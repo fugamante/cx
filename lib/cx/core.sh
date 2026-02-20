@@ -37,6 +37,26 @@ _cx_log_file() {
   fi
 }
 
+cxversion() {
+  local root sha ts src logf
+  root="$(_cx_git_root)"
+  if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
+    sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+  else
+    sha=""
+  fi
+  ts="$(date -u +"%Y-%m-%d")"
+  src="${CX_SOURCE_LOCATION:-local-shell}"
+  logf="$(_cx_log_file)"
+  if [[ -n "$sha" ]]; then
+    echo "cx version: ${sha}"
+  else
+    echo "cx version: ${ts}"
+  fi
+  echo "source: ${src}"
+  echo "log_file: ${logf}"
+}
+
 _cxlog_init() {
   local f dir
   f="$(_cx_log_file)"
@@ -1135,7 +1155,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else
