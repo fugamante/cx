@@ -654,6 +654,94 @@ PY
   echo "log_file: $logf"
 }
 
+cxworklog() {
+  local n f stats
+  n="${1:-50}"
+  f="$(_cxlog_init)"
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxworklog [positive_run_count]" >&2
+    return 2
+  fi
+
+  if [[ ! -s "$f" ]]; then
+    echo "## cxworklog (last $n runs)"
+    echo
+    echo "- Runs analyzed: 0"
+    echo
+    echo "### By Tool"
+    echo
+    echo "| Tool | Runs | Avg Duration (ms) | Avg Effective Tokens |"
+    echo "|---|---:|---:|---:|"
+    echo "| n/a | 0 | 0 | 0 |"
+    echo
+    echo "### Chronological Runs"
+    echo
+    echo "- n/a"
+    return 0
+  fi
+
+  stats="$(
+    tail -n "$n" "$f" | jq -s '
+      def nz: . // 0;
+      {
+        runs: length,
+        by_tool: (
+          map(select(.tool != null))
+          | group_by(.tool)
+          | map({
+              tool: .[0].tool,
+              run_count: length,
+              avg_duration_ms: (if length == 0 then 0 else (map(.duration_ms | nz) | add / length | floor) end),
+              avg_effective_tokens: (if length == 0 then 0 else (map(.effective_input_tokens | nz) | add / length | floor) end)
+            })
+          | sort_by(.tool)
+        ),
+        timeline: (
+          map({
+            ts: (.ts // "n/a"),
+            tool: (.tool // "unknown"),
+            duration_ms: (.duration_ms // null),
+            effective_input_tokens: (.effective_input_tokens // null)
+          })
+        )
+      }
+    '
+  )"
+
+  if [[ -z "$stats" ]]; then
+    echo "cxworklog: failed to parse logs with jq" >&2
+    return 1
+  fi
+
+  local runs tool_rows timeline_rows
+  runs="$(printf "%s" "$stats" | jq -r '.runs')"
+  tool_rows="$(printf "%s" "$stats" | jq -r '.by_tool[]? | "| \(.tool) | \(.run_count) | \(.avg_duration_ms) | \(.avg_effective_tokens) |"')"
+  timeline_rows="$(printf "%s" "$stats" | jq -r '.timeline[]? | "- `\(.ts)` `\(.tool)` duration=\((if .duration_ms==null then "n/a" else (.duration_ms|tostring + "ms") end)) eff=\((if .effective_input_tokens==null then "n/a" else (.effective_input_tokens|tostring) end))"')"
+
+  echo "## cxworklog (last $n runs)"
+  echo
+  echo "- Runs analyzed: $runs"
+  echo
+  echo "### By Tool"
+  echo
+  echo "| Tool | Runs | Avg Duration (ms) | Avg Effective Tokens |"
+  echo "|---|---:|---:|---:|"
+  if [[ -n "$tool_rows" ]]; then
+    printf "%s\n" "$tool_rows"
+  else
+    echo "| n/a | 0 | 0 | 0 |"
+  fi
+  echo
+  echo "### Chronological Runs"
+  echo
+  if [[ -n "$timeline_rows" ]]; then
+    printf "%s\n" "$timeline_rows"
+  else
+    echo "- n/a"
+  fi
+}
+
 cxlog_tail() {
   local n f
   n="${1:-10}"
@@ -744,7 +832,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxprofile cxalert cxtrace cxbench; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxpolicy cxprofile cxalert cxtrace cxbench cxworklog; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

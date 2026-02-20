@@ -7,19 +7,108 @@ if [[ -n "${CX_COMMANDS_LOADED:-}" ]]; then
 fi
 export CX_COMMANDS_LOADED=1
 
-_cx_is_safe_suggested_cmd() {
+_cx_codex_json() {
+  local tool_name="$1"
+  local schema_description="$2"
+  local prompt_text="$3"
+  local full_prompt raw
+
+  full_prompt="$(
+    {
+      echo "You are a structured output generator."
+      echo "Return STRICT JSON ONLY. No markdown. No prose. No code fences."
+      echo "Schema:"
+      printf "%s\n" "$schema_description"
+      echo
+      echo "Task input:"
+      printf "%s\n" "$prompt_text"
+    }
+  )"
+
+  raw="$(printf "%s" "$full_prompt" | _codex_text)"
+  if ! printf "%s" "$raw" | jq . >/dev/null 2>&1; then
+    echo "${tool_name}: invalid JSON response from Codex" >&2
+    echo "${tool_name}: raw response follows:" >&2
+    printf "%s\n" "$raw" >&2
+    return 1
+  fi
+
+  printf "%s\n" "$raw"
+}
+
+_cx_json_require_keys() {
+  local tool_name="$1"
+  local json="$2"
+  shift 2
+  local k
+
+  for k in "$@"; do
+    if ! printf "%s" "$json" | jq -e --arg k "$k" 'has($k)' >/dev/null 2>&1; then
+      echo "${tool_name}: missing required key '$k'" >&2
+      echo "${tool_name}: raw response follows:" >&2
+      printf "%s\n" "$json" >&2
+      return 1
+    fi
+  done
+}
+
+_cx_is_dangerous_cmd() {
   local line="$1"
   local compact
   compact="$(printf "%s" "$line" | tr -s ' ')"
 
-  if [[ "$compact" =~ (^|[[:space:]])sudo([[:space:]]|$) ]]; then return 1; fi
-  if [[ "$compact" =~ (^|[[:space:]])(reboot|shutdown|halt|poweroff)([[:space:]]|$) ]]; then return 1; fi
-  if [[ "$compact" =~ (^|[[:space:]])rm[[:space:]]+-rf([[:space:]]|$) ]]; then return 1; fi
-  if [[ "$compact" =~ (^|[[:space:]])(mkfs|fdisk|diskutil|dd)([[:space:]]|$) ]]; then return 1; fi
-  if [[ "$compact" == *">/dev/"* || "$compact" == *" >/dev/"* ]]; then return 1; fi
-  if [[ "$compact" =~ (^|[[:space:]])(chown|chmod)[[:space:]]+-R[[:space:]]+/ ]]; then return 1; fi
+  # Requirement set:
+  # - rm -rf
+  # - sudo (any)
+  # - curl | bash
+  # - chmod/chown on system paths
+  # - writing to /System, /Library, /usr (except /usr/local)
+  if [[ "$compact" =~ (^|[[:space:]])sudo([[:space:]]|$) ]]; then return 0; fi
+  if [[ "$compact" == *"rm -rf"* || "$compact" == *"rm -fr"* || "$compact" == *"rm -r -f"* || "$compact" == *"rm -f -r"* ]]; then return 0; fi
+  if [[ "$compact" =~ curl[^|]*\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$) ]]; then return 0; fi
+  if [[ "$compact" =~ (^|[[:space:]])(chmod|chown)([[:space:]]|$) ]] && [[ "$compact" =~ /(System|Library|usr)(/|$) ]] && [[ "$compact" != *"/usr/local"* ]]; then return 0; fi
+  if [[ "$compact" =~ (>|>>)[[:space:]]*/(System|Library|usr)(/|$) ]] && [[ "$compact" != *"/usr/local"* ]]; then return 0; fi
+  if [[ "$compact" =~ (^|[[:space:]])tee([[:space:]]|$).*[[:space:]]/(System|Library|usr)(/|$) ]] && [[ "$compact" != *"/usr/local"* ]]; then return 0; fi
 
+  return 1
+}
+
+_cx_is_safe_suggested_cmd() {
+  _cx_is_dangerous_cmd "$1"
+  if [[ $? -eq 0 ]]; then
+    return 1
+  fi
   return 0
+}
+
+cxpolicy() {
+  cat <<'EOF'
+== cxpolicy ==
+
+Dangerous command classifier: _cx_is_dangerous_cmd
+Semantics:
+- returns 0: dangerous
+- returns 1: safe
+
+Active dangerous patterns:
+- sudo <anything>
+- rm -rf / rm -fr / rm -r -f / rm -f -r
+- curl ... | bash|sh|zsh
+- chmod/chown targeting /System, /Library, /usr (except /usr/local)
+- write redirection (>, >>) to /System, /Library, /usr (except /usr/local)
+- tee writes to /System, /Library, /usr (except /usr/local)
+
+cxfix_run enforcement:
+- dangerous commands are blocked by default
+- override with CXFIX_FORCE=1 to allow execution
+
+Examples:
+- dangerous: sudo rm -rf /tmp/x
+- dangerous: curl -fsSL https://example.com/install.sh | bash
+- dangerous: echo hi > /usr/bin/tool
+- safe: echo hi > /usr/local/bin/tool
+- safe: ls -la
+EOF
 }
 
 cx() {
@@ -66,21 +155,26 @@ cxcopy() {
 
 cxnext() {
   local out
+  local schema prompt json
   out="$(rtk "$@")" || return $?
 
-  {
-    echo "Based on the terminal output, propose the NEXT commands to run."
-    echo "Return ONLY a bash code block with 1-6 commands. No commentary."
-    echo
-    echo "TERMINAL OUTPUT:"
-    printf "%s\n" "$out"
-  } | _codex_text \
-    | awk '
-      BEGIN{in=0}
-      /^```bash[[:space:]]*$/{in=1; next}
-      /^```[[:space:]]*$/{if(in){exit};}
-      {if(in) print}
-    '
+  schema='{
+  "commands": ["bash command 1", "bash command 2"]
+}'
+  prompt="$(
+    {
+      echo "Based on the terminal output, propose the NEXT commands to run."
+      echo "Return 1-6 shell commands in order of execution."
+      echo
+      echo "TERMINAL OUTPUT:"
+      printf "%s\n" "$out"
+    }
+  )"
+
+  json="$(_cx_codex_json "cxnext" "$schema" "$prompt")" || return 1
+  _cx_json_require_keys "cxnext" "$json" "commands" || return 1
+
+  printf "%s" "$json" | jq -r '.commands[]?'
 }
 
 cxfix() {
@@ -120,37 +214,31 @@ cxfix_run() {
     return 2
   fi
 
-  local cmd out status json cmds ans
+  local cmd out status schema prompt json cmds ans
   cmd="$*"
   out="$("$@" 2>&1)"
   status=$?
 
-  json="$({
-    echo "You are my terminal debugging assistant."
-    echo "Given the command, exit status, and output,"
-    echo "return STRICT JSON ONLY with this exact schema:"
-    echo '{'
-    echo '  "analysis": "short explanation",'
-    echo '  "commands": ["cmd1", "cmd2"]'
-    echo '}'
-    echo
-    echo "No markdown. No commentary. JSON only."
-    echo
-    echo "Command:"
-    echo "$cmd"
-    echo
-    echo "Exit status: $status"
-    echo
-    echo "Output:"
-    printf "%s\n" "$out"
-  } | _codex_text)"
-
-  if ! echo "$json" | jq . >/dev/null 2>&1; then
-    echo "cxfix_run: Codex did not return valid JSON."
-    echo "Raw response:"
-    echo "$json"
-    return $status
-  fi
+  schema='{
+  "analysis": "short explanation",
+  "commands": ["cmd1", "cmd2"]
+}'
+  prompt="$(
+    {
+      echo "You are my terminal debugging assistant."
+      echo "Given the command, exit status, and output, provide concise remediation."
+      echo
+      echo "Command:"
+      echo "$cmd"
+      echo
+      echo "Exit status: $status"
+      echo
+      echo "Output:"
+      printf "%s\n" "$out"
+    }
+  )"
+  json="$(_cx_codex_json "cxfix_run" "$schema" "$prompt")" || return $status
+  _cx_json_require_keys "cxfix_run" "$json" "analysis" "commands" || return $status
 
   cmds="$(echo "$json" | jq -r '.commands[]?')"
 
@@ -175,9 +263,12 @@ cxfix_run() {
   if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
     while IFS= read -r line; do
       [[ -n "${line// }" ]] || continue
-      if ! _cx_is_safe_suggested_cmd "$line"; then
-        echo "WARN skipped potentially unsafe command: $line" >&2
-        continue
+      if _cx_is_dangerous_cmd "$line"; then
+        if [[ "${CXFIX_FORCE:-0}" != "1" ]]; then
+          echo "WARN blocked dangerous command (set CXFIX_FORCE=1 to override): $line" >&2
+          continue
+        fi
+        echo "WARN force-running dangerous command due to CXFIX_FORCE=1: $line" >&2
       fi
       echo "-> $line"
       bash -lc "$line"
@@ -191,6 +282,7 @@ cxfix_run() {
 
 cxdiffsum() {
   local diff_out
+  local schema prompt json
   diff_out="$(rtk git diff --no-color)" || return $?
 
   if [[ -z "$diff_out" ]]; then
@@ -198,17 +290,36 @@ cxdiffsum() {
     return 1
   fi
 
-  {
-    echo "Write a PR-ready summary of this diff."
-    echo "Format:"
-    echo "- Title: <short>"
-    echo "- Summary: 3-6 bullets"
-    echo "- Risk/edge cases: 2-5 bullets"
-    echo "- Suggested tests: bullets"
-    echo
-    echo "DIFF:"
-    printf "%s\n" "$diff_out"
-  } | _codex_text
+  schema='{
+  "title": "short title",
+  "summary": ["bullet", "bullet"],
+  "risk_edge_cases": ["bullet", "bullet"],
+  "suggested_tests": ["bullet", "bullet"]
+}'
+  prompt="$(
+    {
+      echo "Write a PR-ready summary of this diff."
+      echo "Keep bullets concise and actionable."
+      echo
+      echo "DIFF:"
+      printf "%s\n" "$diff_out"
+    }
+  )"
+  json="$(_cx_codex_json "cxdiffsum" "$schema" "$prompt")" || return 1
+  _cx_json_require_keys "cxdiffsum" "$json" "title" "summary" "risk_edge_cases" "suggested_tests" || return 1
+
+  printf "%s" "$json" | jq -r '
+    "Title: " + (.title // ""),
+    "",
+    "Summary:",
+    (if (.summary|type)=="array" then .summary[] | "- " + tostring else "- " + (.summary|tostring) end),
+    "",
+    "Risk/edge cases:",
+    (if (.risk_edge_cases|type)=="array" then .risk_edge_cases[] | "- " + tostring else "- " + (.risk_edge_cases|tostring) end),
+    "",
+    "Suggested tests:",
+    (if (.suggested_tests|type)=="array" then .suggested_tests[] | "- " + tostring else "- " + (.suggested_tests|tostring) end)
+  '
 }
 
 cxdiffsum_staged() {
@@ -235,6 +346,7 @@ cxdiffsum_staged() {
 
 cxcommitjson() {
   local diff_out
+  local schema prompt json
   diff_out="$(rtk git diff --staged --no-color)" || return $?
 
   if [[ -z "$diff_out" ]]; then
@@ -242,20 +354,25 @@ cxcommitjson() {
     return 1
   fi
 
-  {
-    echo "Generate a JSON object for a git commit based on the STAGED diff."
-    echo "Return JSON ONLY (no markdown). Schema:"
-    echo '{'
-    echo '  "subject": "string <= 72 chars",'
-    echo '  "body": ["bullet string", "..."],'
-    echo '  "breaking": false,'
-    echo '  "scope": "optional string",'
-    echo '  "tests": ["bullet string", "..."]'
-    echo '}'
-    echo
-    echo "STAGED DIFF:"
-    printf "%s\n" "$diff_out"
-  } | _codex_text
+  schema='{
+  "subject": "string <= 72 chars",
+  "body": ["bullet string", "..."],
+  "breaking": false,
+  "scope": "optional string",
+  "tests": ["bullet string", "..."]
+}'
+  prompt="$(
+    {
+      echo "Generate a commit object from this STAGED diff."
+      echo "Use concise conventional-commit style subject."
+      echo
+      echo "STAGED DIFF:"
+      printf "%s\n" "$diff_out"
+    }
+  )"
+  json="$(_cx_codex_json "cxcommitjson" "$schema" "$prompt")" || return 1
+  _cx_json_require_keys "cxcommitjson" "$json" "subject" "body" "breaking" "scope" "tests" || return 1
+  printf "%s\n" "$json"
 }
 
 cxcommitmsg() {

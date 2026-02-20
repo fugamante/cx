@@ -9,6 +9,7 @@
 - Token metrics (`cxmetrics`, `cxlog_tail`)
 - Performance profiling and trace (`cxprofile`, `cxtrace`)
 - Alert analytics over recent runs (`cxalert`)
+- Policy and dangerous-command classification (`cxpolicy`)
 - Repeatable command benchmarking (`cxbench`)
 - Safety-gated fixer runner (`cxfix_run`)
 - Health diagnostics (`cxdoctor`, `cxhealth`)
@@ -43,6 +44,7 @@ cxprofile            # summarize last 50 runs
 cxprofile 100        # summarize last 100 runs
 cxalert              # anomaly/trend alert report over last 50 runs
 cxalert 200          # anomaly/trend alert report over last 200 runs
+cxpolicy             # show dangerous-command safety rules
 cxtrace              # inspect latest run details
 cxtrace 5            # inspect 5th most recent run
 cxbench 10 -- cxo git status

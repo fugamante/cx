@@ -21,6 +21,7 @@ RTK -> Codex CLI (JSONL) -> jq -> Bash functions
 - `cxmetrics`
 - `cxprofile`
 - `cxalert`
+- `cxpolicy`
 - `cxtrace`
 - `cxbench`
 - `cxlog_tail`
