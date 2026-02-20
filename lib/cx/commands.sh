@@ -109,6 +109,109 @@ EOF
   esac
 }
 
+_cx_clip_text() {
+  local out_var=""
+  if [[ "${1:-}" == "--var" ]]; then
+    out_var="${2:-}"
+    shift 2
+  fi
+  local input budget_chars budget_lines mode mode_used footer_enabled clipped
+  local orig_chars orig_lines kept_chars kept_lines
+  input="$(cat)"
+  budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
+  mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  footer_enabled="${CX_CONTEXT_CLIP_FOOTER:-1}"
+  [[ "$budget_chars" =~ ^[0-9]+$ ]] || budget_chars=12000
+  [[ "$budget_lines" =~ ^[0-9]+$ ]] || budget_lines=300
+  [[ "$mode" =~ ^(smart|head|tail)$ ]] || mode="smart"
+
+  orig_chars="$(printf "%s" "$input" | wc -c | tr -d ' ')"
+  orig_lines="$(printf "%s" "$input" | wc -l | tr -d ' ')"
+
+  if [[ "$mode" == "smart" ]]; then
+    if printf "%s" "$input" | grep -Eiq 'error|fail|warning'; then
+      mode_used="tail"
+    else
+      mode_used="head"
+    fi
+  else
+    mode_used="$mode"
+  fi
+
+  local clipped_text
+  clipped_text="$input"
+  if (( orig_lines > budget_lines )); then
+    if [[ "$mode_used" == "tail" ]]; then
+      clipped_text="$(printf "%s" "$clipped_text" | tail -n "$budget_lines")"
+    else
+      clipped_text="$(printf "%s" "$clipped_text" | head -n "$budget_lines")"
+    fi
+  fi
+
+  kept_chars="$(printf "%s" "$clipped_text" | wc -c | tr -d ' ')"
+  if (( kept_chars > budget_chars )); then
+    if [[ "$mode_used" == "tail" ]]; then
+      clipped_text="$(printf "%s" "$clipped_text" | tail -c "$budget_chars")"
+    else
+      clipped_text="$(printf "%s" "$clipped_text" | cut -c1-"$budget_chars")"
+    fi
+  fi
+
+  kept_chars="$(printf "%s" "$clipped_text" | wc -c | tr -d ' ')"
+  kept_lines="$(printf "%s" "$clipped_text" | wc -l | tr -d ' ')"
+  if (( kept_chars < orig_chars || kept_lines < orig_lines )); then
+    clipped=1
+  else
+    clipped=0
+  fi
+
+  export CX_CLIP_ORIGINAL_CHARS="$orig_chars"
+  export CX_CLIP_ORIGINAL_LINES="$orig_lines"
+  export CX_CLIP_KEPT_CHARS="$kept_chars"
+  export CX_CLIP_KEPT_LINES="$kept_lines"
+  export CX_CLIP_CLIPPED="$clipped"
+  export CX_CLIP_MODE_USED="$mode_used"
+  export CX_CLIP_FOOTER_USED="$footer_enabled"
+
+  local final_out
+  final_out="$clipped_text"
+  if [[ "$clipped" == "1" && "$footer_enabled" == "1" ]]; then
+    final_out="${final_out}"$'\n'"[cx] output clipped: original=${orig_chars}/${orig_lines}, kept=${kept_chars}/${kept_lines}, mode=${mode_used}"
+  fi
+
+  if [[ -n "$out_var" ]]; then
+    printf -v "$out_var" "%s" "$final_out"
+  else
+    printf "%s" "$final_out"
+  fi
+}
+
+_cx_chunk_text() {
+  local input chunk_size len total i start
+  input="$(cat)"
+  chunk_size="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  [[ "$chunk_size" =~ ^[0-9]+$ ]] || chunk_size=12000
+  if (( chunk_size <= 0 )); then
+    printf "%s" "$input"
+    return 0
+  fi
+
+  len="$(printf "%s" "$input" | wc -c | tr -d ' ')"
+  if (( len == 0 )); then
+    return 0
+  fi
+  total=$(( (len + chunk_size - 1) / chunk_size ))
+  for ((i=1; i<=total; i++)); do
+    start=$(( (i - 1) * chunk_size + 1 ))
+    printf -- "----- cx chunk %d/%d -----\n" "$i" "$total"
+    printf "%s" "$input" | cut -c"${start}-$((start + chunk_size - 1))"
+    if (( i < total )); then
+      printf "\n"
+    fi
+  done
+}
+
 _cx_system_capture() {
   local out_var=""
   if [[ "${1:-}" == "--var" ]]; then
@@ -148,14 +251,24 @@ _cx_system_capture() {
     fi
   fi
 
+  local clipped_out
+  _cx_clip_text --var clipped_out <<< "$processed_out"
   export CX_SYSTEM_OUTPUT_LEN_RAW="$(printf "%s" "$raw_out" | wc -c | tr -d ' ')"
+  export CX_SYSTEM_OUTPUT_LINES_RAW="$(printf "%s" "$raw_out" | wc -l | tr -d ' ')"
   export CX_SYSTEM_OUTPUT_LEN_PROCESSED="$(printf "%s" "$processed_out" | wc -c | tr -d ' ')"
+  export CX_SYSTEM_OUTPUT_LINES_PROCESSED="$(printf "%s" "$processed_out" | wc -l | tr -d ' ')"
+  export CX_SYSTEM_OUTPUT_LEN_CLIPPED="${CX_CLIP_KEPT_CHARS:-$(printf "%s" "$clipped_out" | wc -c | tr -d ' ')}"
+  export CX_SYSTEM_OUTPUT_LINES_CLIPPED="${CX_CLIP_KEPT_LINES:-$(printf "%s" "$clipped_out" | wc -l | tr -d ' ')}"
+  export CX_SYSTEM_CLIPPED="${CX_CLIP_CLIPPED:-0}"
+  export CX_SYSTEM_CLIP_MODE_USED="${CX_CLIP_MODE_USED:-${CX_CONTEXT_CLIP_MODE:-smart}}"
+  export CX_SYSTEM_CLIP_FOOTER_USED="${CX_CLIP_FOOTER_USED:-${CX_CONTEXT_CLIP_FOOTER:-1}}"
   export CX_SYSTEM_RTK_USED="$rtk_used"
+  export CX_SYSTEM_CAPTURE_SET=1
 
   if [[ -n "$out_var" ]]; then
-    printf -v "$out_var" "%s" "$processed_out"
+    printf -v "$out_var" "%s" "$clipped_out"
   else
-    printf "%s" "$processed_out"
+    printf "%s" "$clipped_out"
   fi
   return "$processed_status"
 }

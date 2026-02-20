@@ -40,6 +40,10 @@ fi
 export CX_RTK_MODE="${CX_RTK_MODE:-condense}"
 export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
 export CX_RTK_LAST_ERROR=0
+export CX_CONTEXT_BUDGET_CHARS="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+export CX_CONTEXT_BUDGET_LINES="${CX_CONTEXT_BUDGET_LINES:-300}"
+export CX_CONTEXT_CLIP_MODE="${CX_CONTEXT_CLIP_MODE:-smart}"
+export CX_CONTEXT_CLIP_FOOTER="${CX_CONTEXT_CLIP_FOOTER:-1}"
 
 _cx_prompt_preprocess() {
   # Prompt passthrough: RTK should not rewrite arbitrary natural-language prompts.
@@ -312,17 +316,42 @@ PY
 
   local prompt_hash prompt_preview root scope
   local prompt_hash_raw prompt_hash_processed prompt_len_raw prompt_len_processed rtk_error
-  local sys_len_raw sys_len_processed rtk_used
+  local sys_len_raw sys_len_processed sys_len_clipped
+  local sys_lines_raw sys_lines_processed sys_lines_clipped
+  local clipped clip_mode clip_footer budget_chars budget_lines rtk_used
   prompt_hash_raw="$(printf "%s" "$prompt_raw" | shasum -a 256 | awk '{print $1}')"
   prompt_hash_processed="$(printf "%s" "$prompt_processed" | shasum -a 256 | awk '{print $1}')"
   prompt_len_raw="$(printf "%s" "$prompt_raw" | wc -c | tr -d ' ')"
   prompt_len_processed="$(printf "%s" "$prompt_processed" | wc -c | tr -d ' ')"
   rtk_error="${CX_RTK_LAST_ERROR:-0}"
-  sys_len_raw="${CX_SYSTEM_OUTPUT_LEN_RAW:-null}"
-  sys_len_processed="${CX_SYSTEM_OUTPUT_LEN_PROCESSED:-null}"
-  if [[ "${CX_SYSTEM_RTK_USED:-0}" == "1" ]]; then
-    rtk_used="true"
+  budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
+  clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  clip_footer="${CX_CONTEXT_CLIP_FOOTER:-1}"
+  if [[ "${CX_SYSTEM_CAPTURE_SET:-0}" == "1" ]]; then
+    sys_len_raw="${CX_SYSTEM_OUTPUT_LEN_RAW:-null}"
+    sys_len_processed="${CX_SYSTEM_OUTPUT_LEN_PROCESSED:-null}"
+    sys_len_clipped="${CX_SYSTEM_OUTPUT_LEN_CLIPPED:-$sys_len_processed}"
+    sys_lines_raw="${CX_SYSTEM_OUTPUT_LINES_RAW:-null}"
+    sys_lines_processed="${CX_SYSTEM_OUTPUT_LINES_PROCESSED:-null}"
+    sys_lines_clipped="${CX_SYSTEM_OUTPUT_LINES_CLIPPED:-$sys_lines_processed}"
+    clipped="$([[ "${CX_SYSTEM_CLIPPED:-0}" == "1" ]] && echo "true" || echo "false")"
+    clip_mode="${CX_SYSTEM_CLIP_MODE_USED:-$clip_mode}"
+    clip_footer="$([[ "${CX_SYSTEM_CLIP_FOOTER_USED:-$clip_footer}" == "1" ]] && echo "true" || echo "false")"
+    if [[ "${CX_SYSTEM_RTK_USED:-0}" == "1" ]]; then
+      rtk_used="true"
+    else
+      rtk_used="false"
+    fi
   else
+    sys_len_raw="null"
+    sys_len_processed="null"
+    sys_len_clipped="null"
+    sys_lines_raw="null"
+    sys_lines_processed="null"
+    sys_lines_clipped="null"
+    clipped="false"
+    clip_footer="$([[ "$clip_footer" == "1" ]] && echo "true" || echo "false")"
     rtk_used="false"
   fi
   prompt_hash="$prompt_hash_processed"
@@ -349,6 +378,15 @@ PY
       printf '"prompt_sha256_processed":"%s",' "$prompt_hash_processed"
       printf '"system_output_len_raw":%s,' "$sys_len_raw"
       printf '"system_output_len_processed":%s,' "$sys_len_processed"
+      printf '"system_output_len_clipped":%s,' "$sys_len_clipped"
+      printf '"system_output_lines_raw":%s,' "$sys_lines_raw"
+      printf '"system_output_lines_processed":%s,' "$sys_lines_processed"
+      printf '"system_output_lines_clipped":%s,' "$sys_lines_clipped"
+      printf '"clipped":%s,' "$clipped"
+      printf '"budget_chars":%s,' "$budget_chars"
+      printf '"budget_lines":%s,' "$budget_lines"
+      printf '"clip_mode":%s,' "$(printf "%s" "$clip_mode" | _cx_json_escape)"
+      printf '"clip_footer":%s,' "$clip_footer"
       printf '"rtk_used":%s,' "$rtk_used"
       printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
       printf '"prompt_sha256":"%s",' "$prompt_hash"
@@ -358,6 +396,9 @@ PY
   fi
 
   _cx_emit_alerts "$tool" "$dur_ms" "${eff_in:-null}" "${out_tok:-null}" "$log_file"
+  unset CX_SYSTEM_CAPTURE_SET CX_SYSTEM_OUTPUT_LEN_RAW CX_SYSTEM_OUTPUT_LEN_PROCESSED CX_SYSTEM_OUTPUT_LEN_CLIPPED
+  unset CX_SYSTEM_OUTPUT_LINES_RAW CX_SYSTEM_OUTPUT_LINES_PROCESSED CX_SYSTEM_OUTPUT_LINES_CLIPPED
+  unset CX_SYSTEM_CLIPPED CX_SYSTEM_CLIP_MODE_USED CX_SYSTEM_CLIP_FOOTER_USED CX_SYSTEM_RTK_USED
   rm -f "$tmpjsonl" 2>/dev/null || true
 }
 
@@ -947,6 +988,36 @@ cxworklog() {
   fi
 }
 
+cxbudget() {
+  local f last
+  f="$(_cxlog_init)"
+  echo "== cxbudget =="
+  echo "CX_CONTEXT_BUDGET_CHARS=${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  echo "CX_CONTEXT_BUDGET_LINES=${CX_CONTEXT_BUDGET_LINES:-300}"
+  echo "CX_CONTEXT_CLIP_MODE=${CX_CONTEXT_CLIP_MODE:-smart}"
+  echo "CX_CONTEXT_CLIP_FOOTER=${CX_CONTEXT_CLIP_FOOTER:-1}"
+  echo "log_file: $f"
+  if [[ -s "$f" ]]; then
+    last="$(tail -n 1 "$f")"
+    echo
+    echo "Last run clip fields:"
+    printf "%s" "$last" | jq -r '
+      "system_output_len_raw: \(.system_output_len_raw // "n/a")",
+      "system_output_len_processed: \(.system_output_len_processed // "n/a")",
+      "system_output_len_clipped: \(.system_output_len_clipped // "n/a")",
+      "system_output_lines_raw: \(.system_output_lines_raw // "n/a")",
+      "system_output_lines_processed: \(.system_output_lines_processed // "n/a")",
+      "system_output_lines_clipped: \(.system_output_lines_clipped // "n/a")",
+      "clipped: \(.clipped // false)",
+      "budget_chars: \(.budget_chars // "n/a")",
+      "budget_lines: \(.budget_lines // "n/a")",
+      "clip_mode: \(.clip_mode // "n/a")",
+      "clip_footer: \(.clip_footer // false)",
+      "rtk_used: \(.rtk_used // false)"
+    '
+  fi
+}
+
 cxoptimize() {
   local n f sf stats
   local ms_thr eff_thr
@@ -1214,7 +1285,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize cxprompt cxroles cxfanout cxpromptlint; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else
