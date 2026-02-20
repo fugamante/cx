@@ -1214,7 +1214,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize cxprompt cxroles cxfanout cxpromptlint; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

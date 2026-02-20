@@ -7,6 +7,108 @@ if [[ -n "${CX_COMMANDS_LOADED:-}" ]]; then
 fi
 export CX_COMMANDS_LOADED=1
 
+_cx_prompt_test_checklist() {
+  local mode="$1"
+  case "$mode" in
+    implement)
+      cat <<'EOF'
+- Run syntax checks for touched files.
+- Run targeted tests for changed behavior.
+- Verify no regressions in related command paths.
+EOF
+      ;;
+    fix)
+      cat <<'EOF'
+- Reproduce the failure path.
+- Validate the fix with the failing case.
+- Run adjacent smoke checks to avoid regression.
+EOF
+      ;;
+    test)
+      cat <<'EOF'
+- Add/adjust focused tests for requested behavior.
+- Run full relevant test suite segment.
+- Confirm deterministic pass/fail output.
+EOF
+      ;;
+    doc)
+      cat <<'EOF'
+- Verify examples run as written.
+- Confirm commands/paths reflect current repo state.
+- Check formatting and section completeness.
+EOF
+      ;;
+    ops)
+      cat <<'EOF'
+- Validate command safety and idempotency.
+- Verify logs/metrics/alerts reflect expected changes.
+- Confirm non-interactive behavior for automation paths.
+EOF
+      ;;
+    *)
+      cat <<'EOF'
+- Run syntax checks for touched files.
+- Validate changed behavior.
+- Confirm no regressions in adjacent flows.
+EOF
+      ;;
+  esac
+}
+
+_cx_role_header() {
+  local role="$1"
+  case "$role" in
+    architect)
+      cat <<'EOF'
+Role: Architect
+Focus:
+- Define minimal, robust design and interfaces.
+- Identify risks/tradeoffs before implementation.
+- Keep plan implementation-ready and testable.
+EOF
+      ;;
+    implementer)
+      cat <<'EOF'
+Role: Implementer
+Focus:
+- Deliver concrete code changes with minimal surface area.
+- Preserve existing behavior unless explicitly changed.
+- Keep edits deterministic and operationally safe.
+EOF
+      ;;
+    reviewer)
+      cat <<'EOF'
+Role: Reviewer
+Focus:
+- Find correctness, safety, and regression risks.
+- Verify schema contracts and edge-case handling.
+- Call out missing tests or brittle assumptions.
+EOF
+      ;;
+    tester)
+      cat <<'EOF'
+Role: Tester
+Focus:
+- Build focused validation for behavior and regressions.
+- Stress critical paths and failure modes.
+- Report concise, reproducible results.
+EOF
+      ;;
+    doc)
+      cat <<'EOF'
+Role: Doc
+Focus:
+- Produce precise, actionable documentation updates.
+- Keep examples executable and aligned with code.
+- Highlight behavior changes and migration notes.
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 _cx_codex_json() {
   local tool_name="$1"
   local schema_description="$2"
@@ -114,6 +216,228 @@ Examples:
 - safe: echo hi > /usr/local/bin/tool
 - safe: ls -la
 EOF
+}
+
+cxroles() {
+  local role="${1:-}"
+  if [[ -z "$role" ]]; then
+    cat <<'EOF'
+Available roles:
+- architect: design, interfaces, risk/tradeoff framing
+- implementer: code changes and integration details
+- reviewer: bug/risk/regression detection
+- tester: validation plans and execution checks
+- doc: docs, examples, migration notes
+
+Usage:
+- cxroles
+- cxroles <architect|implementer|reviewer|tester|doc>
+EOF
+    return 0
+  fi
+
+  if ! _cx_role_header "$role"; then
+    echo "Usage: cxroles <architect|implementer|reviewer|tester|doc>" >&2
+    return 2
+  fi
+}
+
+cxprompt() {
+  local mode request
+  mode="${1:-}"
+  request="${2:-}"
+
+  if [[ -z "$mode" || -z "$request" ]]; then
+    echo "Usage: cxprompt <implement|fix|test|doc|ops> \"<request>\"" >&2
+    return 2
+  fi
+  case "$mode" in
+    implement|fix|test|doc|ops) ;;
+    *)
+      echo "Usage: cxprompt <implement|fix|test|doc|ops> \"<request>\"" >&2
+      return 2
+      ;;
+  esac
+
+  cat <<EOF
+You are working on the "cx" toolchain.
+From now on, EVERY new feature must be implemented in TWO places:
+1) Repo canonical implementation under ~/cxcodex (sourceable bash entrypoint: cxcodex/cx.sh)
+2) Local bootstrap under ~/.bashrc (minimal; should source repo canonical file when present)
+
+Mode:
+- ${mode}
+
+Context:
+- Repo canonical source of truth: ~/cxcodex/cx.sh and ~/cxcodex/lib/cx/*
+- Local shell bootstrap: ~/.bashrc
+- Existing stack: JSONL Codex pipeline, schema-enforced structured commands, repo-aware logs, cxstate/cxpolicy/cxoptimize
+
+Goal:
+- ${request}
+
+Requirements:
+- Keep behavior deterministic and non-interactive.
+- Preserve stdout pipeline compatibility.
+- Warnings/errors go to stderr where appropriate.
+- Handle null/missing log fields safely.
+- Keep implementation compact and maintainable.
+
+Constraints:
+- Do not auto-run cxdoctor during sourcing.
+- Do not redefine cd or shell navigation behavior.
+- Avoid side effects during source beyond function/env setup.
+- Prefer minimal diffs and robust fallbacks.
+
+Deliverables:
+- Canonical repo code changes under ~/cxcodex (including cx.sh wiring if needed)
+- ~/.bashrc bootstrap updates (minimal, delegate to repo when present)
+- Validation outputs for changed commands/paths
+- Short manual test checklist
+
+Test Checklist:
+$(_cx_prompt_test_checklist "$mode")
+EOF
+}
+
+cxfanout() {
+  local objective="$1"
+  local roles role idx=1
+  if [[ -z "${objective:-}" ]]; then
+    echo "Usage: cxfanout \"<objective>\"" >&2
+    return 2
+  fi
+  roles="architect implementer tester reviewer doc"
+
+  for role in $roles; do
+    echo "### Subtask $idx [$role]"
+    _cx_role_header "$role"
+    cat <<EOF
+Objective:
+- ${objective}
+
+Task:
+- Produce a focused contribution for this role only.
+- Keep output implementation-ready and independent from other subtasks.
+
+Deliverables:
+- Role-specific results with concrete, verifiable outputs.
+- Clear assumptions and any blockers.
+EOF
+    echo
+    idx=$((idx + 1))
+  done
+}
+
+cxpromptlint() {
+  local n f stats
+  n="${1:-200}"
+  f="$(_cxlog_init)"
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxpromptlint [positive_run_count]" >&2
+    return 2
+  fi
+
+  if [[ ! -s "$f" ]]; then
+    echo "== cxpromptlint (last $n runs) =="
+    echo "- No logs available."
+    echo "log_file: $f"
+    return 0
+  fi
+
+  stats="$(
+    tail -n "$n" "$f" | jq -s '
+      def nz: . // 0;
+      {
+        runs: length,
+        heavy: (
+          map(select(.tool != null))
+          | group_by(.tool)
+          | map({
+              tool: .[0].tool,
+              avg_effective_input_tokens: (if length == 0 then 0 else (map(.effective_input_tokens|nz) | add / length | floor) end),
+              runs: length
+            })
+          | sort_by(.avg_effective_input_tokens)
+          | reverse
+          | .[0:5]
+        ),
+        poor_cache: (
+          map(select(.tool != null))
+          | group_by(.tool)
+          | map({
+              tool: .[0].tool,
+              cache_hit_rate: (
+                (map(.cached_input_tokens|nz)|add) as $c
+                | (map(.input_tokens|nz)|add) as $i
+                | if $i == 0 then null else ($c / $i) end
+              )
+            })
+          | map(select(.cache_hit_rate != null and .cache_hit_rate < 0.30))
+          | sort_by(.cache_hit_rate)
+          | .[0:5]
+        ),
+        drift: (
+          map(select(.tool != null)) as $r
+          | ($r | length / 2 | floor) as $half
+          | ($r[0:$half]) as $first
+          | ($r[$half:]) as $second
+          | (
+              ($first | map(select(.tool != null)) | group_by(.tool) | map({
+                tool: .[0].tool,
+                first_avg_eff: (if length == 0 then 0 else (map(.effective_input_tokens|nz)|add/length) end)
+              })) as $fa
+              | ($second | map(select(.tool != null)) | group_by(.tool) | map({
+                tool: .[0].tool,
+                second_avg_eff: (if length == 0 then 0 else (map(.effective_input_tokens|nz)|add/length) end)
+              })) as $sa
+              | [
+                  $fa[] as $f
+                  | ($sa[] | select(.tool == $f.tool)) as $s
+                  | {
+                      tool: $f.tool,
+                      first_avg_eff: ($f.first_avg_eff|floor),
+                      second_avg_eff: ($s.second_avg_eff|floor),
+                      ratio: (if $f.first_avg_eff == 0 then null else ($s.second_avg_eff / $f.first_avg_eff) end)
+                    }
+                  | select(.ratio != null and .ratio > 1.25)
+                ]
+              | sort_by(.ratio)
+              | reverse
+              | .[0:5]
+            )
+        )
+      }
+    '
+  )"
+
+  if [[ -z "$stats" ]]; then
+    echo "cxpromptlint: failed to parse logs with jq" >&2
+    return 1
+  fi
+
+  echo "== cxpromptlint (last $n runs) =="
+  echo "- Runs analyzed: $(printf "%s" "$stats" | jq -r '.runs')"
+  echo
+  echo "Top token-heavy prompt types:"
+  local heavy_lines drift_lines cache_lines
+  heavy_lines="$(printf "%s" "$stats" | jq -r '.heavy[]? | "- \(.tool): avg_eff=\(.avg_effective_input_tokens), runs=\(.runs)"')"
+  cache_lines="$(printf "%s" "$stats" | jq -r '.poor_cache[]? | "- \(.tool): cache_hit=\((.cache_hit_rate*100|round))%"')"
+  drift_lines="$(printf "%s" "$stats" | jq -r '.drift[]? | "- \(.tool): first=\(.first_avg_eff), second=\(.second_avg_eff), ratio=\((.ratio*100|round)/100)x"')"
+  if [[ -n "$heavy_lines" ]]; then printf "%s\n" "$heavy_lines"; else echo "- n/a"; fi
+  echo
+  echo "Prompt drift (same tool, increasing effective tokens):"
+  if [[ -n "$drift_lines" ]]; then printf "%s\n" "$drift_lines"; else echo "- n/a"; fi
+  echo
+  echo "Poor cache-hit prompts:"
+  if [[ -n "$cache_lines" ]]; then printf "%s\n" "$cache_lines"; else echo "- n/a"; fi
+  echo
+  echo "Actionable suggestions:"
+  echo "- For token-heavy tools: trim prompt context and prefer schema-only responses."
+  echo "- For drifted tools: standardize prompt templates and compare prompt_preview shifts."
+  echo "- For poor cache-hit tools: reduce prompt variability and keep stable scaffolding text."
+  echo "log_file: $f"
 }
 
 cx() {
