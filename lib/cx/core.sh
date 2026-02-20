@@ -293,6 +293,143 @@ cxprofile() {
   fi
 }
 
+cxalert() {
+  local n f stats
+  local ms_thr eff_thr
+  n="${1:-50}"
+  f="$(_cxlog_init)"
+  ms_thr="${CXALERT_MAX_MS:-8000}"
+  eff_thr="${CXALERT_MAX_EFF_IN:-5000}"
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxalert [positive_run_count]" >&2
+    return 2
+  fi
+  [[ "$ms_thr" =~ ^[0-9]+$ ]] || ms_thr=8000
+  [[ "$eff_thr" =~ ^[0-9]+$ ]] || eff_thr=5000
+
+  if [[ ! -s "$f" ]]; then
+    echo "== cxalert (last $n runs) =="
+    echo
+    echo "Runs analyzed: 0"
+    echo "Slow threshold violations (> ${ms_thr}ms): 0"
+    echo "Effective token violations (> ${eff_thr}): 0"
+    echo "Average cache hit rate: n/a"
+    echo
+    echo "Top 5 slowest runs:"
+    echo "- n/a"
+    echo
+    echo "Top 5 heaviest runs:"
+    echo "- n/a"
+    echo
+    echo "Top tools by effective token cost:"
+    echo "- n/a"
+    echo "log_file: $f"
+    return 0
+  fi
+
+  stats="$(
+    tail -n "$n" "$f" | jq -s --argjson ms_thr "$ms_thr" --argjson eff_thr "$eff_thr" '
+      def nz: . // 0;
+      def safe_div($a; $b): if ($b == 0) then null else ($a / $b) end;
+      {
+        runs: length,
+        slow_violations: (
+          map(select(.duration_ms != null and (.duration_ms > $ms_thr))) | length
+        ),
+        eff_violations: (
+          map(select(.effective_input_tokens != null and (.effective_input_tokens > $eff_thr))) | length
+        ),
+        cache_hit_rate: (
+          safe_div(
+            (map(.cached_input_tokens | nz) | add);
+            (map(.input_tokens | nz) | add)
+          )
+        ),
+        slowest: (
+          map(select(.duration_ms != null))
+          | sort_by(.duration_ms)
+          | reverse
+          | .[0:5]
+          | map({
+              tool: (.tool // "unknown"),
+              duration_ms: .duration_ms,
+              ts: (.ts // "n/a")
+            })
+        ),
+        heaviest: (
+          map(select(.effective_input_tokens != null))
+          | sort_by(.effective_input_tokens)
+          | reverse
+          | .[0:5]
+          | map({
+              tool: (.tool // "unknown"),
+              effective_input_tokens: .effective_input_tokens,
+              ts: (.ts // "n/a")
+            })
+        ),
+        top_tools: (
+          map(select(.tool != null))
+          | group_by(.tool)
+          | map({
+              tool: .[0].tool,
+              runs: length,
+              total_effective_input_tokens: (map(.effective_input_tokens | nz) | add),
+              avg_duration_ms: (if length == 0 then 0 else (map(.duration_ms | nz) | add / length | floor) end)
+            })
+          | sort_by(.total_effective_input_tokens)
+          | reverse
+          | .[0:5]
+        )
+      }
+    '
+  )"
+
+  if [[ -z "$stats" ]]; then
+    echo "cxalert: failed to parse logs with jq" >&2
+    return 1
+  fi
+
+  local runs slow_count eff_count cache_rate
+  local slow_lines heavy_lines tool_lines
+  runs="$(printf "%s" "$stats" | jq -r '.runs')"
+  slow_count="$(printf "%s" "$stats" | jq -r '.slow_violations')"
+  eff_count="$(printf "%s" "$stats" | jq -r '.eff_violations')"
+  cache_rate="$(printf "%s" "$stats" | jq -r 'if .cache_hit_rate == null then "n/a" else ((.cache_hit_rate * 100) | round | tostring + "%") end')"
+  slow_lines="$(printf "%s" "$stats" | jq -r '.slowest[]? | "- \(.tool) | \(.duration_ms)ms | \(.ts)"')"
+  heavy_lines="$(printf "%s" "$stats" | jq -r '.heaviest[]? | "- \(.tool) | \(.effective_input_tokens) effective | \(.ts)"')"
+  tool_lines="$(printf "%s" "$stats" | jq -r '.top_tools[]? | "- \(.tool) | total_effective=\(.total_effective_input_tokens) | runs=\(.runs) | avg_duration=\(.avg_duration_ms)ms"')"
+
+  echo "== cxalert (last $n runs) =="
+  echo
+  echo "Runs analyzed: $runs"
+  echo "Slow threshold violations (> ${ms_thr}ms): $slow_count"
+  echo "Effective token violations (> ${eff_thr}): $eff_count"
+  echo "Average cache hit rate: $cache_rate"
+  echo
+  echo "Top 5 slowest runs:"
+  if [[ -n "$slow_lines" ]]; then
+    printf "%s\n" "$slow_lines"
+  else
+    echo "- n/a"
+  fi
+  echo
+  echo "Top 5 heaviest runs:"
+  if [[ -n "$heavy_lines" ]]; then
+    printf "%s\n" "$heavy_lines"
+  else
+    echo "- n/a"
+  fi
+  echo
+  echo "Top tools by effective token cost:"
+  if [[ -n "$tool_lines" ]]; then
+    printf "%s\n" "$tool_lines"
+  else
+    echo "- n/a"
+  fi
+  echo "log_file: $f"
+}
+
 cxtrace() {
   local n f total raw
   n="${1:-1}"
@@ -607,7 +744,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxprofile cxtrace cxbench; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxprofile cxalert cxtrace cxbench; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else
