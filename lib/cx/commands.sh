@@ -119,13 +119,13 @@ EOF
 cx() {
   local out
   out="$(rtk "$@")" || return $?
-  printf "%s\n" "$out" | codex exec -
+  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec -
 }
 
 cxj() {
   local out
   out="$(rtk "$@")" || return $?
-  printf "%s\n" "$out" | codex exec --json -
+  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec --json -
 }
 
 cxo() {
@@ -133,6 +133,7 @@ cxo() {
   out="$(rtk "$@")" || return $?
 
   printf "%s\n" "$out" \
+    | _cx_prompt_preprocess \
     | codex exec --json - \
     | jq -r 'select(.type=="item.completed" and .item.type=="agent_message") | .item.text' \
     | tail -n 1
@@ -142,7 +143,7 @@ cxol() {
   local out tmp
   out="$(rtk "$@")" || return $?
   tmp="$(mktemp)"
-  printf "%s\n" "$out" | codex exec -o "$tmp" - >/dev/null
+  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec -o "$tmp" - >/dev/null
   cat "$tmp"
   rm -f "$tmp"
 }
@@ -389,7 +390,8 @@ cxcommitjson() {
     }
   )"
   json="$(_cx_codex_json "cxcommitjson" "$schema" "$prompt")" || return 1
-  _cx_json_require_keys "cxcommitjson" "$json" "subject" "body" "breaking" "scope" "tests" || return 1
+  _cx_json_require_keys "cxcommitjson" "$json" "subject" "body" "breaking" "tests" || return 1
+  json="$(printf "%s" "$json" | jq 'if has("scope") then . else . + {scope:null} end')"
   printf "%s\n" "$json"
 }
 

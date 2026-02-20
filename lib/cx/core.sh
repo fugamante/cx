@@ -19,6 +19,53 @@ export CXALERT_MAX_MS="${CXALERT_MAX_MS:-8000}"
 export CXALERT_MAX_EFF_IN="${CXALERT_MAX_EFF_IN:-5000}"
 export CXALERT_MAX_OUT="${CXALERT_MAX_OUT:-1000}"
 
+_cx_has_rtk() {
+  command -v rtk >/dev/null 2>&1
+}
+
+if [[ -z "${CX_RTK_ENABLED+x}" ]]; then
+  if _cx_has_rtk; then
+    export CX_RTK_ENABLED=1
+  else
+    export CX_RTK_ENABLED=0
+  fi
+fi
+export CX_RTK_MODE="${CX_RTK_MODE:-condense}"
+export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
+export CX_RTK_LAST_ERROR=0
+
+_cx_prompt_preprocess() {
+  local raw processed mode maxc
+  raw="$(cat)"
+  processed="$raw"
+  mode="${CX_RTK_MODE:-condense}"
+  maxc="${CX_RTK_MAX_CHARS:-}"
+  export CX_RTK_LAST_ERROR=0
+
+  if [[ "${CX_RTK_ENABLED:-0}" == "1" ]] && _cx_has_rtk; then
+    if processed="$(printf "%s" "$raw" | rtk "$mode" 2>/dev/null)"; then
+      :
+    elif processed="$(printf "%s" "$raw" | rtk prompt "$mode" 2>/dev/null)"; then
+      :
+    elif processed="$(printf "%s" "$raw" | rtk condense 2>/dev/null)"; then
+      :
+    else
+      processed="$raw"
+      export CX_RTK_LAST_ERROR=1
+    fi
+    if [[ -z "$processed" ]]; then
+      processed="$raw"
+      export CX_RTK_LAST_ERROR=1
+    fi
+  fi
+
+  if [[ -n "$maxc" && "$maxc" =~ ^[0-9]+$ ]] && (( maxc > 0 )); then
+    processed="$(printf "%s" "$processed" | cut -c1-"$maxc")"
+  fi
+
+  printf "%s" "$processed"
+}
+
 _cx_json_escape() {
   jq -Rs .
 }
@@ -248,8 +295,9 @@ _cx_codex_jsonl_with_log() {
   tool="${1:-unknown}"
   log_file="$(_cxlog_init)"
 
-  local prompt
-  prompt="$(cat)"
+  local prompt_raw prompt_processed
+  prompt_raw="$(cat)"
+  prompt_processed="$(printf "%s" "$prompt_raw" | _cx_prompt_preprocess)"
 
   local start_ms end_ms dur_ms
   start_ms="$(python3 - <<'PY'
@@ -261,7 +309,7 @@ PY
   local tmpjsonl
   tmpjsonl="$(mktemp)"
 
-  printf "%s" "$prompt" | codex exec --json - | tee "$tmpjsonl"
+  printf "%s" "$prompt_processed" | codex exec --json - | tee "$tmpjsonl"
 
   end_ms="$(python3 - <<'PY'
 import time
@@ -283,8 +331,14 @@ PY
   fi
 
   local prompt_hash prompt_preview root scope
-  prompt_hash="$(printf "%s" "$prompt" | shasum -a 256 | awk '{print $1}')"
-  prompt_preview="$(printf "%s" "$prompt" | tr '\n' ' ' | cut -c1-160)"
+  local prompt_hash_raw prompt_hash_processed prompt_len_raw prompt_len_processed rtk_error
+  prompt_hash_raw="$(printf "%s" "$prompt_raw" | shasum -a 256 | awk '{print $1}')"
+  prompt_hash_processed="$(printf "%s" "$prompt_processed" | shasum -a 256 | awk '{print $1}')"
+  prompt_len_raw="$(printf "%s" "$prompt_raw" | wc -c | tr -d ' ')"
+  prompt_len_processed="$(printf "%s" "$prompt_processed" | wc -c | tr -d ' ')"
+  rtk_error="${CX_RTK_LAST_ERROR:-0}"
+  prompt_hash="$prompt_hash_processed"
+  prompt_preview="$(printf "%s" "$prompt_processed" | tr '\n' ' ' | cut -c1-160)"
   root="$(_cx_git_root)"
   if [[ -n "$root" ]]; then scope="repo"; else scope="global"; fi
 
@@ -301,6 +355,11 @@ PY
       printf '"cached_input_tokens":%s,' "${cached_tok:-null}"
       printf '"effective_input_tokens":%s,' "${eff_in}"
       printf '"output_tokens":%s,' "${out_tok:-null}"
+      printf '"prompt_len_raw":%s,' "${prompt_len_raw:-0}"
+      printf '"prompt_len_processed":%s,' "${prompt_len_processed:-0}"
+      printf '"prompt_sha256_raw":"%s",' "$prompt_hash_raw"
+      printf '"prompt_sha256_processed":"%s",' "$prompt_hash_processed"
+      printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
       printf '"prompt_sha256":"%s",' "$prompt_hash"
       printf '"prompt_preview":%s' "$(printf "%s" "$prompt_preview" | _cx_json_escape)"
       printf '}\n'
