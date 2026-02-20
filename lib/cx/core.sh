@@ -30,40 +30,20 @@ if [[ -z "${CX_RTK_ENABLED+x}" ]]; then
     export CX_RTK_ENABLED=0
   fi
 fi
+if [[ -z "${CX_RTK_SYSTEM+x}" ]]; then
+  if _cx_has_rtk; then
+    export CX_RTK_SYSTEM=1
+  else
+    export CX_RTK_SYSTEM=0
+  fi
+fi
 export CX_RTK_MODE="${CX_RTK_MODE:-condense}"
 export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
 export CX_RTK_LAST_ERROR=0
 
 _cx_prompt_preprocess() {
-  local raw processed mode maxc
-  raw="$(cat)"
-  processed="$raw"
-  mode="${CX_RTK_MODE:-condense}"
-  maxc="${CX_RTK_MAX_CHARS:-}"
-  export CX_RTK_LAST_ERROR=0
-
-  if [[ "${CX_RTK_ENABLED:-0}" == "1" ]] && _cx_has_rtk; then
-    if processed="$(printf "%s" "$raw" | rtk "$mode" 2>/dev/null)"; then
-      :
-    elif processed="$(printf "%s" "$raw" | rtk prompt "$mode" 2>/dev/null)"; then
-      :
-    elif processed="$(printf "%s" "$raw" | rtk condense 2>/dev/null)"; then
-      :
-    else
-      processed="$raw"
-      export CX_RTK_LAST_ERROR=1
-    fi
-    if [[ -z "$processed" ]]; then
-      processed="$raw"
-      export CX_RTK_LAST_ERROR=1
-    fi
-  fi
-
-  if [[ -n "$maxc" && "$maxc" =~ ^[0-9]+$ ]] && (( maxc > 0 )); then
-    processed="$(printf "%s" "$processed" | cut -c1-"$maxc")"
-  fi
-
-  printf "%s" "$processed"
+  # Prompt passthrough: RTK should not rewrite arbitrary natural-language prompts.
+  cat
 }
 
 _cx_json_escape() {
@@ -297,7 +277,7 @@ _cx_codex_jsonl_with_log() {
 
   local prompt_raw prompt_processed
   prompt_raw="$(cat)"
-  prompt_processed="$(printf "%s" "$prompt_raw" | _cx_prompt_preprocess)"
+  prompt_processed="$prompt_raw"
 
   local start_ms end_ms dur_ms
   start_ms="$(python3 - <<'PY'
@@ -332,11 +312,19 @@ PY
 
   local prompt_hash prompt_preview root scope
   local prompt_hash_raw prompt_hash_processed prompt_len_raw prompt_len_processed rtk_error
+  local sys_len_raw sys_len_processed rtk_used
   prompt_hash_raw="$(printf "%s" "$prompt_raw" | shasum -a 256 | awk '{print $1}')"
   prompt_hash_processed="$(printf "%s" "$prompt_processed" | shasum -a 256 | awk '{print $1}')"
   prompt_len_raw="$(printf "%s" "$prompt_raw" | wc -c | tr -d ' ')"
   prompt_len_processed="$(printf "%s" "$prompt_processed" | wc -c | tr -d ' ')"
   rtk_error="${CX_RTK_LAST_ERROR:-0}"
+  sys_len_raw="${CX_SYSTEM_OUTPUT_LEN_RAW:-null}"
+  sys_len_processed="${CX_SYSTEM_OUTPUT_LEN_PROCESSED:-null}"
+  if [[ "${CX_SYSTEM_RTK_USED:-0}" == "1" ]]; then
+    rtk_used="true"
+  else
+    rtk_used="false"
+  fi
   prompt_hash="$prompt_hash_processed"
   prompt_preview="$(printf "%s" "$prompt_processed" | tr '\n' ' ' | cut -c1-160)"
   root="$(_cx_git_root)"
@@ -359,6 +347,9 @@ PY
       printf '"prompt_len_processed":%s,' "${prompt_len_processed:-0}"
       printf '"prompt_sha256_raw":"%s",' "$prompt_hash_raw"
       printf '"prompt_sha256_processed":"%s",' "$prompt_hash_processed"
+      printf '"system_output_len_raw":%s,' "$sys_len_raw"
+      printf '"system_output_len_processed":%s,' "$sys_len_processed"
+      printf '"rtk_used":%s,' "$rtk_used"
       printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
       printf '"prompt_sha256":"%s",' "$prompt_hash"
       printf '"prompt_preview":%s' "$(printf "%s" "$prompt_preview" | _cx_json_escape)"
@@ -1042,6 +1033,11 @@ cxoptimize() {
             | map(select((.duration_ms != null and .duration_ms > $ms_thr) or (.effective_input_tokens != null and .effective_input_tokens > $eff_thr)))
             | length
           ),
+          rtk_used_hits: (
+            $runs
+            | map(select(.rtk_used == true))
+            | length
+          ),
           schema_failures: 0
         }
     '
@@ -1052,12 +1048,13 @@ cxoptimize() {
     return 1
   fi
 
-  local runs alert_hits schema_failures
+  local runs alert_hits schema_failures rtk_used_hits
   local cache_first cache_second cache_trend
-  local alert_rate schema_rate
+  local alert_rate schema_rate rtk_used_rate
   local top_eff_lines top_dur_lines
   runs="$(printf "%s" "$stats" | jq -r '.runs')"
   alert_hits="$(printf "%s" "$stats" | jq -r '.alert_hits')"
+  rtk_used_hits="$(printf "%s" "$stats" | jq -r '.rtk_used_hits')"
   schema_failures=0
   if [[ -s "$sf" ]]; then
     schema_failures="$(tail -n "$n" "$sf" | wc -l | tr -d ' ')"
@@ -1067,8 +1064,10 @@ cxoptimize() {
   alert_rate="$(printf "%s" "$stats" | jq -r 'if .runs == 0 then "n/a" else (((.alert_hits / .runs) * 100) | round | tostring + "%") end')"
   if [[ "$runs" =~ ^[0-9]+$ ]] && (( runs > 0 )); then
     schema_rate="$(awk -v f="$schema_failures" -v r="$runs" 'BEGIN{printf "%d%%", ((f/r)*100)+0.5}')"
+    rtk_used_rate="$(awk -v f="$rtk_used_hits" -v r="$runs" 'BEGIN{printf "%d%%", ((f/r)*100)+0.5}')"
   else
     schema_rate="n/a"
+    rtk_used_rate="n/a"
   fi
   cache_trend="$(printf "%s" "$stats" | jq -r '
     if .cache_first == null or .cache_second == null then "n/a"
@@ -1085,6 +1084,7 @@ cxoptimize() {
   echo "Scoreboard:"
   echo "- Runs analyzed: $runs"
   echo "- Alert-hit rate: $alert_rate (thresholds: dur>${ms_thr}ms, eff>${eff_thr})"
+  echo "- RTK system-routing rate: $rtk_used_rate"
   echo "- Cache hit trend (first->second half): $cache_trend"
   echo "- Schema failure rate: $schema_rate"
   echo

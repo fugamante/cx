@@ -109,6 +109,57 @@ EOF
   esac
 }
 
+_cx_system_capture() {
+  local out_var=""
+  if [[ "${1:-}" == "--var" ]]; then
+    out_var="${2:-}"
+    shift 2
+  fi
+
+  if [[ $# -lt 1 ]]; then
+    echo "_cx_system_capture: missing command" >&2
+    return 2
+  fi
+
+  local cmd="$1"
+  local raw_out processed_out
+  local raw_status processed_status
+  local rtk_candidate=0
+  local rtk_used=0
+
+  case "$cmd" in
+    git|diff|ls|tree|grep|test|log|read) rtk_candidate=1 ;;
+  esac
+
+  raw_out="$("$@" 2>/dev/null)"
+  raw_status=$?
+  processed_out="$raw_out"
+  processed_status=$raw_status
+
+  if [[ "${CX_RTK_SYSTEM:-0}" == "1" ]] && [[ "$rtk_candidate" -eq 1 ]] && _cx_has_rtk; then
+    processed_out="$(rtk "$@" 2>/dev/null)"
+    processed_status=$?
+    if [[ "$processed_status" -eq 0 ]]; then
+      rtk_used=1
+    else
+      processed_out="$raw_out"
+      processed_status=$raw_status
+      rtk_used=0
+    fi
+  fi
+
+  export CX_SYSTEM_OUTPUT_LEN_RAW="$(printf "%s" "$raw_out" | wc -c | tr -d ' ')"
+  export CX_SYSTEM_OUTPUT_LEN_PROCESSED="$(printf "%s" "$processed_out" | wc -c | tr -d ' ')"
+  export CX_SYSTEM_RTK_USED="$rtk_used"
+
+  if [[ -n "$out_var" ]]; then
+    printf -v "$out_var" "%s" "$processed_out"
+  else
+    printf "%s" "$processed_out"
+  fi
+  return "$processed_status"
+}
+
 _cx_codex_json() {
   local tool_name="$1"
   local schema_description="$2"
@@ -442,32 +493,31 @@ cxpromptlint() {
 
 cx() {
   local out
-  out="$(rtk "$@")" || return $?
-  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec -
+  _cx_system_capture --var out "$@" || return $?
+  printf "%s\n" "$out" | codex exec -
 }
 
 cxj() {
   local out
-  out="$(rtk "$@")" || return $?
-  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec --json -
+  _cx_system_capture --var out "$@" || return $?
+  printf "%s\n" "$out" | _cx_codex_jsonl_with_log "cxj"
 }
 
 cxo() {
   local out
-  out="$(rtk "$@")" || return $?
+  _cx_system_capture --var out "$@" || return $?
 
   printf "%s\n" "$out" \
-    | _cx_prompt_preprocess \
-    | codex exec --json - \
+    | _cx_codex_jsonl_with_log "cxo" \
     | jq -r 'select(.type=="item.completed" and .item.type=="agent_message") | .item.text' \
     | tail -n 1
 }
 
 cxol() {
   local out tmp
-  out="$(rtk "$@")" || return $?
+  _cx_system_capture --var out "$@" || return $?
   tmp="$(mktemp)"
-  printf "%s\n" "$out" | _cx_prompt_preprocess | codex exec -o "$tmp" - >/dev/null
+  printf "%s\n" "$out" | codex exec -o "$tmp" - >/dev/null
   cat "$tmp"
   rm -f "$tmp"
 }
@@ -486,7 +536,7 @@ cxcopy() {
 cxnext() {
   local out
   local schema prompt json
-  out="$(rtk "$@")" || return $?
+  _cx_system_capture --var out "$@" || return $?
 
   schema='{
   "commands": ["bash command 1", "bash command 2"]
@@ -515,7 +565,7 @@ cxfix() {
 
   local cmd out status
   cmd="$*"
-  out="$(rtk err "$@" 2>&1)"
+  _cx_system_capture --var out "$@"
   status=$?
 
   {
@@ -546,7 +596,7 @@ cxfix_run() {
 
   local cmd out status schema prompt json cmds ans
   cmd="$*"
-  out="$("$@" 2>&1)"
+  _cx_system_capture --var out "$@"
   status=$?
 
   schema='{
@@ -613,7 +663,7 @@ cxfix_run() {
 cxdiffsum() {
   local diff_out
   local schema prompt json pr_fmt
-  diff_out="$(rtk git diff --no-color)" || return $?
+  _cx_system_capture --var diff_out git diff --no-color || return $?
 
   if [[ -z "$diff_out" ]]; then
     echo "cxdiffsum: no unstaged changes." >&2
@@ -660,7 +710,7 @@ cxdiffsum() {
 
 cxdiffsum_staged() {
   local diff_out
-  diff_out="$(rtk git diff --staged --no-color)" || return $?
+  _cx_system_capture --var diff_out git diff --staged --no-color || return $?
 
   if [[ -z "$diff_out" ]]; then
     echo "cxdiffsum_staged: no staged changes." >&2
@@ -683,7 +733,7 @@ cxdiffsum_staged() {
 cxcommitjson() {
   local diff_out
   local schema prompt json cc_pref style_hint
-  diff_out="$(rtk git diff --staged --no-color)" || return $?
+  _cx_system_capture --var diff_out git diff --staged --no-color || return $?
 
   if [[ -z "$diff_out" ]]; then
     echo "cxcommitjson: no staged changes. Run: git add -p" >&2
