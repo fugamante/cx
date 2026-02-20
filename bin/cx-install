@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASHRC="${HOME}/.bashrc"
+LINE="source \"${REPO_ROOT}/lib/cx.sh\""
+
+if [[ ! -f "$BASHRC" ]]; then
+  touch "$BASHRC"
+fi
+
+if grep -Fq "$LINE" "$BASHRC"; then
+  echo "cx already installed in $BASHRC"
+else
+  {
+    echo
+    echo "# cx utilities"
+    echo "$LINE"
+  } >> "$BASHRC"
+  echo "Installed cx utilities into $BASHRC"
+fi
+
+echo "Run: source \"$BASHRC\""

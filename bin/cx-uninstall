@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASHRC="${HOME}/.bashrc"
+LINE="source \"${REPO_ROOT}/lib/cx.sh\""
+
+if [[ ! -f "$BASHRC" ]]; then
+  echo "No $BASHRC found"
+  exit 0
+fi
+
+tmp="$(mktemp)"
+grep -Fv "$LINE" "$BASHRC" > "$tmp" || true
+mv "$tmp" "$BASHRC"
+
+echo "Removed cx source line from $BASHRC (if present)."
+echo "Run: source \"$BASHRC\""
