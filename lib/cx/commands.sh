@@ -26,6 +26,9 @@ _cx_codex_json() {
   )"
 
   raw="$(printf "%s" "$full_prompt" | _codex_text)"
+  if [[ -n "${CODEX_MODEL:-}" ]]; then
+    _cx_state_set_path "last_model" "$CODEX_MODEL" >/dev/null 2>&1 || true
+  fi
   if ! printf "%s" "$raw" | jq . >/dev/null 2>&1; then
     echo "${tool_name}: invalid JSON response from Codex" >&2
     echo "${tool_name}: raw response follows:" >&2
@@ -282,12 +285,17 @@ cxfix_run() {
 
 cxdiffsum() {
   local diff_out
-  local schema prompt json
+  local schema prompt json pr_fmt
   diff_out="$(rtk git diff --no-color)" || return $?
 
   if [[ -z "$diff_out" ]]; then
     echo "cxdiffsum: no unstaged changes." >&2
     return 1
+  fi
+
+  pr_fmt="$(_cx_state_get "preferences.pr_summary_format" 2>/dev/null)"
+  if [[ -z "$pr_fmt" ]]; then
+    pr_fmt="standard"
   fi
 
   schema='{
@@ -300,6 +308,7 @@ cxdiffsum() {
     {
       echo "Write a PR-ready summary of this diff."
       echo "Keep bullets concise and actionable."
+      echo "Preferred PR summary format: $pr_fmt"
       echo
       echo "DIFF:"
       printf "%s\n" "$diff_out"
@@ -346,12 +355,19 @@ cxdiffsum_staged() {
 
 cxcommitjson() {
   local diff_out
-  local schema prompt json
+  local schema prompt json cc_pref style_hint
   diff_out="$(rtk git diff --staged --no-color)" || return $?
 
   if [[ -z "$diff_out" ]]; then
     echo "cxcommitjson: no staged changes. Run: git add -p" >&2
     return 1
+  fi
+
+  cc_pref="$(_cx_state_get "preferences.conventional_commits" 2>/dev/null)"
+  if [[ "$cc_pref" == "true" || "$cc_pref" == "1" ]]; then
+    style_hint="Use concise conventional-commit style subject."
+  else
+    style_hint="Use concise imperative subject (non-conventional format)."
   fi
 
   schema='{
@@ -364,7 +380,7 @@ cxcommitjson() {
   prompt="$(
     {
       echo "Generate a commit object from this STAGED diff."
-      echo "Use concise conventional-commit style subject."
+      echo "$style_hint"
       echo
       echo "STAGED DIFF:"
       printf "%s\n" "$diff_out"

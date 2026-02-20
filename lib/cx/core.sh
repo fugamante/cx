@@ -46,6 +46,106 @@ _cxlog_init() {
   echo "$f"
 }
 
+_cx_state_file() {
+  local root
+  root="$(_cx_git_root)"
+  if [[ -n "$root" ]]; then
+    echo "$root/.codex/state.json"
+  else
+    echo "$HOME/.codex/state.json"
+  fi
+}
+
+_cx_state_init() {
+  local f dir
+  f="$(_cx_state_file)"
+  dir="$(dirname "$f")"
+  mkdir -p "$dir" 2>/dev/null || true
+  if [[ ! -f "$f" || ! -s "$f" ]]; then
+    cat > "$f" <<'EOF'
+{
+  "preferences": {
+    "conventional_commits": true,
+    "pr_summary_format": "standard"
+  },
+  "alert_overrides": {},
+  "last_model": null
+}
+EOF
+  fi
+  if ! jq . "$f" >/dev/null 2>&1; then
+    cat > "$f" <<'EOF'
+{
+  "preferences": {
+    "conventional_commits": true,
+    "pr_summary_format": "standard"
+  },
+  "alert_overrides": {},
+  "last_model": null
+}
+EOF
+  fi
+  echo "$f"
+}
+
+_cx_state_set_path() {
+  local key="$1"
+  local value="$2"
+  local f tmp parsed
+  f="$(_cx_state_init)"
+  tmp="$(mktemp)"
+  parsed="$(jq -cn --arg v "$value" '$v | fromjson? // $v')"
+  if ! jq --arg k "$key" --argjson v "$parsed" 'setpath($k|split("."); $v)' "$f" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$f"
+}
+
+_cx_state_get() {
+  local key="$1"
+  local f
+  f="$(_cx_state_init)"
+  jq -r --arg k "$key" 'getpath($k|split(".")) // empty' "$f"
+}
+
+cxstate() {
+  local sub key value f
+  sub="${1:-show}"
+  f="$(_cx_state_init)"
+
+  case "$sub" in
+    show)
+      jq . "$f"
+      ;;
+    get)
+      key="${2:-}"
+      if [[ -z "$key" ]]; then
+        echo "Usage: cxstate get <key>" >&2
+        return 2
+      fi
+      _cx_state_get "$key"
+      ;;
+    set)
+      key="${2:-}"
+      value="${3:-}"
+      if [[ -z "$key" || $# -lt 3 ]]; then
+        echo "Usage: cxstate set <key> <value>" >&2
+        return 2
+      fi
+      if ! _cx_state_set_path "$key" "$value"; then
+        echo "cxstate: failed to update state" >&2
+        return 1
+      fi
+      jq . "$f"
+      ;;
+    *)
+      echo "Usage: cxstate [show|get <key>|set <key> <value>]" >&2
+      return 2
+      ;;
+  esac
+}
+
 cxlog_on()  { export CXLOG_ENABLED=1; echo "cx logging: ON -> $(_cx_log_file)"; }
 cxlog_off() { export CXLOG_ENABLED=0; echo "cx logging: OFF"; }
 
@@ -832,7 +932,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxpolicy cxprofile cxalert cxtrace cxbench cxworklog; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else
