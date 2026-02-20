@@ -19,6 +19,9 @@ RTK -> Codex CLI (JSONL) -> jq -> Bash functions
 ## Core Commands
 - `cxdoctor`
 - `cxmetrics`
+- `cxprofile`
+- `cxtrace`
+- `cxbench`
 - `cxlog_tail`
 - `cxfix_run`
 - `cxcommitjson`

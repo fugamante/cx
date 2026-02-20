@@ -197,6 +197,326 @@ cxmetrics() {
   '
 }
 
+cxprofile() {
+  local n f stats
+  n="${1:-50}"
+  f="$(_cxlog_init)"
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxprofile [positive_run_count]" >&2
+    return 2
+  fi
+
+  if [[ ! -s "$f" ]]; then
+    echo "== cxprofile (last $n runs) =="
+    echo
+    echo "Runs: 0"
+    echo "Avg duration: 0ms"
+    echo "Avg effective tokens: 0"
+    echo "Cache hit rate: n/a"
+    echo "Output/input ratio: n/a"
+    echo "Slowest run: n/a"
+    echo "Heaviest context: n/a"
+    return 0
+  fi
+
+  stats="$(
+    tail -n "$n" "$f" | jq -s '
+      def nz: . // 0;
+      def safe_div($a; $b): if ($b == 0) then null else ($a / $b) end;
+      {
+        runs: length,
+        avg_duration_ms: (if length == 0 then 0 else (map(.duration_ms | nz) | add / length) end),
+        avg_effective_input_tokens: (if length == 0 then 0 else (map(.effective_input_tokens | nz) | add / length) end),
+        cache_hit_rate: (
+          safe_div(
+            (map(.cached_input_tokens | nz) | add);
+            (map(.input_tokens | nz) | add)
+          )
+        ),
+        output_input_ratio: (
+          safe_div(
+            (map(.output_tokens | nz) | add);
+            (map(.effective_input_tokens | nz) | add)
+          )
+        ),
+        slowest: (
+          (map(select(.duration_ms != null)) | max_by(.duration_ms))
+          // {duration_ms: null, tool: "n/a"}
+          | {duration_ms: (.duration_ms // null), tool: (.tool // "unknown")}
+        ),
+        heaviest: (
+          (map(select(.effective_input_tokens != null)) | max_by(.effective_input_tokens))
+          // {effective_input_tokens: null, tool: "n/a"}
+          | {effective_input_tokens: (.effective_input_tokens // null), tool: (.tool // "unknown")}
+        )
+      }
+    '
+  )"
+  if [[ -z "$stats" ]]; then
+    echo "cxprofile: failed to parse logs with jq" >&2
+    return 1
+  fi
+
+  local runs avg_dur avg_eff cache_pct out_in_ratio slow_dur slow_tool heavy_eff heavy_tool
+  runs="$(printf "%s" "$stats" | jq -r '.runs')"
+  avg_dur="$(printf "%s" "$stats" | jq -r '(.avg_duration_ms | floor)')"
+  avg_eff="$(printf "%s" "$stats" | jq -r '(.avg_effective_input_tokens | floor)')"
+  cache_pct="$(printf "%s" "$stats" | jq -r 'if .cache_hit_rate == null then "n/a" else ((.cache_hit_rate * 100) | round | tostring + "%") end')"
+  out_in_ratio="$(
+    printf "%s" "$stats" | jq -r '.output_input_ratio' | awk '
+      $0 == "null" || $0 == "" { print "n/a"; next }
+      { printf "%.2f\n", $0 }
+    '
+  )"
+  slow_dur="$(printf "%s" "$stats" | jq -r '.slowest.duration_ms')"
+  slow_tool="$(printf "%s" "$stats" | jq -r '.slowest.tool')"
+  heavy_eff="$(printf "%s" "$stats" | jq -r '.heaviest.effective_input_tokens')"
+  heavy_tool="$(printf "%s" "$stats" | jq -r '.heaviest.tool')"
+
+  echo "== cxprofile (last $n runs) =="
+  echo
+  echo "Runs: $runs"
+  echo "Avg duration: ${avg_dur}ms"
+  echo "Avg effective tokens: $avg_eff"
+  echo "Cache hit rate: $cache_pct"
+  echo "Output/input ratio: $out_in_ratio"
+  if [[ "$slow_dur" == "null" ]]; then
+    echo "Slowest run: n/a"
+  else
+    echo "Slowest run: ${slow_dur}ms (${slow_tool})"
+  fi
+  if [[ "$heavy_eff" == "null" ]]; then
+    echo "Heaviest context: n/a"
+  else
+    echo "Heaviest context: ${heavy_eff} effective tokens (${heavy_tool})"
+  fi
+}
+
+cxtrace() {
+  local n f total raw
+  n="${1:-1}"
+  f="$(_cxlog_init)"
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxtrace [positive_run_index_from_latest]" >&2
+    return 2
+  fi
+
+  if [[ ! -s "$f" ]]; then
+    echo "cxtrace: no logs yet"
+    echo "log_file: $f"
+    return 0
+  fi
+
+  total="$(wc -l < "$f" | tr -d ' ')"
+  if (( n > total )); then
+    echo "cxtrace: requested run #$n but only $total run(s) available"
+    echo "log_file: $f"
+    return 1
+  fi
+
+  raw="$(tail -n "$n" "$f" | head -n 1)"
+  if [[ -z "$raw" ]]; then
+    echo "cxtrace: could not read requested run"
+    echo "log_file: $f"
+    return 1
+  fi
+
+  if ! printf "%s\n" "$raw" | jq . >/dev/null 2>&1; then
+    echo "cxtrace: selected log entry is not valid JSON"
+    echo "log_file: $f"
+    return 1
+  fi
+
+  local ts tool cwd duration_ms input_tokens cached_input_tokens effective_input_tokens output_tokens scope repo_root prompt_sha256 prompt_preview
+  ts="$(printf "%s\n" "$raw" | jq -r '.ts // "n/a"')"
+  tool="$(printf "%s\n" "$raw" | jq -r '.tool // "n/a"')"
+  cwd="$(printf "%s\n" "$raw" | jq -r '.cwd // "n/a"')"
+  duration_ms="$(printf "%s\n" "$raw" | jq -r 'if .duration_ms == null then "n/a" else (.duration_ms|tostring) end')"
+  input_tokens="$(printf "%s\n" "$raw" | jq -r 'if .input_tokens == null then "n/a" else (.input_tokens|tostring) end')"
+  cached_input_tokens="$(printf "%s\n" "$raw" | jq -r 'if .cached_input_tokens == null then "n/a" else (.cached_input_tokens|tostring) end')"
+  effective_input_tokens="$(printf "%s\n" "$raw" | jq -r 'if .effective_input_tokens == null then "n/a" else (.effective_input_tokens|tostring) end')"
+  output_tokens="$(printf "%s\n" "$raw" | jq -r 'if .output_tokens == null then "n/a" else (.output_tokens|tostring) end')"
+  scope="$(printf "%s\n" "$raw" | jq -r '.scope // "n/a"')"
+  repo_root="$(printf "%s\n" "$raw" | jq -r '.repo_root // "n/a"')"
+  prompt_sha256="$(printf "%s\n" "$raw" | jq -r '.prompt_sha256 // "n/a"')"
+  prompt_preview="$(printf "%s\n" "$raw" | jq -r '.prompt_preview // empty')"
+
+  echo "== cxtrace (run #$n from latest) =="
+  echo
+  echo "ts: $ts"
+  echo "tool: $tool"
+  echo "cwd: $cwd"
+  if [[ "$duration_ms" == "n/a" ]]; then
+    echo "duration_ms: n/a"
+  else
+    echo "duration_ms: ${duration_ms}ms"
+  fi
+  echo "input_tokens: $input_tokens"
+  echo "cached_input_tokens: $cached_input_tokens"
+  echo "effective_input_tokens: $effective_input_tokens"
+  echo "output_tokens: $output_tokens"
+  echo "scope: $scope"
+  echo "repo_root: $repo_root"
+  echo "prompt_sha256: $prompt_sha256"
+  if [[ -n "$prompt_preview" ]]; then
+    echo "prompt_preview: $prompt_preview"
+  fi
+  echo "log_file: $f"
+}
+
+cxbench() {
+  if [[ $# -lt 3 ]]; then
+    echo "Usage: cxbench <runs> -- <command...>" >&2
+    return 2
+  fi
+
+  local runs
+  runs="$1"
+  shift
+
+  if [[ ! "$runs" =~ ^[0-9]+$ ]] || (( runs <= 0 )); then
+    echo "Usage: cxbench <runs> -- <command...>" >&2
+    return 2
+  fi
+
+  if [[ "${1:-}" != "--" ]]; then
+    echo "Usage: cxbench <runs> -- <command...>" >&2
+    return 2
+  fi
+  shift
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: cxbench <runs> -- <command...>" >&2
+    return 2
+  fi
+
+  local cmd_str logf bench_log prev_cxlog_enabled
+  cmd_str="$*"
+  logf="$(_cxlog_init)"
+  bench_log="${CXBENCH_LOG:-1}"
+  prev_cxlog_enabled="${CXLOG_ENABLED:-1}"
+
+  if [[ "$bench_log" == "0" ]]; then
+    export CXLOG_ENABLED=0
+  fi
+
+  local i status failures=0
+  local sum_dur=0 min_dur=0 max_dur=0
+  local sum_eff=0 sum_out=0 tok_count=0
+
+  for ((i=1; i<=runs; i++)); do
+    local before_lines after_lines delta_lines before_sha
+    local start_ms end_ms runtime_ms
+    local new_lines entry duration_ms eff_tok out_tok
+
+    before_lines=0
+    if [[ -f "$logf" ]]; then
+      before_lines="$(wc -l < "$logf" | tr -d ' ')"
+    fi
+    before_sha=""
+    if [[ "$before_lines" -gt 0 ]]; then
+      before_sha="$(tail -n 1 "$logf" | jq -r '.prompt_sha256 // empty' 2>/dev/null)"
+    fi
+
+    start_ms="$(python3 - <<'PY'
+import time
+print(int(time.time()*1000))
+PY
+    )"
+    bash -lc "$cmd_str" >/dev/null 2>&1
+    status=$?
+    end_ms="$(python3 - <<'PY'
+import time
+print(int(time.time()*1000))
+PY
+    )"
+    runtime_ms="$((end_ms - start_ms))"
+    duration_ms="$runtime_ms"
+    eff_tok=""
+    out_tok=""
+
+    if [[ "$status" -ne 0 ]]; then
+      failures=$((failures + 1))
+    fi
+
+    if [[ "$bench_log" != "0" && -f "$logf" ]]; then
+      after_lines="$(wc -l < "$logf" | tr -d ' ')"
+      if [[ -z "$after_lines" ]]; then after_lines=0; fi
+      delta_lines="$((after_lines - before_lines))"
+      if (( delta_lines > 0 )); then
+        new_lines="$(tail -n "$delta_lines" "$logf")"
+        entry="$(
+          printf "%s\n" "$new_lines" | jq -c --arg before_sha "$before_sha" '
+            [
+              .[]
+              | select(.duration_ms != null)
+            ] as $all
+            | (
+                ($all | map(select((.prompt_sha256 // "") != "" and .prompt_sha256 != $before_sha)) | .[-1])
+                // ($all | .[-1])
+              )
+          ' 2>/dev/null
+        )"
+        if [[ -n "$entry" && "$entry" != "null" ]]; then
+          duration_ms="$(printf "%s" "$entry" | jq -r '.duration_ms // empty' 2>/dev/null)"
+          eff_tok="$(printf "%s" "$entry" | jq -r '.effective_input_tokens // empty' 2>/dev/null)"
+          out_tok="$(printf "%s" "$entry" | jq -r '.output_tokens // empty' 2>/dev/null)"
+          if [[ -z "$duration_ms" ]]; then
+            duration_ms="$runtime_ms"
+          fi
+        fi
+      fi
+    fi
+
+    if [[ -z "$duration_ms" ]]; then
+      duration_ms="$runtime_ms"
+    fi
+
+    if (( i == 1 )); then
+      min_dur="$duration_ms"
+      max_dur="$duration_ms"
+    else
+      if (( duration_ms < min_dur )); then min_dur="$duration_ms"; fi
+      if (( duration_ms > max_dur )); then max_dur="$duration_ms"; fi
+    fi
+    sum_dur="$((sum_dur + duration_ms))"
+
+    if [[ -n "${eff_tok:-}" && -n "${out_tok:-}" ]]; then
+      sum_eff="$((sum_eff + eff_tok))"
+      sum_out="$((sum_out + out_tok))"
+      tok_count="$((tok_count + 1))"
+    fi
+  done
+
+  export CXLOG_ENABLED="$prev_cxlog_enabled"
+
+  local avg_dur avg_eff avg_out
+  avg_dur="$((sum_dur / runs))"
+  if (( tok_count > 0 )); then
+    avg_eff="$((sum_eff / tok_count))"
+    avg_out="$((sum_out / tok_count))"
+  else
+    avg_eff="n/a"
+    avg_out="n/a"
+  fi
+
+  echo "== cxbench =="
+  echo "Command: $cmd_str"
+  echo "Runs: $runs"
+  echo "Duration avg/min/max: ${avg_dur}ms / ${min_dur}ms / ${max_dur}ms"
+  echo "Avg effective_input_tokens: $avg_eff"
+  echo "Avg output_tokens: $avg_out"
+  echo "Failures: $failures"
+  if [[ "$bench_log" == "0" ]]; then
+    echo "Logging: disabled via CXBENCH_LOG=0"
+  else
+    echo "Logging: enabled"
+  fi
+  echo "log_file: $logf"
+}
+
 cxlog_tail() {
   local n f
   n="${1:-10}"
@@ -287,7 +607,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxprofile cxtrace cxbench; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

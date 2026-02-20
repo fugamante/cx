@@ -7,6 +7,8 @@
 - Deterministic JSON extraction via `_codex_text`
 - Repo-aware JSONL logging (`.codex/cxlogs/runs.jsonl`)
 - Token metrics (`cxmetrics`, `cxlog_tail`)
+- Performance profiling and trace (`cxprofile`, `cxtrace`)
+- Repeatable command benchmarking (`cxbench`)
 - Safety-gated fixer runner (`cxfix_run`)
 - Health diagnostics (`cxdoctor`, `cxhealth`)
 - Commit/diff helpers (`cxdiffsum_staged`, `cxcommitjson`, `cxcommitmsg`)
@@ -31,6 +33,17 @@ source ~/.bashrc
 
 ```bash
 cxdoctor
+```
+
+## New commands
+
+```bash
+cxprofile            # summarize last 50 runs
+cxprofile 100        # summarize last 100 runs
+cxtrace              # inspect latest run details
+cxtrace 5            # inspect 5th most recent run
+cxbench 10 -- cxo git status
+CXBENCH_LOG=0 cxbench 20 -- echo hello
 ```
 
 ## Notes
