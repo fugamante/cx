@@ -46,6 +46,41 @@ _cxlog_init() {
   echo "$f"
 }
 
+_cx_schema_fail_log_file() {
+  local root
+  root="$(_cx_git_root)"
+  if [[ -n "$root" ]]; then
+    echo "$root/.codex/cxlogs/schema_failures.jsonl"
+  else
+    echo "$HOME/.codex/cxlogs/schema_failures.jsonl"
+  fi
+}
+
+_cx_schema_fail_log_init() {
+  local f dir
+  f="$(_cx_schema_fail_log_file)"
+  dir="$(dirname "$f")"
+  mkdir -p "$dir" 2>/dev/null || true
+  touch "$f" 2>/dev/null || true
+  echo "$f"
+}
+
+_cx_log_schema_failure() {
+  local tool="$1"
+  local reason="$2"
+  local raw="${3:-}"
+  local f
+  f="$(_cx_schema_fail_log_init)"
+  {
+    printf '{'
+    printf '"ts":"%s",' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    printf '"tool":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
+    printf '"reason":%s,' "$(printf "%s" "$reason" | _cx_json_escape)"
+    printf '"raw_sha256":"%s"' "$(printf "%s" "$raw" | shasum -a 256 | awk '{print $1}')"
+    printf '}\n'
+  } >> "$f"
+}
+
 _cx_state_file() {
   local root
   root="$(_cx_git_root)"
@@ -842,6 +877,174 @@ cxworklog() {
   fi
 }
 
+cxoptimize() {
+  local n f sf stats
+  local ms_thr eff_thr
+  n="${1:-200}"
+  f="$(_cxlog_init)"
+  sf="$(_cx_schema_fail_log_init)"
+  ms_thr="$(_cx_state_get "alert_overrides.CXALERT_MAX_MS" 2>/dev/null)"
+  eff_thr="$(_cx_state_get "alert_overrides.CXALERT_MAX_EFF_IN" 2>/dev/null)"
+  [[ -n "$ms_thr" ]] || ms_thr="${CXALERT_MAX_MS:-8000}"
+  [[ -n "$eff_thr" ]] || eff_thr="${CXALERT_MAX_EFF_IN:-5000}"
+  [[ "$ms_thr" =~ ^[0-9]+$ ]] || ms_thr=8000
+  [[ "$eff_thr" =~ ^[0-9]+$ ]] || eff_thr=5000
+
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || (( n <= 0 )); then
+    echo "Usage: cxoptimize [positive_run_count]" >&2
+    return 2
+  fi
+
+  if [[ ! -s "$f" ]]; then
+    echo "== cxoptimize (last $n runs) =="
+    echo
+    echo "Scoreboard:"
+    echo "- Runs analyzed: 0"
+    echo "- Alert-hit rate: n/a"
+    echo "- Cache hit trend (first->second half): n/a"
+    echo "- Schema failure rate: n/a"
+    echo
+    echo "Recommendations:"
+    echo "- No run data available. Execute a few cx commands, then rerun cxoptimize."
+    echo "log_file: $f"
+    echo "schema_fail_log_file: $sf"
+    return 0
+  fi
+
+  stats="$(
+    tail -n "$n" "$f" | jq -s --argjson ms_thr "$ms_thr" --argjson eff_thr "$eff_thr" '
+      def nz: . // 0;
+      def safe_div($a; $b): if ($b == 0) then null else ($a / $b) end;
+      . as $runs
+      | (length) as $count
+      | ($count / 2 | floor) as $half
+      | {
+          runs: $count,
+          top_eff: (
+            $runs
+            | map(select(.tool != null))
+            | group_by(.tool)
+            | map({
+                tool: .[0].tool,
+                avg_effective_input_tokens: (if length == 0 then 0 else (map(.effective_input_tokens | nz) | add / length | floor) end),
+                runs: length
+              })
+            | sort_by(.avg_effective_input_tokens)
+            | reverse
+            | .[0:5]
+          ),
+          top_dur: (
+            $runs
+            | map(select(.tool != null))
+            | group_by(.tool)
+            | map({
+                tool: .[0].tool,
+                avg_duration_ms: (if length == 0 then 0 else (map(.duration_ms | nz) | add / length | floor) end),
+                runs: length
+              })
+            | sort_by(.avg_duration_ms)
+            | reverse
+            | .[0:5]
+          ),
+          cache_first: (
+            if $half == 0 then null else safe_div(
+              ($runs[0:$half] | map(.cached_input_tokens | nz) | add);
+              ($runs[0:$half] | map(.input_tokens | nz) | add)
+            ) end
+          ),
+          cache_second: (
+            if ($count - $half) == 0 then null else safe_div(
+              ($runs[$half:] | map(.cached_input_tokens | nz) | add);
+              ($runs[$half:] | map(.input_tokens | nz) | add)
+            ) end
+          ),
+          alert_hits: (
+            $runs
+            | map(select((.duration_ms != null and .duration_ms > $ms_thr) or (.effective_input_tokens != null and .effective_input_tokens > $eff_thr)))
+            | length
+          ),
+          schema_failures: 0
+        }
+    '
+  )"
+
+  if [[ -z "$stats" ]]; then
+    echo "cxoptimize: failed to parse logs with jq" >&2
+    return 1
+  fi
+
+  local runs alert_hits schema_failures
+  local cache_first cache_second cache_trend
+  local alert_rate schema_rate
+  local top_eff_lines top_dur_lines
+  runs="$(printf "%s" "$stats" | jq -r '.runs')"
+  alert_hits="$(printf "%s" "$stats" | jq -r '.alert_hits')"
+  schema_failures=0
+  if [[ -s "$sf" ]]; then
+    schema_failures="$(tail -n "$n" "$sf" | wc -l | tr -d ' ')"
+  fi
+  cache_first="$(printf "%s" "$stats" | jq -r '.cache_first')"
+  cache_second="$(printf "%s" "$stats" | jq -r '.cache_second')"
+  alert_rate="$(printf "%s" "$stats" | jq -r 'if .runs == 0 then "n/a" else (((.alert_hits / .runs) * 100) | round | tostring + "%") end')"
+  if [[ "$runs" =~ ^[0-9]+$ ]] && (( runs > 0 )); then
+    schema_rate="$(awk -v f="$schema_failures" -v r="$runs" 'BEGIN{printf "%d%%", ((f/r)*100)+0.5}')"
+  else
+    schema_rate="n/a"
+  fi
+  cache_trend="$(printf "%s" "$stats" | jq -r '
+    if .cache_first == null or .cache_second == null then "n/a"
+    else
+      ((.cache_first * 100) | round | tostring) + "% -> " +
+      ((.cache_second * 100) | round | tostring) + "%"
+    end
+  ')"
+  top_eff_lines="$(printf "%s" "$stats" | jq -r '.top_eff[]? | "- \(.tool): avg_eff=\(.avg_effective_input_tokens), runs=\(.runs)"')"
+  top_dur_lines="$(printf "%s" "$stats" | jq -r '.top_dur[]? | "- \(.tool): avg_duration=\(.avg_duration_ms)ms, runs=\(.runs)"')"
+
+  echo "== cxoptimize (last $n runs) =="
+  echo
+  echo "Scoreboard:"
+  echo "- Runs analyzed: $runs"
+  echo "- Alert-hit rate: $alert_rate (thresholds: dur>${ms_thr}ms, eff>${eff_thr})"
+  echo "- Cache hit trend (first->second half): $cache_trend"
+  echo "- Schema failure rate: $schema_rate"
+  echo
+  echo "Top tools by avg effective_input_tokens:"
+  if [[ -n "$top_eff_lines" ]]; then
+    printf "%s\n" "$top_eff_lines"
+  else
+    echo "- n/a"
+  fi
+  echo
+  echo "Top tools by avg duration_ms:"
+  if [[ -n "$top_dur_lines" ]]; then
+    printf "%s\n" "$top_dur_lines"
+  else
+    echo "- n/a"
+  fi
+  echo
+  echo "Recommendations:"
+  if [[ -n "$top_eff_lines" ]]; then
+    echo "- High effective-input tools above should adopt lean mode: trim prompt context and prefer schema-only outputs."
+  fi
+  if [[ -n "$top_dur_lines" ]]; then
+    echo "- High latency tools above should split heavy workflows into smaller fast micro-queries and reduce repo-wide context."
+  fi
+  if [[ "$cache_first" != "null" && "$cache_second" != "null" ]]; then
+    if awk "BEGIN{exit !($cache_second < $cache_first)}"; then
+      echo "- Cache hit rate dropped between window halves; prompt drift likely. Compare prompt_preview hashes and stabilize templates."
+    fi
+  fi
+  if [[ "$schema_failures" =~ ^[0-9]+$ ]] && (( schema_failures > 0 )); then
+    echo "- Schema failures detected; tighten schemas and reduce optional ambiguity in structured prompts."
+  fi
+  if [[ "$alert_hits" =~ ^[0-9]+$ ]] && (( alert_hits > 0 )); then
+    echo "- Frequent threshold alerts detected; raise only with evidence, otherwise optimize prompt size and command granularity."
+  fi
+  echo "log_file: $f"
+  echo "schema_fail_log_file: $sf"
+}
+
 cxlog_tail() {
   local n f
   n="${1:-10}"
@@ -932,7 +1135,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxoptimize; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

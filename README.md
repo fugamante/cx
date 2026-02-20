@@ -11,6 +11,7 @@
 - Alert analytics over recent runs (`cxalert`)
 - Policy and dangerous-command classification (`cxpolicy`)
 - Per-repo preferences/state (`cxstate`)
+- Optimization advisor over recent runs (`cxoptimize`)
 - Repeatable command benchmarking (`cxbench`)
 - Safety-gated fixer runner (`cxfix_run`)
 - Health diagnostics (`cxdoctor`, `cxhealth`)
@@ -18,7 +19,8 @@
 
 ## Layout
 
-- `lib/cx.sh`: top-level source entrypoint
+- `cx.sh`: canonical top-level source entrypoint
+- `lib/cx.sh`: internal source entrypoint
 - `lib/cx/core.sh`: logging, alerts, diagnostics
 - `lib/cx/commands.sh`: cx user commands
 - `bin/cx-install`: append source line to `~/.bashrc`
@@ -49,6 +51,8 @@ cxpolicy             # show dangerous-command safety rules
 cxstate show         # display .codex/state.json
 cxstate set preferences.conventional_commits false
 cxstate get preferences.pr_summary_format
+cxoptimize           # optimization recommendations over last 200 runs
+cxoptimize 400
 cxtrace              # inspect latest run details
 cxtrace 5            # inspect 5th most recent run
 cxbench 10 -- cxo git status

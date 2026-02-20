@@ -30,6 +30,7 @@ _cx_codex_json() {
     _cx_state_set_path "last_model" "$CODEX_MODEL" >/dev/null 2>&1 || true
   fi
   if ! printf "%s" "$raw" | jq . >/dev/null 2>&1; then
+    _cx_log_schema_failure "$tool_name" "invalid_json" "$raw" >/dev/null 2>&1 || true
     echo "${tool_name}: invalid JSON response from Codex" >&2
     echo "${tool_name}: raw response follows:" >&2
     printf "%s\n" "$raw" >&2
@@ -47,6 +48,7 @@ _cx_json_require_keys() {
 
   for k in "$@"; do
     if ! printf "%s" "$json" | jq -e --arg k "$k" 'has($k)' >/dev/null 2>&1; then
+      _cx_log_schema_failure "$tool_name" "missing_key:$k" "$json" >/dev/null 2>&1 || true
       echo "${tool_name}: missing required key '$k'" >&2
       echo "${tool_name}: raw response follows:" >&2
       printf "%s\n" "$json" >&2
