@@ -1401,23 +1401,137 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
     if cmd.is_empty() {
         return Err("missing command".to_string());
     }
-    let mut command = Command::new(&cmd[0]);
-    if cmd.len() > 1 {
-        command.args(&cmd[1..]);
-    }
-    let output = command
-        .output()
-        .map_err(|e| format!("failed to execute '{}': {e}", cmd[0]))?;
-    let status = output.status.code().unwrap_or(1);
-    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !stderr.trim().is_empty() {
-        if !combined.is_empty() && !combined.ends_with('\n') {
-            combined.push('\n');
+
+    fn run_capture(command: &[String]) -> Result<(String, i32), String> {
+        if command.is_empty() {
+            return Err("missing command".to_string());
         }
-        combined.push_str(&stderr);
+        let mut c = Command::new(&command[0]);
+        if command.len() > 1 {
+            c.args(&command[1..]);
+        }
+        let output = c
+            .output()
+            .map_err(|e| format!("failed to execute '{}': {e}", command[0]))?;
+        let status = output.status.code().unwrap_or(1);
+        let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !stderr.trim().is_empty() {
+            if !combined.is_empty() && !combined.ends_with('\n') {
+                combined.push('\n');
+            }
+            combined.push_str(&stderr);
+        }
+        Ok((combined, status))
     }
-    Ok((combined, status))
+
+    fn has_rtk() -> bool {
+        Command::new("rtk")
+            .arg("--help")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn is_rtk_supported_prefix(cmd0: &str) -> bool {
+        matches!(
+            cmd0,
+            "git" | "diff" | "ls" | "tree" | "grep" | "test" | "log" | "read"
+        )
+    }
+
+    fn first_n_chars(s: &str, n: usize) -> String {
+        s.chars().take(n).collect()
+    }
+
+    fn last_n_chars(s: &str, n: usize) -> String {
+        let total = s.chars().count();
+        if n >= total {
+            return s.to_string();
+        }
+        s.chars().skip(total - n).collect()
+    }
+
+    fn clip_text(input: &str) -> String {
+        let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(12000);
+        let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(300);
+        let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
+        let clip_footer = env::var("CX_CONTEXT_CLIP_FOOTER")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(1)
+            == 1;
+
+        let original_chars = input.chars().count();
+        let original_lines = input.lines().count();
+        let lower = input.to_lowercase();
+        let mode_used = match clip_mode.as_str() {
+            "head" => "head",
+            "tail" => "tail",
+            _ => {
+                if lower.contains("error") || lower.contains("fail") || lower.contains("warning") {
+                    "tail"
+                } else {
+                    "head"
+                }
+            }
+        };
+
+        let lines: Vec<&str> = input.lines().collect();
+        let line_limited = if lines.len() <= budget_lines {
+            input.to_string()
+        } else if mode_used == "tail" {
+            lines[lines.len().saturating_sub(budget_lines)..].join("\n")
+        } else {
+            lines[..budget_lines].join("\n")
+        };
+
+        let char_limited = if line_limited.chars().count() <= budget_chars {
+            line_limited
+        } else if mode_used == "tail" {
+            last_n_chars(&line_limited, budget_chars)
+        } else {
+            first_n_chars(&line_limited, budget_chars)
+        };
+
+        let kept_chars = char_limited.chars().count();
+        let kept_lines = char_limited.lines().count();
+        let clipped = kept_chars < original_chars || kept_lines < original_lines;
+        if clipped && clip_footer {
+            format!(
+                "{char_limited}\n[cx] output clipped: original={}/{}, kept={}/{}, mode={}",
+                original_chars, original_lines, kept_chars, kept_lines, mode_used
+            )
+        } else {
+            char_limited
+        }
+    }
+
+    let (raw_out, status) = run_capture(cmd)?;
+    let rtk_enabled = env::var("CX_RTK_SYSTEM")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(1)
+        == 1;
+    let processed = if rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && has_rtk() {
+        let mut rtk_cmd = vec!["rtk".to_string()];
+        rtk_cmd.extend_from_slice(cmd);
+        match run_capture(&rtk_cmd) {
+            Ok((rtk_out, rtk_status)) if rtk_status == 0 && !rtk_out.trim().is_empty() => rtk_out,
+            _ => raw_out.clone(),
+        }
+    } else {
+        raw_out.clone()
+    };
+    Ok((clip_text(&processed), status))
 }
 
 fn run_git_capture(args: &[&str]) -> Result<(String, i32), String> {

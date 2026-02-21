@@ -14,6 +14,7 @@ Current scope:
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
 - operational helpers: `budget`, `log-tail`, `health`
+- system capture path includes RTK routing (when available) + context clipping budgets
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
@@ -76,6 +77,7 @@ GitHub Actions:
 ```bash
 cargo run -- help
 cargo run -- version
+cargo run -- where
 cargo run -- doctor
 cargo run -- state show
 cargo run -- state set preferences.conventional_commits true
@@ -126,5 +128,5 @@ cargo run -- replay <id>
 ## Next steps
 
 - add richer prompt templates by mode with optional schema snippets
-- port RTK system-routing + clipping/chunking internals for full capture-path parity
-- align remaining edge-case behavior for `cxhealth`/`cxdoctor` output parity
+- add explicit chunking helpers and expose chunk-aware fanout workflows
+- align remaining edge-case behavior for `cxhealth`/`cxdoctor` and command-output formatting parity
