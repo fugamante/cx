@@ -8,6 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
@@ -41,20 +42,6 @@ struct RunEntry {
     prompt_preview: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct CxState {
-    #[serde(default)]
-    preferences: Preferences,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct Preferences {
-    #[serde(default)]
-    conventional_commits: Option<bool>,
-    #[serde(default)]
-    pr_summary_format: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 struct QuarantineRecord {
     #[serde(default)]
@@ -86,6 +73,9 @@ fn print_help() {
     println!("Commands:");
     println!("  version            Print tool version");
     println!("  doctor             Run non-interactive environment checks");
+    println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
+    println!("  policy [check ...] Show safety rules or classify a command");
+    println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  alert [N]          Report anomalies from last N runs (default 50)");
     println!("  optimize [N]       Recommend cost/latency improvements from last N runs");
@@ -307,14 +297,190 @@ fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
     serde_json::from_str(&s).map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))
 }
 
-fn read_state() -> Option<CxState> {
+fn default_state_value() -> Value {
+    json!({
+        "preferences": {
+            "conventional_commits": Value::Null,
+            "pr_summary_format": Value::Null
+        },
+        "alert_overrides": {},
+        "last_model": Value::Null
+    })
+}
+
+fn read_state_value() -> Option<Value> {
     let state_file = resolve_state_file()?;
     if !state_file.exists() {
         return None;
     }
     let mut s = String::new();
     File::open(state_file).ok()?.read_to_string(&mut s).ok()?;
-    serde_json::from_str::<CxState>(&s).ok()
+    serde_json::from_str::<Value>(&s).ok()
+}
+
+fn ensure_state_value() -> Result<(PathBuf, Value), String> {
+    let state_file =
+        resolve_state_file().ok_or_else(|| "unable to resolve state file".to_string())?;
+    if !state_file.exists() {
+        ensure_parent_dir(&state_file)?;
+        let initial = default_state_value();
+        let mut serialized = serde_json::to_string_pretty(&initial)
+            .map_err(|e| format!("failed to serialize default state: {e}"))?;
+        serialized.push('\n');
+        fs::write(&state_file, serialized)
+            .map_err(|e| format!("failed to write {}: {e}", state_file.display()))?;
+        return Ok((state_file, initial));
+    }
+    let mut s = String::new();
+    File::open(&state_file)
+        .map_err(|e| format!("cannot open {}: {e}", state_file.display()))?
+        .read_to_string(&mut s)
+        .map_err(|e| format!("cannot read {}: {e}", state_file.display()))?;
+    let value = serde_json::from_str::<Value>(&s)
+        .map_err(|e| format!("invalid JSON in {}: {e}", state_file.display()))?;
+    Ok((state_file, value))
+}
+
+fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    let mut serialized = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("failed to serialize JSON: {e}"))?;
+    serialized.push('\n');
+    fs::write(&tmp, serialized).map_err(|e| format!("failed to write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        format!(
+            "failed to move {} -> {}: {e}",
+            tmp.display(),
+            path.display()
+        )
+    })
+}
+
+fn parse_cli_value(raw: &str) -> Value {
+    if let Ok(v) = serde_json::from_str::<Value>(raw) {
+        return v;
+    }
+    if raw.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if raw.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+    if raw.eq_ignore_ascii_case("null") {
+        return Value::Null;
+    }
+    if let Ok(v) = raw.parse::<i64>() {
+        return json!(v);
+    }
+    if let Ok(v) = raw.parse::<f64>() {
+        return json!(v);
+    }
+    Value::String(raw.to_string())
+}
+
+fn value_at_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = root;
+    for seg in path.split('.') {
+        if seg.is_empty() {
+            continue;
+        }
+        cur = cur.get(seg)?;
+    }
+    Some(cur)
+}
+
+fn value_to_display(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        _ => v.to_string(),
+    }
+}
+
+fn set_value_at_path(root: &mut Value, path: &str, new_value: Value) -> Result<(), String> {
+    let mut segs: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return Err("key cannot be empty".to_string());
+    }
+    let last = segs.pop().unwrap_or_default();
+    let mut cur = root;
+    for seg in segs {
+        if !cur.is_object() {
+            *cur = json!({});
+        }
+        let obj = cur
+            .as_object_mut()
+            .ok_or_else(|| "failed to access state object".to_string())?;
+        cur = obj.entry(seg.to_string()).or_insert_with(|| json!({}));
+    }
+    if !cur.is_object() {
+        *cur = json!({});
+    }
+    let obj = cur
+        .as_object_mut()
+        .ok_or_else(|| "failed to access final state object".to_string())?;
+    obj.insert(last.to_string(), new_value);
+    Ok(())
+}
+
+fn cmd_state_show() -> i32 {
+    let (_state_file, state) = match ensure_state_value() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs state show: {e}");
+            return 1;
+        }
+    };
+    match serde_json::to_string_pretty(&state) {
+        Ok(s) => {
+            println!("{s}");
+            0
+        }
+        Err(e) => {
+            eprintln!("cxrs state show: failed to render JSON: {e}");
+            1
+        }
+    }
+}
+
+fn cmd_state_get(key: &str) -> i32 {
+    let (state_file, state) = match ensure_state_value() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs state get: {e}");
+            return 1;
+        }
+    };
+    let Some(v) = value_at_path(&state, key) else {
+        eprintln!("cxrs state get: key not found: {key}");
+        eprintln!("state_file: {}", state_file.display());
+        return 1;
+    };
+    match v {
+        Value::String(s) => println!("{s}"),
+        _ => println!("{}", v),
+    }
+    0
+}
+
+fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
+    let (state_file, mut state) = match ensure_state_value() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs state set: {e}");
+            return 1;
+        }
+    };
+    if let Err(e) = set_value_at_path(&mut state, key, parse_cli_value(raw_value)) {
+        eprintln!("cxrs state set: {e}");
+        return 1;
+    }
+    if let Err(e) = write_json_atomic(&state_file, &state) {
+        eprintln!("cxrs state set: {e}");
+        return 1;
+    }
+    println!("ok");
+    0
 }
 
 fn print_version() {
@@ -334,21 +500,17 @@ fn print_version() {
     let quarantine_dir = resolve_quarantine_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
-    let (cc, pr_fmt) = if let Some(state) = read_state() {
-        (
-            state
-                .preferences
-                .conventional_commits
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string()),
-            state
-                .preferences
-                .pr_summary_format
-                .unwrap_or_else(|| "null".to_string()),
-        )
-    } else {
-        ("n/a".to_string(), "n/a".to_string())
-    };
+    let state = read_state_value();
+    let cc = state
+        .as_ref()
+        .and_then(|v| value_at_path(v, "preferences.conventional_commits"))
+        .map(value_to_display)
+        .unwrap_or_else(|| "n/a".to_string());
+    let pr_fmt = state
+        .as_ref()
+        .and_then(|v| value_at_path(v, "preferences.pr_summary_format"))
+        .map(value_to_display)
+        .unwrap_or_else(|| "n/a".to_string());
     println!("name: {APP_NAME}");
     println!("version: {APP_VERSION}");
     println!("cwd: {cwd}");
@@ -1048,6 +1210,145 @@ fn run_git_capture(args: &[&str]) -> Result<(String, i32), String> {
     Ok((combined, status))
 }
 
+fn run_command_for_bench(
+    command: &[String],
+    disable_cx_log: bool,
+    passthru: bool,
+) -> Result<i32, String> {
+    if command.is_empty() {
+        return Err("missing command".to_string());
+    }
+    let mut cmd = Command::new(&command[0]);
+    if command.len() > 1 {
+        cmd.args(&command[1..]);
+    }
+    if disable_cx_log {
+        cmd.env("CXLOG_ENABLED", "0");
+    }
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to execute '{}': {e}", command[0]))?;
+    if passthru {
+        let mut out = std::io::stdout();
+        let mut err = std::io::stderr();
+        let _ = out.write_all(&output.stdout);
+        let _ = err.write_all(&output.stderr);
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn cmd_bench(runs: usize, command: &[String]) -> i32 {
+    if runs == 0 {
+        eprintln!("cxrs bench: runs must be > 0");
+        return 2;
+    }
+    if command.is_empty() {
+        eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
+        return 2;
+    }
+
+    let disable_cx_log = env::var("CXBENCH_LOG").ok().as_deref() == Some("0");
+    let passthru = env::var("CXBENCH_PASSTHRU").ok().as_deref() == Some("1");
+    let log_file = resolve_log_file();
+    let mut durations: Vec<u64> = Vec::with_capacity(runs);
+    let mut eff_totals: Vec<u64> = Vec::new();
+    let mut out_totals: Vec<u64> = Vec::new();
+    let mut failures = 0usize;
+
+    for _ in 0..runs {
+        let before_runs = if let Some(path) = &log_file {
+            if path.exists() {
+                load_runs(path, usize::MAX).unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        let before_len = before_runs.len();
+
+        let started = Instant::now();
+        let code = match run_command_for_bench(command, disable_cx_log, passthru) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("cxrs bench: {e}");
+                return 1;
+            }
+        };
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        durations.push(elapsed_ms);
+        if code != 0 {
+            failures += 1;
+        }
+
+        if let Some(path) = &log_file {
+            if path.exists() {
+                let after_runs = load_runs(path, usize::MAX).unwrap_or_default();
+                if after_runs.len() > before_len {
+                    let mut eff_sum = 0u64;
+                    let mut out_sum = 0u64;
+                    let mut any_eff = false;
+                    let mut any_out = false;
+                    for r in after_runs.iter().skip(before_len) {
+                        if let Some(v) = r.effective_input_tokens {
+                            eff_sum += v;
+                            any_eff = true;
+                        }
+                        if let Some(v) = r.output_tokens {
+                            out_sum += v;
+                            any_out = true;
+                        }
+                    }
+                    if any_eff {
+                        eff_totals.push(eff_sum);
+                    }
+                    if any_out {
+                        out_totals.push(out_sum);
+                    }
+                }
+            }
+        }
+    }
+
+    let min = durations.iter().min().copied().unwrap_or(0);
+    let max = durations.iter().max().copied().unwrap_or(0);
+    let sum: u64 = durations.iter().sum();
+    let avg = if durations.is_empty() {
+        0
+    } else {
+        sum / (durations.len() as u64)
+    };
+
+    println!("== cxrs bench ==");
+    println!("runs: {runs}");
+    println!("command: {}", command.join(" "));
+    println!("duration_ms avg/min/max: {avg}/{min}/{max}");
+    println!("failures: {failures}");
+    if !eff_totals.is_empty() {
+        let eff_avg = eff_totals.iter().sum::<u64>() / (eff_totals.len() as u64);
+        println!("avg effective_input_tokens: {eff_avg}");
+    } else {
+        println!("avg effective_input_tokens: n/a");
+    }
+    if !out_totals.is_empty() {
+        let out_avg = out_totals.iter().sum::<u64>() / (out_totals.len() as u64);
+        println!("avg output_tokens: {out_avg}");
+    } else {
+        println!("avg output_tokens: n/a");
+    }
+    if disable_cx_log {
+        println!("cxbench_log: disabled (CXBENCH_LOG=0)");
+    } else {
+        println!("cxbench_log: enabled");
+    }
+    println!(
+        "cxbench_passthru: {}",
+        if passthru { "enabled" } else { "disabled" }
+    );
+
+    if failures > 0 { 1 } else { 0 }
+}
+
 fn run_strict_schema(tool: &str, schema: &str, task_input: &str) -> Result<String, String> {
     let full_prompt = build_strict_schema_prompt(schema, task_input);
     let jsonl = run_codex_jsonl(&full_prompt)?;
@@ -1126,6 +1427,39 @@ fn is_dangerous_cmd(cmd: &str) -> bool {
         return true;
     }
     false
+}
+
+fn cmd_policy(args: &[String]) -> i32 {
+    if args.first().map(String::as_str) == Some("check") {
+        if args.len() < 2 {
+            eprintln!("Usage: {APP_NAME} policy check <command...>");
+            return 2;
+        }
+        let candidate = args[1..].join(" ");
+        if is_dangerous_cmd(&candidate) {
+            println!("dangerous");
+            return 0;
+        }
+        println!("safe");
+        return 0;
+    }
+
+    println!("== cxrs policy ==");
+    println!("Dangerous command patterns blocked by default in fix-run:");
+    println!("- sudo (any)");
+    println!("- rm -rf / rm -fr forms");
+    println!("- curl | bash/sh/zsh");
+    println!("- chmod/chown on /System, /Library, /usr (except /usr/local)");
+    println!("- shell redirection/tee writes to /System, /Library, /usr (except /usr/local)");
+    println!();
+    println!("Overrides:");
+    println!("- CXFIX_RUN=1       execute suggested commands");
+    println!("- CXFIX_FORCE=1     allow dangerous commands");
+    println!();
+    println!("Examples:");
+    println!("- {APP_NAME} policy check \"sudo rm -rf /tmp/foo\"");
+    println!("- {APP_NAME} policy check \"chmod 755 /usr/local/bin/tool\"");
+    0
 }
 
 fn cmd_next(command: &[String]) -> i32 {
@@ -1284,8 +1618,10 @@ fn generate_commitjson_value() -> Result<Value, String> {
         return Err("no staged changes. run: git add -p".to_string());
     }
 
-    let conventional = read_state()
-        .and_then(|s| s.preferences.conventional_commits)
+    let conventional = read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "preferences.conventional_commits"))
+        .and_then(Value::as_bool)
         .unwrap_or(true);
     let style_hint = if conventional {
         "Use concise conventional-commit style subject."
@@ -1399,9 +1735,12 @@ fn generate_diffsum_value(tool: &str, staged: bool) -> Result<Value, String> {
         return Err("no unstaged changes.".to_string());
     }
 
-    let pr_fmt = read_state()
-        .and_then(|s| s.preferences.pr_summary_format)
-        .unwrap_or_else(|| "standard".to_string());
+    let pr_fmt = read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "preferences.pr_summary_format"))
+        .and_then(Value::as_str)
+        .unwrap_or("standard")
+        .to_string();
     let schema = r#"{
   "title": "short title",
   "summary": ["bullet", "bullet"],
@@ -1666,6 +2005,54 @@ fn main() {
             0
         }
         "doctor" => print_doctor(),
+        "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
+            "show" => cmd_state_show(),
+            "get" => {
+                let Some(key) = args.get(3) else {
+                    eprintln!("Usage: {APP_NAME} state get <key>");
+                    std::process::exit(2);
+                };
+                cmd_state_get(key)
+            }
+            "set" => {
+                let Some(key) = args.get(3) else {
+                    eprintln!("Usage: {APP_NAME} state set <key> <value>");
+                    std::process::exit(2);
+                };
+                let Some(value) = args.get(4) else {
+                    eprintln!("Usage: {APP_NAME} state set <key> <value>");
+                    std::process::exit(2);
+                };
+                cmd_state_set(key, value)
+            }
+            other => {
+                eprintln!("{APP_NAME}: unknown state subcommand '{other}'");
+                eprintln!("Usage: {APP_NAME} state <show|get <key>|set <key> <value>>");
+                2
+            }
+        },
+        "policy" => cmd_policy(&args[2..]),
+        "bench" => {
+            if args.len() < 5 {
+                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
+                std::process::exit(2);
+            }
+            let runs = args
+                .get(2)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(0);
+            let delim = args.iter().position(|v| v == "--");
+            let Some(i) = delim else {
+                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
+                std::process::exit(2);
+            };
+            if i + 1 >= args.len() {
+                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
+                std::process::exit(2);
+            }
+            cmd_bench(runs, &args[i + 1..])
+        }
         "profile" => {
             let n = args
                 .get(2)

@@ -6,6 +6,9 @@ Current scope:
 - standalone binary scaffold
 - stable CLI surface for experimentation
 - non-interactive `doctor` checks
+- typed `state` command (`show/get/set`) with atomic JSON writes
+- `policy` command for dangerous-command classification rules
+- `bench` command for repeated runtime/token summaries
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
 - `alert` anomaly report command with threshold-based summaries
@@ -35,6 +38,12 @@ cargo build
 cargo run -- help
 cargo run -- version
 cargo run -- doctor
+cargo run -- state show
+cargo run -- state set preferences.conventional_commits true
+cargo run -- state get preferences.conventional_commits
+cargo run -- policy
+cargo run -- policy check "sudo rm -rf /tmp/foo"
+cargo run -- bench 3 -- ls -la
 cargo run -- profile
 cargo run -- profile 100
 cargo run -- alert
@@ -58,6 +67,6 @@ cargo run -- replay <id>
 
 ## Next steps
 
-- add typed config/log models matching `runs.jsonl` and state/quarantine files
-- port schema validation and replay primitives
-- add compatibility command layer that mirrors high-value `cx` workflows
+- add `metrics` parity command and align output with Bash `cxmetrics`
+- improve `bench` log correlation with prompt hashes for tighter token attribution
+- add a compatibility wrapper (`cxrs cx...`) to ease side-by-side Bash/Rust validation
