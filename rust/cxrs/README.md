@@ -42,6 +42,24 @@ cd rust/cxrs
 cargo build
 ```
 
+## Machine requirements
+
+Operating system:
+- macOS (primary tested target for this spike)
+- Linux (expected to work with equivalent CLI dependencies)
+- Windows: use WSL for now
+
+Required binaries:
+- `codex`
+- `git`
+- `jq`
+- Rust toolchain (`cargo`, `rustc`)
+- optional: `rtk`
+
+Platform notes:
+- `cxcopy` currently uses macOS `pbcopy`.
+- Shell examples assume POSIX `bash`.
+
 ## Install
 
 ```bash
@@ -75,6 +93,20 @@ GitHub Actions:
 - Workflow: `cxrs-compat` (`/path/to/cxcodex/.github/workflows/cxrs-compat.yml`)
 - Triggered on pushes/PRs to `codex/rust-spike` when Rust/Bash-compat paths change.
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
+
+## Codex access and session modes
+
+Current implementation:
+- The Rust branch assumes `codex` CLI is already authenticated and usable.
+- This reflects development/testing on a machine with an active personal account/subscription.
+- No explicit "session mode" handshake exists yet before command execution.
+
+Planned implementation:
+- Add a preflight session stage with explicit mode selection:
+  - `subscription` (authenticated account tier)
+  - `visitor` (non-login path when backend support exists)
+- Emit session metadata to logs so command behavior can be tied to access mode.
+- Enforce mode-aware limits/fallbacks before running Codex piping commands.
 
 ## Run
 
@@ -135,3 +167,4 @@ cargo run -- replay <id>
 - add richer prompt templates by mode with optional schema snippets
 - add explicit chunking helpers and expose chunk-aware fanout workflows
 - align remaining edge-case behavior for `cxhealth`/`cxdoctor` and command-output formatting parity
+- add explicit session-mode preflight (`subscription` vs `visitor`) with log metadata

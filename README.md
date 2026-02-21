@@ -120,13 +120,37 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `CX_CONTEXT_CLIP_MODE=smart|head|tail`
 - `CX_CONTEXT_CLIP_FOOTER=0|1`
 
-## Requirements
+## Machine requirements
 
+Operating system:
+- macOS (primary tested target)
+- Linux (expected to work; validate shell/bootstrap paths in your distro)
+- Windows: use WSL for now (native PowerShell/CMD support is not a target yet)
+
+Runtime dependencies:
 - `bash`
 - `codex`
 - `jq`
 - `git`
 - optional: `rtk` (system-output compression route)
+
+Notes:
+- Clipboard helper `cxcopy` uses `pbcopy` on macOS.
+- Paths/examples in this repo assume POSIX shells and filesystem semantics.
+
+## Codex access modes
+
+Current behavior:
+- The toolchain assumes `codex` CLI is already installed and authenticated.
+- In practice, this usually means a user is logged in with their own account/subscription tier.
+- If `codex` is unavailable or unauthenticated, commands fail fast via `cxdoctor`/runtime checks.
+
+Planned behavior (future):
+- Add an explicit session-start stage with access mode selection:
+  - `subscription` (authenticated user session)
+  - `visitor` (non-login/guest path when supported by platform APIs)
+- Persist selected mode in structured session logs for auditability and troubleshooting.
+- Route prompts/limits/policies based on selected access mode.
 
 ## Rust spike
 
