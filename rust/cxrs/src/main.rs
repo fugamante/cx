@@ -81,6 +81,7 @@ fn print_help() {
     println!("  roles [role]       List roles or print role-specific prompt header");
     println!("  fanout <objective> Generate role-tagged parallelizable subtasks");
     println!("  promptlint [N]     Lint prompt/cost patterns from last N runs");
+    println!("  cx <cmd...>        Compatibility shim for bash-style cx command names");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  alert [N]          Report anomalies from last N runs (default 50)");
     println!("  optimize [N]       Recommend cost/latency improvements from last N runs");
@@ -706,17 +707,23 @@ fn print_metrics(n: usize) -> i32 {
         return 1;
     };
     if !log_file.exists() {
-        println!("== cxrs metrics (last {n} runs) ==");
-        println!("Runs: 0");
-        println!("Total duration_ms: 0");
-        println!("Avg duration_ms: 0");
-        println!("Total input_tokens: 0");
-        println!("Total cached_input_tokens: 0");
-        println!("Total effective_input_tokens: 0");
-        println!("Total output_tokens: 0");
-        println!("Cache hit rate: n/a");
-        println!("Output/effective ratio: n/a");
-        println!("log_file: {}", log_file.display());
+        let out = json!({
+            "log_file": log_file.display().to_string(),
+            "runs": 0,
+            "avg_duration_ms": 0.0,
+            "avg_input_tokens": 0.0,
+            "avg_cached_input_tokens": 0.0,
+            "avg_effective_input_tokens": 0.0,
+            "avg_output_tokens": 0.0,
+            "by_tool": []
+        });
+        match serde_json::to_string_pretty(&out) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("cxrs metrics: failed to render JSON: {e}");
+                return 1;
+            }
+        }
         return 0;
     }
     let runs = match load_runs(&log_file, n) {
@@ -727,45 +734,79 @@ fn print_metrics(n: usize) -> i32 {
         }
     };
 
-    let total = runs.len() as u64;
-    let sum_dur: u64 = runs.iter().map(|r| r.duration_ms.unwrap_or(0)).sum();
-    let sum_in: u64 = runs.iter().map(|r| r.input_tokens.unwrap_or(0)).sum();
-    let sum_cached: u64 = runs
+    let total = runs.len() as f64;
+    let sum_dur: f64 = runs.iter().map(|r| r.duration_ms.unwrap_or(0) as f64).sum();
+    let sum_in: f64 = runs
         .iter()
-        .map(|r| r.cached_input_tokens.unwrap_or(0))
+        .map(|r| r.input_tokens.unwrap_or(0) as f64)
         .sum();
-    let sum_eff: u64 = runs
+    let sum_cached: f64 = runs
         .iter()
-        .map(|r| r.effective_input_tokens.unwrap_or(0))
+        .map(|r| r.cached_input_tokens.unwrap_or(0) as f64)
         .sum();
-    let sum_out: u64 = runs.iter().map(|r| r.output_tokens.unwrap_or(0)).sum();
-    let avg_dur = if total == 0 { 0 } else { sum_dur / total };
+    let sum_eff: f64 = runs
+        .iter()
+        .map(|r| r.effective_input_tokens.unwrap_or(0) as f64)
+        .sum();
+    let sum_out: f64 = runs
+        .iter()
+        .map(|r| r.output_tokens.unwrap_or(0) as f64)
+        .sum();
 
-    println!("== cxrs metrics (last {n} runs) ==");
-    println!("Runs: {total}");
-    println!("Total duration_ms: {sum_dur}");
-    println!("Avg duration_ms: {avg_dur}");
-    println!("Total input_tokens: {sum_in}");
-    println!("Total cached_input_tokens: {sum_cached}");
-    println!("Total effective_input_tokens: {sum_eff}");
-    println!("Total output_tokens: {sum_out}");
-    if sum_in > 0 {
-        println!(
-            "Cache hit rate: {}%",
-            ((sum_cached as f64 / sum_in as f64) * 100.0).round() as i64
-        );
-    } else {
-        println!("Cache hit rate: n/a");
+    let mut grouped: HashMap<String, Vec<&RunEntry>> = HashMap::new();
+    for r in &runs {
+        let key = r.tool.clone().unwrap_or_else(|| "unknown".to_string());
+        grouped.entry(key).or_default().push(r);
     }
-    if sum_eff > 0 {
-        println!(
-            "Output/effective ratio: {:.2}",
-            sum_out as f64 / sum_eff as f64
-        );
-    } else {
-        println!("Output/effective ratio: n/a");
+    let mut by_tool: Vec<Value> = grouped
+        .into_iter()
+        .map(|(tool, entries)| {
+            let c = entries.len() as f64;
+            let d: f64 = entries
+                .iter()
+                .map(|r| r.duration_ms.unwrap_or(0) as f64)
+                .sum();
+            let e: f64 = entries
+                .iter()
+                .map(|r| r.effective_input_tokens.unwrap_or(0) as f64)
+                .sum();
+            let o: f64 = entries
+                .iter()
+                .map(|r| r.output_tokens.unwrap_or(0) as f64)
+                .sum();
+            json!({
+                "tool": tool,
+                "runs": entries.len(),
+                "avg_duration_ms": if c == 0.0 { 0.0 } else { d / c },
+                "avg_effective_input_tokens": if c == 0.0 { 0.0 } else { e / c },
+                "avg_output_tokens": if c == 0.0 { 0.0 } else { o / c }
+            })
+        })
+        .collect();
+    by_tool.sort_by(|a, b| {
+        b.get("runs")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .cmp(&a.get("runs").and_then(Value::as_u64).unwrap_or(0))
+    });
+
+    let out = json!({
+      "log_file": log_file.display().to_string(),
+      "runs": runs.len(),
+      "avg_duration_ms": if total == 0.0 { 0.0 } else { sum_dur / total },
+      "avg_input_tokens": if total == 0.0 { 0.0 } else { sum_in / total },
+      "avg_cached_input_tokens": if total == 0.0 { 0.0 } else { sum_cached / total },
+      "avg_effective_input_tokens": if total == 0.0 { 0.0 } else { sum_eff / total },
+      "avg_output_tokens": if total == 0.0 { 0.0 } else { sum_out / total },
+      "by_tool": by_tool
+    });
+    match serde_json::to_string_pretty(&out) {
+        Ok(s) => println!("{s}"),
+        Err(e) => {
+            eprintln!("cxrs metrics: failed to render JSON: {e}");
+            return 1;
+        }
     }
-    println!("log_file: {}", log_file.display());
     0
 }
 
@@ -2351,6 +2392,187 @@ fn cmd_quarantine_show(id: &str) -> i32 {
     }
 }
 
+fn cmd_cx_compat(args: &[String]) -> i32 {
+    if args.is_empty() {
+        eprintln!("Usage: {APP_NAME} cx <command> [args...]");
+        return 2;
+    }
+    let sub = args[0].as_str();
+    match sub {
+        "cxmetrics" | "metrics" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(50);
+            print_metrics(n)
+        }
+        "cxprofile" | "profile" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(50);
+            print_profile(n)
+        }
+        "cxtrace" | "trace" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(1);
+            print_trace(n)
+        }
+        "cxalert" | "alert" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(50);
+            print_alert(n)
+        }
+        "cxoptimize" | "optimize" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(200);
+            print_optimize(n)
+        }
+        "cxworklog" | "worklog" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(50);
+            print_worklog(n)
+        }
+        "cxpolicy" | "policy" => cmd_policy(&args[1..]),
+        "cxstate" | "state" => match args.get(1).map(String::as_str).unwrap_or("show") {
+            "show" => cmd_state_show(),
+            "get" => {
+                let Some(key) = args.get(2) else {
+                    eprintln!("Usage: {APP_NAME} cx state get <key>");
+                    return 2;
+                };
+                cmd_state_get(key)
+            }
+            "set" => {
+                let Some(key) = args.get(2) else {
+                    eprintln!("Usage: {APP_NAME} cx state set <key> <value>");
+                    return 2;
+                };
+                let Some(value) = args.get(3) else {
+                    eprintln!("Usage: {APP_NAME} cx state set <key> <value>");
+                    return 2;
+                };
+                cmd_state_set(key, value)
+            }
+            other => {
+                eprintln!("{APP_NAME} cx state: unknown subcommand '{other}'");
+                2
+            }
+        },
+        "cxbench" | "bench" => {
+            let Some(runs) = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+            else {
+                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
+                return 2;
+            };
+            let delim = args.iter().position(|v| v == "--");
+            let Some(i) = delim else {
+                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
+                return 2;
+            };
+            if i + 1 >= args.len() {
+                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
+                return 2;
+            }
+            cmd_bench(runs, &args[i + 1..])
+        }
+        "cxprompt" | "prompt" => {
+            let Some(mode) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} cx prompt <mode> <request>");
+                return 2;
+            };
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cx prompt <mode> <request>");
+                return 2;
+            }
+            cmd_prompt(mode, &args[2..].join(" "))
+        }
+        "cxroles" | "roles" => cmd_roles(args.get(1).map(String::as_str)),
+        "cxfanout" | "fanout" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cx fanout <objective>");
+                return 2;
+            }
+            cmd_fanout(&args[1..].join(" "))
+        }
+        "cxpromptlint" | "promptlint" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(200);
+            cmd_promptlint(n)
+        }
+        "cxnext" | "next" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cx next <command> [args...]");
+                return 2;
+            }
+            cmd_next(&args[1..])
+        }
+        "cxdiffsum" | "diffsum" => cmd_diffsum(false),
+        "cxdiffsum_staged" | "diffsum-staged" => cmd_diffsum(true),
+        "cxcommitjson" | "commitjson" => cmd_commitjson(),
+        "cxcommitmsg" | "commitmsg" => cmd_commitmsg(),
+        "cxfix_run" | "fix-run" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cx fix-run <command> [args...]");
+                return 2;
+            }
+            cmd_fix_run(&args[1..])
+        }
+        "cxreplay" | "replay" => {
+            let Some(id) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} cx replay <quarantine_id>");
+                return 2;
+            };
+            cmd_replay(id)
+        }
+        "cxquarantine" | "quarantine" => match args.get(1).map(String::as_str).unwrap_or("list") {
+            "list" => {
+                let n = args
+                    .get(2)
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(20);
+                cmd_quarantine_list(n)
+            }
+            "show" => {
+                let Some(id) = args.get(2) else {
+                    eprintln!("Usage: {APP_NAME} cx quarantine show <quarantine_id>");
+                    return 2;
+                };
+                cmd_quarantine_show(id)
+            }
+            other => {
+                eprintln!("{APP_NAME} cx quarantine: unknown subcommand '{other}'");
+                2
+            }
+        },
+        other => {
+            eprintln!("{APP_NAME} cx: unsupported command '{other}'");
+            2
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("help");
@@ -2448,6 +2670,7 @@ fn main() {
                 .unwrap_or(200);
             cmd_promptlint(n)
         }
+        "cx" => cmd_cx_compat(&args[2..]),
         "profile" => {
             let n = args
                 .get(2)

@@ -11,6 +11,7 @@ Current scope:
 - `bench` command for repeated runtime/token summaries
 - `metrics` parity command for token/time aggregates
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
+- `cx` compatibility shim for bash-style command names
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
 - `alert` anomaly report command with threshold-based summaries
@@ -61,11 +62,15 @@ cargo run -- policy
 cargo run -- policy check "sudo rm -rf /tmp/foo"
 cargo run -- bench 3 -- ls -la
 cargo run -- metrics 50
+cargo run -- metrics 50 | jq .
 cargo run -- prompt implement "add cache diagnostics"
 cargo run -- roles
 cargo run -- roles reviewer
 cargo run -- fanout "port prompt tooling to Rust"
 cargo run -- promptlint 200
+cargo run -- cx cxmetrics 50 | jq .
+cargo run -- cx cxdiffsum_staged
+cargo run -- cx cxcommitmsg
 cargo run -- profile
 cargo run -- profile 100
 cargo run -- alert
