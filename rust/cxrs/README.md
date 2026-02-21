@@ -14,6 +14,7 @@ Current scope:
 - strict `next` command for command-output-driven next steps
 - strict `commitjson` and `commitmsg` from staged diff
 - strict `diffsum` and `diffsum-staged` PR-summary generators
+- strict `fix-run` remediation suggestions with dangerous-command blocking
 
 This crate is intentionally isolated from the production Bash toolchain and can
 evolve independently on the `codex/rust-spike` branch.
@@ -38,6 +39,7 @@ cargo run -- trace 5
 cargo run -- next git -C ~/cxcodex status --short
 cargo run -- diffsum
 cargo run -- diffsum-staged
+cargo run -- fix-run ls /does-not-exist
 cargo run -- commitjson
 cargo run -- commitmsg
 cargo run -- quarantine list

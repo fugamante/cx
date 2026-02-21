@@ -90,6 +90,7 @@ fn print_help() {
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
     println!("  diffsum            Summarize unstaged diff (strict schema)");
     println!("  diffsum-staged     Summarize staged diff (strict schema)");
+    println!("  fix-run <cmd...>   Suggest remediation commands for a failed command");
     println!("  commitjson         Generate strict JSON commit object from staged diff");
     println!("  commitmsg          Generate commit message text from staged diff");
     println!("  replay <id>        Replay quarantined schema run in strict mode");
@@ -714,6 +715,49 @@ fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+fn is_dangerous_cmd(cmd: &str) -> bool {
+    let compact = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = compact.to_lowercase();
+
+    if lower.contains(" sudo ") || lower.starts_with("sudo ") || lower.ends_with(" sudo") {
+        return true;
+    }
+    if lower.contains("rm -rf")
+        || lower.contains("rm -fr")
+        || lower.contains("rm -r -f")
+        || lower.contains("rm -f -r")
+    {
+        return true;
+    }
+    if lower.contains("curl ")
+        && lower.contains('|')
+        && (lower.contains("| bash") || lower.contains("| sh") || lower.contains("| zsh"))
+    {
+        return true;
+    }
+    if (lower.contains("chmod ") || lower.contains("chown "))
+        && (lower.contains("/system") || lower.contains("/library") || lower.contains("/usr"))
+        && !lower.contains("/usr/local")
+    {
+        return true;
+    }
+    if (lower.contains("> /system")
+        || lower.contains(">> /system")
+        || lower.contains("> /library")
+        || lower.contains(">> /library")
+        || lower.contains("> /usr")
+        || lower.contains(">> /usr")
+        || (lower.contains("tee ")
+            && (lower.contains(" /system")
+                || lower.contains(" /library")
+                || lower.contains(" /usr"))))
+        && !lower.contains("/usr/local")
+    {
+        return true;
+    }
+    false
+}
+
 fn cmd_next(command: &[String]) -> i32 {
     let (captured, exit_status) = match run_system_command_capture(command) {
         Ok(v) => v,
@@ -770,6 +814,93 @@ fn cmd_next(command: &[String]) -> i32 {
         println!("{cmd}");
     }
     0
+}
+
+fn cmd_fix_run(command: &[String]) -> i32 {
+    let (captured, exit_status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix-run: {e}");
+            return 1;
+        }
+    };
+
+    let schema = r#"{
+  "analysis": "short explanation",
+  "commands": ["cmd1", "cmd2"]
+}"#;
+    let task_input = format!(
+        "You are my terminal debugging assistant.\nGiven the command, exit status, and output, provide concise remediation.\n\nCommand:\n{}\n\nExit status: {}\n\nOutput:\n{}",
+        command.join(" "),
+        exit_status,
+        captured
+    );
+    let raw = match run_strict_schema("cxrs_fix_run", schema, &task_input) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix-run: {e}");
+            return 1;
+        }
+    };
+    let v: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix-run: invalid JSON: {e}");
+            return 1;
+        }
+    };
+    let analysis = v
+        .get("analysis")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let commands = match parse_commands_array(&raw) {
+        Ok(v) => v,
+        Err(reason) => {
+            let qid = log_schema_failure("cxrs_fix_run", &reason, &raw, schema, &task_input)
+                .unwrap_or_else(|_| "".to_string());
+            eprintln!("cxrs fix-run: schema failure; quarantine_id={qid}");
+            eprintln!("cxrs fix-run: raw response follows:");
+            eprintln!("{raw}");
+            return 1;
+        }
+    };
+
+    if !analysis.is_empty() {
+        println!("Analysis:");
+        println!("{analysis}");
+        println!();
+    }
+    println!("Suggested commands:");
+    println!("-------------------");
+    for c in &commands {
+        println!("{c}");
+    }
+    println!("-------------------");
+
+    let should_run = env::var("CXFIX_RUN").ok().as_deref() == Some("1");
+    let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
+    if !should_run {
+        println!("Not running suggested commands (set CXFIX_RUN=1 to execute).");
+        return if exit_status == 0 { 0 } else { exit_status };
+    }
+
+    for c in commands {
+        if is_dangerous_cmd(&c) && !force {
+            eprintln!("WARN blocked dangerous command (set CXFIX_FORCE=1 to override): {c}");
+            continue;
+        }
+        if is_dangerous_cmd(&c) && force {
+            eprintln!("WARN force-running dangerous command due to CXFIX_FORCE=1: {c}");
+        }
+        println!("-> {c}");
+        let status = Command::new("bash").args(["-lc", &c]).status();
+        if let Err(e) = status {
+            eprintln!("cxrs fix-run: failed to execute command: {e}");
+        }
+    }
+
+    if exit_status == 0 { 0 } else { exit_status }
 }
 
 fn generate_commitjson_value() -> Result<Value, String> {
@@ -1190,6 +1321,13 @@ fn main() {
         }
         "diffsum" => cmd_diffsum(false),
         "diffsum-staged" => cmd_diffsum(true),
+        "fix-run" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} fix-run <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_fix_run(&args[2..])
+        }
         "commitjson" => cmd_commitjson(),
         "commitmsg" => cmd_commitmsg(),
         "replay" => {
