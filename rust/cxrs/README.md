@@ -12,7 +12,9 @@ Current scope:
 - `bench` log correlation using appended-run windows + prompt-hash preference
 - `metrics` parity command for token/time aggregates
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
-- `cx` compatibility shim for bash-style command names
+- execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
+- operational helpers: `budget`, `log-tail`, `health`
+- `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
 - `alert` anomaly report command with threshold-based summaries
@@ -81,6 +83,13 @@ cargo run -- state get preferences.conventional_commits
 cargo run -- policy
 cargo run -- policy check "sudo rm -rf /tmp/foo"
 cargo run -- bench 3 -- ls -la
+cargo run -- cx git status
+cargo run -- cxj git status | sed -n '1,5p'
+cargo run -- cxo git status
+cargo run -- fix ls /does-not-exist
+cargo run -- budget
+cargo run -- log-tail 3
+cargo run -- health
 cargo run -- metrics 50
 cargo run -- metrics 50 | jq .
 cargo run -- prompt implement "add cache diagnostics"
@@ -88,9 +97,10 @@ cargo run -- roles
 cargo run -- roles reviewer
 cargo run -- fanout "port prompt tooling to Rust"
 cargo run -- promptlint 200
-cargo run -- cx cxmetrics 50 | jq .
-cargo run -- cx cxdiffsum_staged
-cargo run -- cx cxcommitmsg
+cargo run -- cx-compat cxmetrics 50 | jq .
+cargo run -- cx-compat cxdiffsum_staged
+cargo run -- cx-compat cxcommitmsg
+cargo run -- cx cxmetrics 50 | jq .   # auto-routed compat
 ./scripts/compat_check.sh 50
 cargo run -- profile
 cargo run -- profile 100
@@ -116,4 +126,5 @@ cargo run -- replay <id>
 ## Next steps
 
 - add richer prompt templates by mode with optional schema snippets
-- add a compatibility wrapper (`cxrs cx...`) to ease side-by-side Bash/Rust validation
+- port RTK system-routing + clipping/chunking internals for full capture-path parity
+- align remaining edge-case behavior for `cxhealth`/`cxdoctor` output parity

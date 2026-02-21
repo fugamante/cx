@@ -40,6 +40,30 @@ struct RunEntry {
     prompt_sha256: Option<String>,
     #[serde(default)]
     prompt_preview: Option<String>,
+    #[serde(default)]
+    system_output_len_raw: Option<u64>,
+    #[serde(default)]
+    system_output_len_processed: Option<u64>,
+    #[serde(default)]
+    system_output_len_clipped: Option<u64>,
+    #[serde(default)]
+    system_output_lines_raw: Option<u64>,
+    #[serde(default)]
+    system_output_lines_processed: Option<u64>,
+    #[serde(default)]
+    system_output_lines_clipped: Option<u64>,
+    #[serde(default)]
+    clipped: Option<bool>,
+    #[serde(default)]
+    budget_chars: Option<u64>,
+    #[serde(default)]
+    budget_lines: Option<u64>,
+    #[serde(default)]
+    clip_mode: Option<String>,
+    #[serde(default)]
+    clip_footer: Option<bool>,
+    #[serde(default)]
+    rtk_used: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -76,12 +100,21 @@ fn print_help() {
     println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
     println!("  policy [check ...] Show safety rules or classify a command");
     println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
+    println!("  cx <cmd...>        Run command output through codex text mode");
+    println!("  cxj <cmd...>       Run command output through codex JSONL mode");
+    println!("  cxo <cmd...>       Run command output and print last agent message");
+    println!("  cxol <cmd...>      Run command output through codex plain mode");
+    println!("  cxcopy <cmd...>    Copy cxo output to clipboard (pbcopy)");
+    println!("  fix <cmd...>       Explain failures and suggest next steps (text)");
+    println!("  budget             Show context budget settings and last clip fields");
+    println!("  log-tail [N]       Pretty-print last N log entries");
+    println!("  health             Run end-to-end codex/cx smoke checks");
     println!("  metrics [N]        Token and duration aggregates from last N runs");
     println!("  prompt <mode> <request>  Generate Codex-ready prompt block");
     println!("  roles [role]       List roles or print role-specific prompt header");
     println!("  fanout <objective> Generate role-tagged parallelizable subtasks");
     println!("  promptlint [N]     Lint prompt/cost patterns from last N runs");
-    println!("  cx <cmd...>        Compatibility shim for bash-style cx command names");
+    println!("  cx-compat <cmd...> Compatibility shim for bash-style cx command names");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  alert [N]          Report anomalies from last N runs (default 50)");
     println!("  optimize [N]       Recommend cost/latency improvements from last N runs");
@@ -1314,6 +1347,30 @@ fn run_codex_jsonl(prompt: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+fn run_codex_plain(prompt: &str) -> Result<String, String> {
+    let mut child = Command::new("codex")
+        .args(["exec", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to start codex: {e}"))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("failed writing prompt to codex stdin: {e}"))?;
+    }
+
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("failed waiting for codex: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("codex exited with status {}", out.status));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
     format!(
         "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema-strict mode: deterministic JSON only; reject ambiguity.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
@@ -1939,6 +1996,271 @@ fn cmd_promptlint(n: usize) -> i32 {
     0
 }
 
+fn cmd_cx(command: &[String]) -> i32 {
+    let (captured, status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cx: {e}");
+            return 1;
+        }
+    };
+    let out = match run_codex_plain(&captured) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cx: {e}");
+            return if status == 0 { 1 } else { status };
+        }
+    };
+    print!("{out}");
+    if status == 0 { 0 } else { status }
+}
+
+fn cmd_cxj(command: &[String]) -> i32 {
+    let (captured, status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxj: {e}");
+            return 1;
+        }
+    };
+    let out = match run_codex_jsonl(&captured) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxj: {e}");
+            return if status == 0 { 1 } else { status };
+        }
+    };
+    print!("{out}");
+    if status == 0 { 0 } else { status }
+}
+
+fn cmd_cxo(command: &[String]) -> i32 {
+    let (captured, status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxo: {e}");
+            return 1;
+        }
+    };
+    let out = match run_codex_jsonl(&captured) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxo: {e}");
+            return if status == 0 { 1 } else { status };
+        }
+    };
+    let text = extract_agent_text(&out).unwrap_or_default();
+    println!("{text}");
+    if status == 0 { 0 } else { status }
+}
+
+fn cmd_cxol(command: &[String]) -> i32 {
+    cmd_cx(command)
+}
+
+fn cmd_cxcopy(command: &[String]) -> i32 {
+    let (captured, status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxcopy: {e}");
+            return 1;
+        }
+    };
+    let out = match run_codex_jsonl(&captured) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxcopy: {e}");
+            return if status == 0 { 1 } else { status };
+        }
+    };
+    let text = extract_agent_text(&out).unwrap_or_default();
+    if text.trim().is_empty() {
+        eprintln!("cxrs cxcopy: nothing to copy");
+        return 1;
+    }
+    let mut pb = match Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs cxcopy: pbcopy unavailable: {e}");
+            return 1;
+        }
+    };
+    if let Some(stdin) = pb.stdin.as_mut() {
+        let _ = stdin.write_all(text.as_bytes());
+    }
+    match pb.wait() {
+        Ok(s) if s.success() => {
+            println!("Copied to clipboard.");
+            if status == 0 { 0 } else { status }
+        }
+        Ok(s) => {
+            eprintln!("cxrs cxcopy: pbcopy failed with status {}", s);
+            1
+        }
+        Err(e) => {
+            eprintln!("cxrs cxcopy: pbcopy wait failed: {e}");
+            1
+        }
+    }
+}
+
+fn cmd_fix(command: &[String]) -> i32 {
+    let (captured, status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix: {e}");
+            return 1;
+        }
+    };
+    let prompt = format!(
+        "You are my terminal debugging assistant.\nTask:\n1) Explain what happened (brief).\n2) If the command failed, diagnose likely cause(s).\n3) Propose the next 3 commands to run to confirm/fix.\n4) If it is a configuration issue, point to exact file/line patterns to check.\n\nCommand:\n{}\n\nExit status: {}\n\nOutput:\n{}",
+        command.join(" "),
+        status,
+        captured
+    );
+    let jsonl = match run_codex_jsonl(&prompt) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix: {e}");
+            return status;
+        }
+    };
+    let text = extract_agent_text(&jsonl).unwrap_or_default();
+    println!("{text}");
+    status
+}
+
+fn cmd_budget() -> i32 {
+    let Some(log_file) = resolve_log_file() else {
+        eprintln!("cxrs: unable to resolve log file");
+        return 1;
+    };
+    println!("== cxbudget ==");
+    println!(
+        "CX_CONTEXT_BUDGET_CHARS={}",
+        env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string())
+    );
+    println!(
+        "CX_CONTEXT_BUDGET_LINES={}",
+        env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string())
+    );
+    println!(
+        "CX_CONTEXT_CLIP_MODE={}",
+        env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string())
+    );
+    println!(
+        "CX_CONTEXT_CLIP_FOOTER={}",
+        env::var("CX_CONTEXT_CLIP_FOOTER").unwrap_or_else(|_| "1".to_string())
+    );
+    println!("log_file: {}", log_file.display());
+
+    if !log_file.exists() {
+        return 0;
+    }
+    let runs = load_runs(&log_file, 1).unwrap_or_default();
+    if let Some(last) = runs.last() {
+        println!();
+        println!("Last run clip fields:");
+        show_field("system_output_len_raw", last.system_output_len_raw);
+        show_field(
+            "system_output_len_processed",
+            last.system_output_len_processed,
+        );
+        show_field("system_output_len_clipped", last.system_output_len_clipped);
+        show_field("system_output_lines_raw", last.system_output_lines_raw);
+        show_field(
+            "system_output_lines_processed",
+            last.system_output_lines_processed,
+        );
+        show_field(
+            "system_output_lines_clipped",
+            last.system_output_lines_clipped,
+        );
+        show_field("clipped", last.clipped);
+        show_field("budget_chars", last.budget_chars);
+        show_field("budget_lines", last.budget_lines);
+        show_field("clip_mode", last.clip_mode.clone());
+        show_field("clip_footer", last.clip_footer);
+        show_field("rtk_used", last.rtk_used);
+    }
+    0
+}
+
+fn cmd_log_tail(n: usize) -> i32 {
+    let Some(log_file) = resolve_log_file() else {
+        eprintln!("cxrs: unable to resolve log file");
+        return 1;
+    };
+    if !log_file.exists() {
+        eprintln!("cxrs log-tail: no log file at {}", log_file.display());
+        return 1;
+    }
+    let file = match File::open(&log_file) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs log-tail: cannot open {}: {e}", log_file.display());
+            return 1;
+        }
+    };
+    let reader = BufReader::new(file);
+    let mut lines: Vec<String> = Vec::new();
+    for line in reader.lines().map_while(Result::ok) {
+        if !line.trim().is_empty() {
+            lines.push(line);
+        }
+    }
+    let start = lines.len().saturating_sub(n);
+    for line in &lines[start..] {
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            match serde_json::to_string_pretty(&v) {
+                Ok(s) => println!("{s}"),
+                Err(_) => println!("{line}"),
+            }
+        } else {
+            println!("{line}");
+        }
+    }
+    0
+}
+
+fn cmd_health() -> i32 {
+    println!("== codex version ==");
+    match Command::new("codex").arg("--version").output() {
+        Ok(out) => print!("{}", String::from_utf8_lossy(&out.stdout)),
+        Err(e) => {
+            eprintln!("cxrs health: codex --version failed: {e}");
+            return 1;
+        }
+    }
+    println!();
+    println!("== codex json ==");
+    let jsonl = match run_codex_jsonl("ping") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs health: codex json failed: {e}");
+            return 1;
+        }
+    };
+    let lines: Vec<&str> = jsonl.lines().collect();
+    let keep = lines.len().saturating_sub(4);
+    for line in &lines[keep..] {
+        println!("{line}");
+    }
+    println!();
+    println!("== _codex_text ==");
+    let txt = extract_agent_text(&jsonl).unwrap_or_default();
+    println!("{txt}");
+    println!();
+    println!("== cxo test ==");
+    let code = cmd_cxo(&["git".to_string(), "status".to_string()]);
+    if code != 0 {
+        return code;
+    }
+    println!();
+    println!("All systems operational.");
+    0
+}
+
 fn cmd_next(command: &[String]) -> i32 {
     let (captured, exit_status) = match run_system_command_capture(command) {
         Ok(v) => v,
@@ -2524,6 +2846,41 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
                 .unwrap_or(50);
             print_worklog(n)
         }
+        "cx" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cx <command> [args...]");
+                return 2;
+            }
+            cmd_cx(&args[1..])
+        }
+        "cxj" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cxj <command> [args...]");
+                return 2;
+            }
+            cmd_cxj(&args[1..])
+        }
+        "cxo" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cxo <command> [args...]");
+                return 2;
+            }
+            cmd_cxo(&args[1..])
+        }
+        "cxol" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cxol <command> [args...]");
+                return 2;
+            }
+            cmd_cxol(&args[1..])
+        }
+        "cxcopy" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cxcopy <command> [args...]");
+                return 2;
+            }
+            cmd_cxcopy(&args[1..])
+        }
         "cxpolicy" | "policy" => cmd_policy(&args[1..]),
         "cxstate" | "state" => match args.get(1).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
@@ -2604,10 +2961,27 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             }
             cmd_next(&args[1..])
         }
+        "cxfix" | "fix" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} cx fix <command> [args...]");
+                return 2;
+            }
+            cmd_fix(&args[1..])
+        }
         "cxdiffsum" | "diffsum" => cmd_diffsum(false),
         "cxdiffsum_staged" | "diffsum-staged" => cmd_diffsum(true),
         "cxcommitjson" | "commitjson" => cmd_commitjson(),
         "cxcommitmsg" | "commitmsg" => cmd_commitmsg(),
+        "cxbudget" | "budget" => cmd_budget(),
+        "cxlog_tail" | "log-tail" => {
+            let n = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(10);
+            cmd_log_tail(n)
+        }
+        "cxhealth" | "health" => cmd_health(),
         "cxfix_run" | "fix-run" => {
             if args.len() < 2 {
                 eprintln!("Usage: {APP_NAME} cx fix-run <command> [args...]");
@@ -2648,6 +3022,67 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn is_compat_name(name: &str) -> bool {
+    matches!(
+        name,
+        "cxmetrics"
+            | "metrics"
+            | "cxprofile"
+            | "profile"
+            | "cxtrace"
+            | "trace"
+            | "cxalert"
+            | "alert"
+            | "cxoptimize"
+            | "optimize"
+            | "cxworklog"
+            | "worklog"
+            | "cx"
+            | "cxj"
+            | "cxo"
+            | "cxol"
+            | "cxcopy"
+            | "cxpolicy"
+            | "policy"
+            | "cxstate"
+            | "state"
+            | "cxbench"
+            | "bench"
+            | "cxprompt"
+            | "prompt"
+            | "cxroles"
+            | "roles"
+            | "cxfanout"
+            | "fanout"
+            | "cxpromptlint"
+            | "promptlint"
+            | "cxnext"
+            | "next"
+            | "cxfix"
+            | "fix"
+            | "cxdiffsum"
+            | "diffsum"
+            | "cxdiffsum_staged"
+            | "diffsum-staged"
+            | "cxcommitjson"
+            | "commitjson"
+            | "cxcommitmsg"
+            | "commitmsg"
+            | "cxbudget"
+            | "budget"
+            | "cxlog_tail"
+            | "log-tail"
+            | "cxhealth"
+            | "health"
+            | "cxfix_run"
+            | "fix-run"
+            | "cxreplay"
+            | "replay"
+            | "cxquarantine"
+            | "quarantine"
+    )
 }
 
 fn main() {
@@ -2747,7 +3182,63 @@ fn main() {
                 .unwrap_or(200);
             cmd_promptlint(n)
         }
-        "cx" => cmd_cx_compat(&args[2..]),
+        "cx" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cx <command> [args...]");
+                std::process::exit(2);
+            }
+            if is_compat_name(&args[2]) {
+                cmd_cx_compat(&args[2..])
+            } else {
+                cmd_cx(&args[2..])
+            }
+        }
+        "cxj" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cxj <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_cxj(&args[2..])
+        }
+        "cxo" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cxo <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_cxo(&args[2..])
+        }
+        "cxol" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cxol <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_cxol(&args[2..])
+        }
+        "cxcopy" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} cxcopy <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_cxcopy(&args[2..])
+        }
+        "fix" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} fix <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_fix(&args[2..])
+        }
+        "budget" => cmd_budget(),
+        "log-tail" => {
+            let n = args
+                .get(2)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(10);
+            cmd_log_tail(n)
+        }
+        "health" => cmd_health(),
+        "cx-compat" => cmd_cx_compat(&args[2..]),
         "profile" => {
             let n = args
                 .get(2)
