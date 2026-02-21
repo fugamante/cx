@@ -2,17 +2,25 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASHRC="${HOME}/.bashrc"
+if [[ -n "${CX_SHELL_RC:-}" ]]; then
+  SHELL_RC="${CX_SHELL_RC}"
+elif [[ -f "${HOME}/.bash_profile" ]]; then
+  SHELL_RC="${HOME}/.bash_profile"
+elif [[ -f "${HOME}/.profile" ]]; then
+  SHELL_RC="${HOME}/.profile"
+else
+  SHELL_RC="${HOME}/.bash_profile"
+fi
 LINE="source \"${REPO_ROOT}/cx.sh\""
 
-if [[ ! -f "$BASHRC" ]]; then
-  echo "No $BASHRC found"
+if [[ ! -f "$SHELL_RC" ]]; then
+  echo "No $SHELL_RC found"
   exit 0
 fi
 
 tmp="$(mktemp)"
-grep -Fv "$LINE" "$BASHRC" > "$tmp" || true
-mv "$tmp" "$BASHRC"
+grep -Fv "$LINE" "$SHELL_RC" > "$tmp" || true
+mv "$tmp" "$SHELL_RC"
 
-echo "Removed cx source line from $BASHRC (if present)."
-echo "Run: source \"$BASHRC\""
+echo "Removed cx source line from $SHELL_RC (if present)."
+echo "Run: source \"$SHELL_RC\""

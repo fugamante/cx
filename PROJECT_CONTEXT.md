@@ -13,7 +13,7 @@
 RTK -> Codex CLI (JSONL) -> jq -> Bash functions
 
 ## Key Files
-- `~/.bashrc` (legacy source)
+- shell startup profile (legacy source)
 - `.codex/cxlogs/runs.jsonl` (repo logs)
 
 ## Core Commands

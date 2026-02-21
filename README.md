@@ -7,7 +7,7 @@
 - bounded context capture (RTK + clipping/chunking)
 - safer command execution and replay on failures
 
-The repo is the canonical source of truth, while `~/.bashrc` is a thin bootstrap loader.
+The repo is the canonical source of truth, while your shell startup file acts as a thin bootstrap loader.
 
 ## Core design
 
@@ -25,8 +25,8 @@ The repo is the canonical source of truth, while `~/.bashrc` is a thin bootstrap
 - `lib/cx/core.sh`: logging, modes, state, schema failure/quarantine, diagnostics
 - `lib/cx/commands.sh`: user commands and structured workflows
 - `bin/cx`: thin executable wrapper (`bin/cx <function> [args...]`)
-- `bin/cx-install`: append repo source line to `~/.bashrc`
-- `bin/cx-uninstall`: remove repo source line from `~/.bashrc`
+- `bin/cx-install`: append repo source line to your shell startup file
+- `bin/cx-uninstall`: remove repo source line from your shell startup file
 - `test/smoke.sh`: function availability smoke test
 - `PROJECT_CONTEXT.md`: architecture baseline
 
@@ -35,7 +35,7 @@ The repo is the canonical source of truth, while `~/.bashrc` is a thin bootstrap
 ```bash
 cd ~/cxcodex
 ./bin/cx-install
-source ~/.bashrc
+source "${CX_SHELL_RC:-$HOME/.bash_profile}"
 cxversion
 ```
 
