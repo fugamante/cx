@@ -96,6 +96,7 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!("  version            Print tool version");
+    println!("  where              Show binary/source/log resolution details");
     println!("  doctor             Run non-interactive environment checks");
     println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
     println!("  policy [check ...] Show safety rules or classify a command");
@@ -602,6 +603,25 @@ fn print_doctor() -> i32 {
         println!("FAIL: install required binaries before using cxrs.");
         1
     }
+}
+
+fn print_where() -> i32 {
+    let exe = env::current_exe()
+        .ok()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+    let source = env::var("CX_SOURCE_LOCATION").unwrap_or_else(|_| "standalone:cxrs".to_string());
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let state_file = resolve_state_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    println!("binary: {exe}");
+    println!("source: {source}");
+    println!("log_file: {log_file}");
+    println!("state_file: {state_file}");
+    0
 }
 
 fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String> {
@@ -2798,6 +2818,12 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
     }
     let sub = args[0].as_str();
     match sub {
+        "cxversion" | "version" => {
+            print_version();
+            0
+        }
+        "cxdoctor" | "doctor" => print_doctor(),
+        "cxwhere" | "where" => print_where(),
         "cxmetrics" | "metrics" => {
             let n = args
                 .get(1)
@@ -3027,7 +3053,13 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
 fn is_compat_name(name: &str) -> bool {
     matches!(
         name,
-        "cxmetrics"
+        "cxversion"
+            | "version"
+            | "cxdoctor"
+            | "doctor"
+            | "cxwhere"
+            | "where"
+            | "cxmetrics"
             | "metrics"
             | "cxprofile"
             | "profile"
@@ -3097,6 +3129,7 @@ fn main() {
             print_version();
             0
         }
+        "where" => print_where(),
         "doctor" => print_doctor(),
         "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
