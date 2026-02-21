@@ -12,6 +12,7 @@ Current scope:
 - schema failure quarantine storage + logging
 - strict `replay` command for quarantined schema runs
 - strict `next` command for command-output-driven next steps
+- strict `commitjson` and `commitmsg` from staged diff
 
 This crate is intentionally isolated from the production Bash toolchain and can
 evolve independently on the `codex/rust-spike` branch.
@@ -34,6 +35,8 @@ cargo run -- profile 100
 cargo run -- trace
 cargo run -- trace 5
 cargo run -- next git -C ~/cxcodex status --short
+cargo run -- commitjson
+cargo run -- commitmsg
 cargo run -- quarantine list
 cargo run -- quarantine show <id>
 cargo run -- replay <id>

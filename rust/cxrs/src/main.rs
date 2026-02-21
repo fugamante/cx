@@ -88,6 +88,8 @@ fn print_help() {
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
+    println!("  commitjson         Generate strict JSON commit object from staged diff");
+    println!("  commitmsg          Generate commit message text from staged diff");
     println!("  replay <id>        Replay quarantined schema run in strict mode");
     println!("  quarantine list [N]  Show recent quarantine entries (default 20)");
     println!("  quarantine show <id> Show quarantined entry payload");
@@ -656,6 +658,42 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
     Ok((combined, status))
 }
 
+fn run_git_capture(args: &[&str]) -> Result<(String, i32), String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to execute git {}: {e}", args.join(" ")))?;
+    let status = output.status.code().unwrap_or(1);
+    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !stderr.trim().is_empty() {
+        if !combined.is_empty() && !combined.ends_with('\n') {
+            combined.push('\n');
+        }
+        combined.push_str(&stderr);
+    }
+    Ok((combined, status))
+}
+
+fn run_strict_schema(tool: &str, schema: &str, task_input: &str) -> Result<String, String> {
+    let full_prompt = build_strict_schema_prompt(schema, task_input);
+    let jsonl = run_codex_jsonl(&full_prompt)?;
+    let raw = extract_agent_text(&jsonl).unwrap_or_default();
+    if raw.trim().is_empty() {
+        let qid = log_schema_failure(tool, "empty_agent_message", &raw, schema, task_input)
+            .unwrap_or_else(|_| "".to_string());
+        return Err(format!("empty response from codex; quarantine_id={qid}"));
+    }
+    if serde_json::from_str::<Value>(&raw).is_err() {
+        let qid = log_schema_failure(tool, "invalid_json", &raw, schema, task_input)
+            .unwrap_or_else(|_| "".to_string());
+        return Err(format!(
+            "invalid JSON response; quarantine_id={qid}; raw={raw}"
+        ));
+    }
+    Ok(raw)
+}
+
 fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
     let v: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
     let arr = v
@@ -728,6 +766,128 @@ fn cmd_next(command: &[String]) -> i32 {
     };
     for cmd in commands {
         println!("{cmd}");
+    }
+    0
+}
+
+fn generate_commitjson_value() -> Result<Value, String> {
+    let (diff_out, status) = run_git_capture(&["diff", "--staged", "--no-color"])?;
+    if status != 0 {
+        return Err(format!(
+            "git diff --staged failed with exit status {status}: {diff_out}"
+        ));
+    }
+    if diff_out.trim().is_empty() {
+        return Err("no staged changes. run: git add -p".to_string());
+    }
+
+    let conventional = read_state()
+        .and_then(|s| s.preferences.conventional_commits)
+        .unwrap_or(true);
+    let style_hint = if conventional {
+        "Use concise conventional-commit style subject."
+    } else {
+        "Use concise imperative subject (non-conventional format)."
+    };
+    let schema = r#"{
+  "subject": "string <= 72 chars",
+  "body": ["bullet string", "..."],
+  "breaking": false,
+  "scope": "optional string",
+  "tests": ["bullet string", "..."]
+}"#;
+    let task_input = format!(
+        "Generate a commit object from this STAGED diff.\n{style_hint}\n\nSTAGED DIFF:\n{diff_out}"
+    );
+    let raw = run_strict_schema("cxrs_commitjson", schema, &task_input)?;
+    let mut v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
+
+    let has_subject = v.get("subject").and_then(Value::as_str).is_some();
+    let has_body = v.get("body").and_then(Value::as_array).is_some();
+    let has_breaking = v.get("breaking").and_then(Value::as_bool).is_some();
+    let has_tests = v.get("tests").and_then(Value::as_array).is_some();
+    if !(has_subject && has_body && has_breaking && has_tests) {
+        let reason = "missing_or_invalid_required_keys:subject,body,breaking,tests";
+        let qid = log_schema_failure("cxrs_commitjson", reason, &raw, schema, &task_input)
+            .unwrap_or_else(|_| "".to_string());
+        return Err(format!(
+            "schema validation failed; quarantine_id={qid}; raw={raw}"
+        ));
+    }
+    if v.get("scope").is_none() {
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("scope".to_string(), Value::Null);
+        }
+    }
+    Ok(v)
+}
+
+fn cmd_commitjson() -> i32 {
+    match generate_commitjson_value() {
+        Ok(v) => match serde_json::to_string_pretty(&v) {
+            Ok(s) => {
+                println!("{s}");
+                0
+            }
+            Err(e) => {
+                eprintln!("cxrs commitjson: render failure: {e}");
+                1
+            }
+        },
+        Err(e) => {
+            eprintln!("cxrs commitjson: {e}");
+            1
+        }
+    }
+}
+
+fn cmd_commitmsg() -> i32 {
+    let v = match generate_commitjson_value() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs commitmsg: {e}");
+            return 1;
+        }
+    };
+    let subject = v
+        .get("subject")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let body_items: Vec<String> = v
+        .get("body")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let test_items: Vec<String> = v
+        .get("tests")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    println!("{subject}");
+    println!();
+    if !body_items.is_empty() {
+        for line in body_items {
+            println!("- {line}");
+        }
+    }
+    if !test_items.is_empty() {
+        println!();
+        println!("Tests:");
+        for line in test_items {
+            println!("- {line}");
+        }
     }
     0
 }
@@ -899,6 +1059,8 @@ fn main() {
             }
             cmd_next(&args[2..])
         }
+        "commitjson" => cmd_commitjson(),
+        "commitmsg" => cmd_commitmsg(),
         "replay" => {
             let Some(id) = args.get(2) else {
                 eprintln!("Usage: {APP_NAME} replay <quarantine_id>");
