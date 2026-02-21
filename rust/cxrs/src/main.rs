@@ -87,6 +87,7 @@ fn print_help() {
     println!("  doctor             Run non-interactive environment checks");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
+    println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
     println!("  replay <id>        Replay quarantined schema run in strict mode");
     println!("  quarantine list [N]  Show recent quarantine entries (default 20)");
     println!("  quarantine show <id> Show quarantined entry payload");
@@ -632,6 +633,105 @@ fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
     )
 }
 
+fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
+    if cmd.is_empty() {
+        return Err("missing command".to_string());
+    }
+    let mut command = Command::new(&cmd[0]);
+    if cmd.len() > 1 {
+        command.args(&cmd[1..]);
+    }
+    let output = command
+        .output()
+        .map_err(|e| format!("failed to execute '{}': {e}", cmd[0]))?;
+    let status = output.status.code().unwrap_or(1);
+    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !stderr.trim().is_empty() {
+        if !combined.is_empty() && !combined.ends_with('\n') {
+            combined.push('\n');
+        }
+        combined.push_str(&stderr);
+    }
+    Ok((combined, status))
+}
+
+fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
+    let v: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+    let arr = v
+        .get("commands")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "missing required key 'commands' array".to_string())?;
+    let mut out: Vec<String> = Vec::new();
+    for item in arr {
+        let Some(s) = item.as_str() else {
+            return Err("commands array must contain strings".to_string());
+        };
+        if !s.trim().is_empty() {
+            out.push(s.to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn cmd_next(command: &[String]) -> i32 {
+    let (captured, exit_status) = match run_system_command_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs next: {e}");
+            return 1;
+        }
+    };
+
+    let schema = r#"{
+  "commands": ["bash command 1", "bash command 2"]
+}"#;
+    let task_input = format!(
+        "Based on the terminal command output below, propose the NEXT shell commands to run.\nReturn 1-6 commands in execution order.\n\nExecuted command:\n{}\nExit status: {}\n\nTERMINAL OUTPUT:\n{}",
+        command.join(" "),
+        exit_status,
+        captured
+    );
+    let full_prompt = build_strict_schema_prompt(schema, &task_input);
+    let jsonl = match run_codex_jsonl(&full_prompt) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs next: {e}");
+            return 1;
+        }
+    };
+    let raw = extract_agent_text(&jsonl).unwrap_or_default();
+    if raw.trim().is_empty() {
+        match log_schema_failure(
+            "cxrs_next",
+            "empty_agent_message",
+            &raw,
+            schema,
+            &task_input,
+        ) {
+            Ok(qid) => eprintln!("cxrs next: empty response; quarantine_id={qid}"),
+            Err(e) => eprintln!("cxrs next: failed to log schema failure: {e}"),
+        }
+        return 1;
+    }
+    let commands = match parse_commands_array(&raw) {
+        Ok(v) => v,
+        Err(reason) => {
+            match log_schema_failure("cxrs_next", &reason, &raw, schema, &task_input) {
+                Ok(qid) => eprintln!("cxrs next: schema failure; quarantine_id={qid}"),
+                Err(e) => eprintln!("cxrs next: failed to log schema failure: {e}"),
+            }
+            eprintln!("cxrs next: raw response follows:");
+            eprintln!("{raw}");
+            return 1;
+        }
+    };
+    for cmd in commands {
+        println!("{cmd}");
+    }
+    0
+}
+
 fn cmd_replay(id: &str) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
@@ -791,6 +891,13 @@ fn main() {
                 .filter(|v| *v > 0)
                 .unwrap_or(1);
             print_trace(n)
+        }
+        "next" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {APP_NAME} next <command> [args...]");
+                std::process::exit(2);
+            }
+            cmd_next(&args[2..])
         }
         "replay" => {
             let Some(id) = args.get(2) else {
