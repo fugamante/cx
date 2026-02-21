@@ -9,6 +9,8 @@ Current scope:
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
 - `trace` command for run-level deep dive
+- schema failure quarantine storage + logging
+- strict `replay` command for quarantined schema runs
 
 This crate is intentionally isolated from the production Bash toolchain and can
 evolve independently on the `codex/rust-spike` branch.
@@ -30,6 +32,9 @@ cargo run -- profile
 cargo run -- profile 100
 cargo run -- trace
 cargo run -- trace 5
+cargo run -- quarantine list
+cargo run -- quarantine show <id>
+cargo run -- replay <id>
 ```
 
 ## Next steps

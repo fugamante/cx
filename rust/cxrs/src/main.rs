@@ -1,9 +1,12 @@
-use serde::Deserialize;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::env;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
@@ -51,6 +54,28 @@ struct Preferences {
     pr_summary_format: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+struct QuarantineRecord {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    ts: String,
+    #[serde(default)]
+    tool: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    schema: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    prompt_sha256: String,
+    #[serde(default)]
+    raw_response: String,
+    #[serde(default)]
+    raw_sha256: String,
+}
+
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
     println!();
@@ -58,11 +83,14 @@ fn print_help() {
     println!("  {APP_NAME} <command> [args]");
     println!();
     println!("Commands:");
-    println!("  version     Print tool version");
-    println!("  doctor      Run non-interactive environment checks");
-    println!("  profile [N] Summarize last N runs from resolved cx log (default 50)");
-    println!("  trace [N]   Show Nth most-recent run from resolved cx log (default 1)");
-    println!("  help        Print this help");
+    println!("  version            Print tool version");
+    println!("  doctor             Run non-interactive environment checks");
+    println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
+    println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
+    println!("  replay <id>        Replay quarantined schema run in strict mode");
+    println!("  quarantine list [N]  Show recent quarantine entries (default 20)");
+    println!("  quarantine show <id> Show quarantined entry payload");
+    println!("  help               Print this help");
 }
 
 fn repo_root() -> Option<PathBuf> {
@@ -92,11 +120,181 @@ fn resolve_log_file() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".codex").join("cxlogs").join("runs.jsonl"))
 }
 
+fn resolve_schema_fail_log_file() -> Option<PathBuf> {
+    if let Some(root) = repo_root() {
+        return Some(
+            root.join(".codex")
+                .join("cxlogs")
+                .join("schema_failures.jsonl"),
+        );
+    }
+    home_dir().map(|h| {
+        h.join(".codex")
+            .join("cxlogs")
+            .join("schema_failures.jsonl")
+    })
+}
+
+fn resolve_quarantine_dir() -> Option<PathBuf> {
+    if let Some(root) = repo_root() {
+        return Some(root.join(".codex").join("quarantine"));
+    }
+    home_dir().map(|h| h.join(".codex").join("quarantine"))
+}
+
 fn resolve_state_file() -> Option<PathBuf> {
     if let Some(root) = repo_root() {
         return Some(root.join(".codex").join("state.json"));
     }
     home_dir().map(|h| h.join(".codex").join("state.json"))
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent).map_err(|e| format!("failed to create {}: {e}", parent.display()))
+}
+
+fn append_jsonl(path: &Path, value: &Value) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("failed opening {}: {e}", path.display()))?;
+    let mut line =
+        serde_json::to_string(value).map_err(|e| format!("failed json serialize for log: {e}"))?;
+    line.push('\n');
+    f.write_all(line.as_bytes())
+        .map_err(|e| format!("failed writing {}: {e}", path.display()))
+}
+
+fn sha256_hex(s: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    let digest = hasher.finalize();
+    format!("{:x}", digest)
+}
+
+fn utc_now_iso() -> String {
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+fn make_quarantine_id(tool: &str) -> String {
+    let safe_tool: String = tool
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!(
+        "{}_{}_{}",
+        Utc::now().format("%Y%m%dT%H%M%SZ"),
+        safe_tool,
+        std::process::id()
+    )
+}
+
+fn quarantine_store(
+    tool: &str,
+    reason: &str,
+    raw: &str,
+    schema: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    let Some(qdir) = resolve_quarantine_dir() else {
+        return Err("unable to resolve quarantine directory".to_string());
+    };
+    fs::create_dir_all(&qdir).map_err(|e| format!("failed to create {}: {e}", qdir.display()))?;
+
+    let id = make_quarantine_id(tool);
+    let rec = QuarantineRecord {
+        id: id.clone(),
+        ts: utc_now_iso(),
+        tool: tool.to_string(),
+        reason: reason.to_string(),
+        schema: schema.to_string(),
+        prompt: prompt.to_string(),
+        prompt_sha256: sha256_hex(prompt),
+        raw_response: raw.to_string(),
+        raw_sha256: sha256_hex(raw),
+    };
+    let file = qdir.join(format!("{id}.json"));
+    let serialized = serde_json::to_string_pretty(&rec)
+        .map_err(|e| format!("failed to serialize quarantine record: {e}"))?;
+    fs::write(&file, serialized).map_err(|e| format!("failed to write {}: {e}", file.display()))?;
+    Ok(id)
+}
+
+fn log_schema_failure(
+    tool: &str,
+    reason: &str,
+    raw: &str,
+    schema: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    let qid = quarantine_store(tool, reason, raw, schema, prompt)?;
+
+    let schema_fail_log = resolve_schema_fail_log_file()
+        .ok_or_else(|| "unable to resolve schema_failures log file".to_string())?;
+    let failure_row = json!({
+        "ts": utc_now_iso(),
+        "tool": tool,
+        "reason": reason,
+        "quarantine_id": qid,
+        "raw_sha256": sha256_hex(raw)
+    });
+    append_jsonl(&schema_fail_log, &failure_row)?;
+
+    let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
+    let cwd = env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let root = repo_root()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let scope = if root.is_empty() { "global" } else { "repo" };
+
+    let run_failure = json!({
+        "ts": utc_now_iso(),
+        "tool": tool,
+        "cwd": cwd,
+        "scope": scope,
+        "repo_root": root,
+        "duration_ms": Value::Null,
+        "input_tokens": Value::Null,
+        "cached_input_tokens": Value::Null,
+        "effective_input_tokens": Value::Null,
+        "output_tokens": Value::Null,
+        "schema_ok": false,
+        "schema_reason": reason,
+        "quarantine_id": qid
+    });
+    append_jsonl(&run_log, &run_failure)?;
+
+    Ok(qid)
+}
+
+fn quarantine_file_by_id(id: &str) -> Option<PathBuf> {
+    let qdir = resolve_quarantine_dir()?;
+    let path = qdir.join(format!("{id}.json"));
+    if path.exists() { Some(path) } else { None }
+}
+
+fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
+    let path = quarantine_file_by_id(id).ok_or_else(|| format!("quarantine id not found: {id}"))?;
+    let mut s = String::new();
+    File::open(&path)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
+        .read_to_string(&mut s)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    serde_json::from_str(&s).map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))
 }
 
 fn read_state() -> Option<CxState> {
@@ -123,6 +321,9 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let quarantine_dir = resolve_quarantine_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
     let (cc, pr_fmt) = if let Some(state) = read_state() {
         (
             state
@@ -144,6 +345,7 @@ fn print_version() {
     println!("source: {source}");
     println!("log_file: {log_file}");
     println!("state_file: {state_file}");
+    println!("quarantine_dir: {quarantine_dir}");
     println!("mode: {mode}");
     println!("schema_relaxed: {schema_relaxed}");
     println!("state.preferences.conventional_commits: {cc}");
@@ -377,6 +579,190 @@ fn print_trace(n: usize) -> i32 {
     0
 }
 
+fn extract_agent_text(jsonl: &str) -> Option<String> {
+    let mut last: Option<String> = None;
+    for line in jsonl.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let is_item_completed = v.get("type").and_then(Value::as_str) == Some("item.completed");
+        if !is_item_completed {
+            continue;
+        }
+        let item = v.get("item")?;
+        if item.get("type").and_then(Value::as_str) != Some("agent_message") {
+            continue;
+        }
+        if let Some(text) = item.get("text").and_then(Value::as_str) {
+            last = Some(text.to_string());
+        }
+    }
+    last
+}
+
+fn run_codex_jsonl(prompt: &str) -> Result<String, String> {
+    let mut child = Command::new("codex")
+        .args(["exec", "--json", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to start codex: {e}"))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("failed writing prompt to codex stdin: {e}"))?;
+    }
+
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("failed waiting for codex: {e}"))?;
+
+    if !out.status.success() {
+        return Err(format!("codex exited with status {}", out.status));
+    }
+
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
+    format!(
+        "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema-strict mode: deterministic JSON only; reject ambiguity.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
+    )
+}
+
+fn cmd_replay(id: &str) -> i32 {
+    let rec = match read_quarantine_record(id) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs replay: {e}");
+            return 1;
+        }
+    };
+
+    if rec.schema.trim().is_empty() || rec.prompt.trim().is_empty() {
+        eprintln!("cxrs replay: quarantine entry is missing schema/prompt payload");
+        return 1;
+    }
+
+    let full_prompt = build_strict_schema_prompt(&rec.schema, &rec.prompt);
+    let jsonl = match run_codex_jsonl(&full_prompt) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs replay: {e}");
+            return 1;
+        }
+    };
+    let raw = extract_agent_text(&jsonl).unwrap_or_default();
+    if raw.trim().is_empty() {
+        match log_schema_failure(
+            &format!("{}_replay", rec.tool),
+            "empty_agent_message",
+            &raw,
+            &rec.schema,
+            &rec.prompt,
+        ) {
+            Ok(qid) => eprintln!("cxrs replay: empty response; quarantine_id={qid}"),
+            Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
+        }
+        return 1;
+    }
+
+    if serde_json::from_str::<Value>(&raw).is_err() {
+        match log_schema_failure(
+            &format!("{}_replay", rec.tool),
+            "invalid_json",
+            &raw,
+            &rec.schema,
+            &rec.prompt,
+        ) {
+            Ok(qid) => eprintln!("cxrs replay: invalid JSON; quarantine_id={qid}"),
+            Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
+        }
+        eprintln!("cxrs replay: raw response follows:");
+        eprintln!("{raw}");
+        return 1;
+    }
+
+    println!("{raw}");
+    0
+}
+
+fn cmd_quarantine_list(n: usize) -> i32 {
+    let Some(qdir) = resolve_quarantine_dir() else {
+        eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
+        return 1;
+    };
+    if !qdir.exists() {
+        println!("== cxrs quarantine list ==");
+        println!("entries: 0");
+        println!("quarantine_dir: {}", qdir.display());
+        return 0;
+    }
+
+    let mut rows: Vec<QuarantineRecord> = Vec::new();
+    let rd = match fs::read_dir(&qdir) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs quarantine list: cannot read {}: {e}", qdir.display());
+            return 1;
+        }
+    };
+
+    for ent in rd.flatten() {
+        let path = ent.path();
+        if path.extension().and_then(|v| v.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(mut s) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if s.trim().is_empty() {
+            continue;
+        }
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
+        if let Ok(rec) = serde_json::from_str::<QuarantineRecord>(&s) {
+            rows.push(rec);
+        }
+    }
+
+    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
+    if rows.len() > n {
+        rows.truncate(n);
+    }
+
+    println!("== cxrs quarantine list ==");
+    println!("entries: {}", rows.len());
+    for rec in rows {
+        println!("- {} | {} | {} | {}", rec.id, rec.ts, rec.tool, rec.reason);
+    }
+    println!("quarantine_dir: {}", qdir.display());
+    0
+}
+
+fn cmd_quarantine_show(id: &str) -> i32 {
+    let rec = match read_quarantine_record(id) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs quarantine show: {e}");
+            return 1;
+        }
+    };
+    match serde_json::to_string_pretty(&rec) {
+        Ok(v) => {
+            println!("{v}");
+            0
+        }
+        Err(e) => {
+            eprintln!("cxrs quarantine show: failed to render JSON: {e}");
+            1
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("help");
@@ -406,6 +792,35 @@ fn main() {
                 .unwrap_or(1);
             print_trace(n)
         }
+        "replay" => {
+            let Some(id) = args.get(2) else {
+                eprintln!("Usage: {APP_NAME} replay <quarantine_id>");
+                std::process::exit(2);
+            };
+            cmd_replay(id)
+        }
+        "quarantine" => match args.get(2).map(String::as_str).unwrap_or("list") {
+            "list" => {
+                let n = args
+                    .get(3)
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(20);
+                cmd_quarantine_list(n)
+            }
+            "show" => {
+                let Some(id) = args.get(3) else {
+                    eprintln!("Usage: {APP_NAME} quarantine show <quarantine_id>");
+                    std::process::exit(2);
+                };
+                cmd_quarantine_show(id)
+            }
+            other => {
+                eprintln!("{APP_NAME}: unknown quarantine subcommand '{other}'");
+                eprintln!("Usage: {APP_NAME} quarantine <list [N]|show <id>>");
+                2
+            }
+        },
         _ => {
             eprintln!("{APP_NAME}: unknown command '{cmd}'");
             eprintln!("Run '{APP_NAME} help' for usage.");
