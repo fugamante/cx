@@ -9,6 +9,8 @@ Current scope:
 - typed `state` command (`show/get/set`) with atomic JSON writes
 - `policy` command for dangerous-command classification rules
 - `bench` command for repeated runtime/token summaries
+- `metrics` parity command for token/time aggregates
+- prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
 - `alert` anomaly report command with threshold-based summaries
@@ -32,6 +34,20 @@ cd rust/cxrs
 cargo build
 ```
 
+## Install
+
+```bash
+cd rust/cxrs
+make install
+~/.local/bin/cxrs version
+```
+
+Development wrapper (uses release binary when present, otherwise `cargo run`):
+
+```bash
+./bin/cxrs help
+```
+
 ## Run
 
 ```bash
@@ -44,6 +60,12 @@ cargo run -- state get preferences.conventional_commits
 cargo run -- policy
 cargo run -- policy check "sudo rm -rf /tmp/foo"
 cargo run -- bench 3 -- ls -la
+cargo run -- metrics 50
+cargo run -- prompt implement "add cache diagnostics"
+cargo run -- roles
+cargo run -- roles reviewer
+cargo run -- fanout "port prompt tooling to Rust"
+cargo run -- promptlint 200
 cargo run -- profile
 cargo run -- profile 100
 cargo run -- alert
@@ -67,6 +89,6 @@ cargo run -- replay <id>
 
 ## Next steps
 
-- add `metrics` parity command and align output with Bash `cxmetrics`
-- improve `bench` log correlation with prompt hashes for tighter token attribution
+- improve `bench` run correlation with prompt hashes for tighter token attribution
+- add richer prompt templates by mode with optional schema snippets
 - add a compatibility wrapper (`cxrs cx...`) to ease side-by-side Bash/Rust validation
