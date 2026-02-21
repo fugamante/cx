@@ -19,10 +19,12 @@
 
 ## Layout
 
-- `cx.sh`: canonical top-level source entrypoint
-- `lib/cx.sh`: internal source entrypoint
+- `VERSION`: toolchain version stamp
+- `cx.sh`: compatibility shim entrypoint (sources `lib/cx.sh`)
+- `lib/cx.sh`: canonical source entrypoint
 - `lib/cx/core.sh`: logging, alerts, diagnostics
 - `lib/cx/commands.sh`: cx user commands
+- `bin/cx`: thin executable wrapper (dispatches sourced cx functions)
 - `bin/cx-install`: append source line to `~/.bashrc`
 - `bin/cx-uninstall`: remove source line from `~/.bashrc`
 - `PROJECT_CONTEXT.md`: architecture baseline
@@ -32,6 +34,7 @@
 ```bash
 ./bin/cx-install
 source ~/.bashrc
+./bin/cx cxversion
 ```
 
 ## Validate
@@ -53,6 +56,7 @@ cxstate set preferences.conventional_commits false
 cxstate get preferences.pr_summary_format
 cxoptimize           # optimization recommendations over last 200 runs
 cxoptimize 400
+cxreplay <id>        # replay quarantined schema failure deterministically
 cxtrace              # inspect latest run details
 cxtrace 5            # inspect 5th most recent run
 cxbench 10 -- cxo git status

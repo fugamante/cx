@@ -3,10 +3,10 @@
 # cx core utilities: logging, alerts, codex JSONL capture, diagnostics.
 # Source this file from interactive bash shells.
 
-if [[ -n "${CX_CORE_LOADED:-}" ]]; then
+if [[ -n "${CX_CORE_LOADED:-}" ]] && declare -F _cx_log_file >/dev/null 2>&1 && declare -F _codex_text >/dev/null 2>&1; then
   return 0
 fi
-export CX_CORE_LOADED=1
+CX_CORE_LOADED=1
 
 # Logging paths (repo-aware; fallback to global outside git repos).
 export CXLOG_DIR="${CXLOG_DIR:-$HOME/.codex/cxlogs}"
@@ -18,6 +18,9 @@ export CXALERT_ENABLED="${CXALERT_ENABLED:-1}"
 export CXALERT_MAX_MS="${CXALERT_MAX_MS:-8000}"
 export CXALERT_MAX_EFF_IN="${CXALERT_MAX_EFF_IN:-5000}"
 export CXALERT_MAX_OUT="${CXALERT_MAX_OUT:-1000}"
+export CX_MODE="${CX_MODE:-lean}"
+export CX_QUARANTINE_ENABLED="${CX_QUARANTINE_ENABLED:-1}"
+export CX_SCHEMA_RELAXED="${CX_SCHEMA_RELAXED:-0}"
 
 _cx_has_rtk() {
   command -v rtk >/dev/null 2>&1
@@ -45,9 +48,46 @@ export CX_CONTEXT_BUDGET_LINES="${CX_CONTEXT_BUDGET_LINES:-300}"
 export CX_CONTEXT_CLIP_MODE="${CX_CONTEXT_CLIP_MODE:-smart}"
 export CX_CONTEXT_CLIP_FOOTER="${CX_CONTEXT_CLIP_FOOTER:-1}"
 
+_cx_mode_normalize() {
+  case "${CX_MODE:-lean}" in
+    lean|deterministic|verbose) printf "%s" "${CX_MODE:-lean}" ;;
+    *) printf "%s" "lean" ;;
+  esac
+}
+
+_cx_mode_prompt_prefix() {
+  local mode
+  mode="$(_cx_mode_normalize)"
+  case "$mode" in
+    lean)
+      cat <<'EOF'
+Mode: lean
+Return concise output with minimal prose.
+EOF
+      ;;
+    deterministic)
+      cat <<'EOF'
+Mode: deterministic
+Return stable, format-locked output only; avoid extra prose.
+EOF
+      ;;
+    verbose)
+      cat <<'EOF'
+Mode: verbose
+Return richer explanation with clear sections and explicit assumptions.
+EOF
+      ;;
+  esac
+}
+
 _cx_prompt_preprocess() {
-  # Prompt passthrough: RTK should not rewrite arbitrary natural-language prompts.
-  cat
+  local input
+  input="$(cat)"
+  {
+    _cx_mode_prompt_prefix
+    echo
+    printf "%s" "$input"
+  }
 }
 
 _cx_json_escape() {
@@ -69,7 +109,8 @@ _cx_log_file() {
 }
 
 cxversion() {
-  local root sha ts src logf
+  local root sha ts src logf version_file version_text
+  local mode rtk_enabled rtk_system budget_chars budget_lines clip_mode
   root="$(_cx_git_root)"
   if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
     sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
@@ -79,13 +120,36 @@ cxversion() {
   ts="$(date -u +"%Y-%m-%d")"
   src="${CX_SOURCE_LOCATION:-local-shell}"
   logf="$(_cx_log_file)"
-  if [[ -n "$sha" ]]; then
-    echo "cx version: ${sha}"
+  version_file="${CX_REPO_DIR:-$HOME/cxcodex}/VERSION"
+  if [[ -f "$version_file" ]]; then
+    version_text="$(tr -d '\n' < "$version_file")"
+  elif [[ -n "$sha" ]]; then
+    version_text="$sha"
   else
-    echo "cx version: ${ts}"
+    version_text="$ts"
   fi
-  echo "source: ${src}"
+  mode="$(_cx_mode_normalize)"
+  rtk_enabled="${CX_RTK_ENABLED:-0}"
+  rtk_system="${CX_RTK_SYSTEM:-0}"
+  budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
+  clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  echo "cx version: ${version_text}"
+  echo "source=${src}"
   echo "log_file: ${logf}"
+  echo "mode: ${mode}"
+  echo "rtk_enabled: ${rtk_enabled}"
+  echo "rtk_system: ${rtk_system}"
+  echo "budget_chars: ${budget_chars}"
+  echo "budget_lines: ${budget_lines}"
+  echo "clip_mode: ${clip_mode}"
+}
+
+cxwhere() {
+  local fn
+  for fn in _codex_text _codex_last _cx_codex_json _cx_log_schema_failure cxo cxdiffsum_staged cxcommitjson cxnext cxfix_run; do
+    type -a "$fn" 2>/dev/null || echo "$fn: not found" >&2
+  done
 }
 
 _cxlog_init() {
@@ -116,20 +180,124 @@ _cx_schema_fail_log_init() {
   echo "$f"
 }
 
+_cx_quarantine_dir() {
+  local root
+  root="$(_cx_git_root)"
+  if [[ -n "$root" ]]; then
+    echo "$root/.codex/quarantine"
+  else
+    echo "$HOME/.codex/quarantine"
+  fi
+}
+
+_cx_quarantine_init() {
+  local d
+  d="$(_cx_quarantine_dir)"
+  mkdir -p "$d" 2>/dev/null || true
+  echo "$d"
+}
+
+_cx_quarantine_store() {
+  local tool="$1"
+  local reason="$2"
+  local raw="${3:-}"
+  local schema="${4:-}"
+  local prompt="${5:-}"
+  local d id file
+
+  if [[ "${CX_QUARANTINE_ENABLED:-1}" != "1" ]]; then
+    printf "%s" ""
+    return 0
+  fi
+
+  d="$(_cx_quarantine_init)"
+  id="$(date -u +"%Y%m%dT%H%M%SZ")_$(printf "%s" "$tool" | tr -cs '[:alnum:]_-' '_')_$$"
+  file="$d/${id}.json"
+  jq -n \
+    --arg id "$id" \
+    --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --arg tool "$tool" \
+    --arg reason "$reason" \
+    --arg raw "$raw" \
+    --arg schema "$schema" \
+    --arg prompt "$prompt" \
+    --arg prompt_sha "$(printf "%s" "$prompt" | shasum -a 256 | awk '{print $1}')" \
+    --arg raw_sha "$(printf "%s" "$raw" | shasum -a 256 | awk '{print $1}')" \
+    '{
+      id: $id,
+      ts: $ts,
+      tool: $tool,
+      reason: $reason,
+      schema: $schema,
+      prompt: $prompt,
+      prompt_sha256: $prompt_sha,
+      raw_response: $raw,
+      raw_sha256: $raw_sha
+    }' > "$file" 2>/dev/null || {
+      rm -f "$file" 2>/dev/null || true
+      printf "%s" ""
+      return 1
+    }
+  printf "%s" "$id"
+}
+
+_cx_quarantine_file_by_id() {
+  local id="$1"
+  local d
+  d="$(_cx_quarantine_init)"
+  if [[ -f "$d/${id}.json" ]]; then
+    echo "$d/${id}.json"
+    return 0
+  fi
+  return 1
+}
+
 _cx_log_schema_failure() {
   local tool="$1"
   local reason="$2"
   local raw="${3:-}"
+  local schema="${4:-}"
+  local prompt="${5:-}"
   local f
+  local qid=""
+  local root scope runf
   f="$(_cx_schema_fail_log_init)"
+  qid="$(_cx_quarantine_store "$tool" "$reason" "$raw" "$schema" "$prompt" 2>/dev/null || true)"
   {
     printf '{'
     printf '"ts":"%s",' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     printf '"tool":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
     printf '"reason":%s,' "$(printf "%s" "$reason" | _cx_json_escape)"
+    printf '"quarantine_id":%s,' "$(printf "%s" "$qid" | _cx_json_escape)"
     printf '"raw_sha256":"%s"' "$(printf "%s" "$raw" | shasum -a 256 | awk '{print $1}')"
     printf '}\n'
   } >> "$f"
+  runf="$(_cxlog_init)"
+  root="$(_cx_git_root)"
+  if [[ -n "$root" ]]; then scope="repo"; else scope="global"; fi
+  {
+    printf '{'
+    printf '"ts":"%s",' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    printf '"tool":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
+    printf '"cwd":%s,' "$(pwd | tr -d '\n' | _cx_json_escape)"
+    printf '"scope":"%s",' "$scope"
+    printf '"repo_root":%s,' "$(printf "%s" "${root:-}" | _cx_json_escape)"
+    printf '"duration_ms":null,"input_tokens":null,"cached_input_tokens":null,"effective_input_tokens":null,"output_tokens":null,'
+    printf '"prompt_len_raw":null,"prompt_len_processed":null,'
+    printf '"system_output_len_raw":null,"system_output_len_processed":null,"system_output_len_clipped":null,'
+    printf '"system_output_lines_raw":null,"system_output_lines_processed":null,"system_output_lines_clipped":null,'
+    printf '"clipped":false,'
+    printf '"budget_chars":%s,' "${CX_CONTEXT_BUDGET_CHARS:-12000}"
+    printf '"budget_lines":%s,' "${CX_CONTEXT_BUDGET_LINES:-300}"
+    printf '"clip_mode":%s,' "$(printf "%s" "${CX_CONTEXT_CLIP_MODE:-smart}" | _cx_json_escape)"
+    printf '"clip_footer":%s,' "$([[ "${CX_CONTEXT_CLIP_FOOTER:-1}" == "1" ]] && echo "true" || echo "false")"
+    printf '"rtk_used":false,'
+    printf '"schema_ok":false,'
+    printf '"schema_reason":%s,' "$(printf "%s" "$reason" | _cx_json_escape)"
+    printf '"quarantine_id":%s' "$(printf "%s" "$qid" | _cx_json_escape)"
+    printf '}\n'
+  } >> "$runf"
+  printf "%s" "$qid"
 }
 
 _cx_state_file() {
@@ -281,7 +449,7 @@ _cx_codex_jsonl_with_log() {
 
   local prompt_raw prompt_processed
   prompt_raw="$(cat)"
-  prompt_processed="$prompt_raw"
+  prompt_processed="$(printf "%s" "$prompt_raw" | _cx_prompt_preprocess)"
 
   local start_ms end_ms dur_ms
   start_ms="$(python3 - <<'PY'
@@ -316,6 +484,7 @@ PY
 
   local prompt_hash prompt_preview root scope
   local prompt_hash_raw prompt_hash_processed prompt_len_raw prompt_len_processed rtk_error
+  local schema_ok schema_reason quarantine_id
   local sys_len_raw sys_len_processed sys_len_clipped
   local sys_lines_raw sys_lines_processed sys_lines_clipped
   local clipped clip_mode clip_footer budget_chars budget_lines rtk_used
@@ -358,6 +527,9 @@ PY
   prompt_preview="$(printf "%s" "$prompt_processed" | tr '\n' ' ' | cut -c1-160)"
   root="$(_cx_git_root)"
   if [[ -n "$root" ]]; then scope="repo"; else scope="global"; fi
+  schema_ok="true"
+  schema_reason=""
+  quarantine_id=""
 
   if [[ "$CXLOG_ENABLED" == "1" ]]; then
     {
@@ -389,6 +561,9 @@ PY
       printf '"clip_footer":%s,' "$clip_footer"
       printf '"rtk_used":%s,' "$rtk_used"
       printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
+      printf '"schema_ok":%s,' "$schema_ok"
+      printf '"schema_reason":%s,' "$(printf "%s" "$schema_reason" | _cx_json_escape)"
+      printf '"quarantine_id":%s,' "$(printf "%s" "$quarantine_id" | _cx_json_escape)"
       printf '"prompt_sha256":"%s",' "$prompt_hash"
       printf '"prompt_preview":%s' "$(printf "%s" "$prompt_preview" | _cx_json_escape)"
       printf '}\n'
@@ -402,10 +577,25 @@ PY
   rm -f "$tmpjsonl" 2>/dev/null || true
 }
 
+_cx_extract_agent_message() {
+  local mode="${1:-last}"
+  jq -Rrs --arg mode "$mode" '
+    split("\n")
+    | map(fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | (.item.text // ""))
+    | if $mode == "all" then
+        if length == 0 then "" else join("\n\n") end
+      else
+        (last // "")
+      end
+  '
+}
+
+_codex_last() {
+  _cx_codex_jsonl_with_log "_codex_last" | _cx_extract_agent_message "last"
+}
+
 _codex_text() {
-  _cx_codex_jsonl_with_log "_codex_text" \
-    | jq -Rr 'fromjson? | select(.type=="item.completed" and .item.type=="agent_message") | .item.text' \
-    | tail -n 1
+  _cx_codex_jsonl_with_log "_codex_text" | _cx_extract_agent_message "last"
 }
 
 cxmetrics() {
@@ -1285,7 +1475,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxwhere cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint cxreplay; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

@@ -2,10 +2,10 @@
 
 # cx command helpers built on top of core.sh
 
-if [[ -n "${CX_COMMANDS_LOADED:-}" ]]; then
+if [[ -n "${CX_COMMANDS_LOADED:-}" ]] && declare -F cxo >/dev/null 2>&1 && declare -F cxcommitjson >/dev/null 2>&1; then
   return 0
 fi
-export CX_COMMANDS_LOADED=1
+CX_COMMANDS_LOADED=1
 
 _cx_prompt_test_checklist() {
   local mode="$1"
@@ -106,6 +106,17 @@ EOF
     *)
       return 1
       ;;
+  esac
+}
+
+_cx_mode_render_hint() {
+  local mode
+  mode="$(_cx_mode_normalize)"
+  case "$mode" in
+    lean) echo "Keep output compact and direct." ;;
+    deterministic) echo "Return deterministic, format-locked output only." ;;
+    verbose) echo "Provide expanded detail and rationale." ;;
+    *) echo "Keep output compact and direct." ;;
   esac
 }
 
@@ -277,12 +288,23 @@ _cx_codex_json() {
   local tool_name="$1"
   local schema_description="$2"
   local prompt_text="$3"
-  local full_prompt raw
+  local full_prompt raw mode
 
+  mode="$(_cx_mode_normalize)"
   full_prompt="$(
     {
       echo "You are a structured output generator."
       echo "Return STRICT JSON ONLY. No markdown. No prose. No code fences."
+      echo "Output MUST be a single valid JSON object matching the schema."
+      if [[ "${CX_SCHEMA_STRICT:-0}" == "1" ]]; then
+        echo "Schema-strict mode: deterministic JSON only; reject ambiguity."
+      elif [[ "$mode" == "deterministic" ]]; then
+        echo "Deterministic constraints: stable keys, stable ordering, no optional chatter."
+      elif [[ "$mode" == "lean" ]]; then
+        echo "Lean constraints: keep values concise."
+      else
+        echo "Verbose constraints: include fuller detail inside schema fields only."
+      fi
       echo "Schema:"
       printf "%s\n" "$schema_description"
       echo
@@ -292,18 +314,39 @@ _cx_codex_json() {
   )"
 
   raw="$(printf "%s" "$full_prompt" | _codex_text)"
+  export CX_LAST_SCHEMA_TOOL="$tool_name"
+  export CX_LAST_SCHEMA_DESC="$schema_description"
+  export CX_LAST_SCHEMA_PROMPT="$prompt_text"
+  export CX_LAST_SCHEMA_RAW="$raw"
   if [[ -n "${CODEX_MODEL:-}" ]]; then
     _cx_state_set_path "last_model" "$CODEX_MODEL" >/dev/null 2>&1 || true
   fi
   if ! printf "%s" "$raw" | jq . >/dev/null 2>&1; then
-    _cx_log_schema_failure "$tool_name" "invalid_json" "$raw" >/dev/null 2>&1 || true
+    local qid=""
+    qid="$(_cx_log_schema_failure "$tool_name" "invalid_json" "$raw" "$schema_description" "$prompt_text" 2>/dev/null || true)"
     echo "${tool_name}: invalid JSON response from Codex" >&2
+    if [[ -n "$qid" ]]; then
+      echo "${tool_name}: quarantine_id=${qid}" >&2
+    fi
     echo "${tool_name}: raw response follows:" >&2
     printf "%s\n" "$raw" >&2
     return 1
   fi
 
   printf "%s\n" "$raw"
+}
+
+_cx_codex_json_schema() {
+  local tool_name="$1"
+  local schema_description="$2"
+  local prompt_text="$3"
+
+  if [[ "${CX_SCHEMA_RELAXED:-0}" == "1" ]]; then
+    _cx_codex_json "$tool_name" "$schema_description" "$prompt_text"
+    return $?
+  fi
+
+  CX_MODE=deterministic CX_SCHEMA_STRICT=1 _cx_codex_json "$tool_name" "$schema_description" "$prompt_text"
 }
 
 _cx_json_require_keys() {
@@ -314,8 +357,12 @@ _cx_json_require_keys() {
 
   for k in "$@"; do
     if ! printf "%s" "$json" | jq -e --arg k "$k" 'has($k)' >/dev/null 2>&1; then
-      _cx_log_schema_failure "$tool_name" "missing_key:$k" "$json" >/dev/null 2>&1 || true
+      local qid=""
+      qid="$(_cx_log_schema_failure "$tool_name" "missing_key:$k" "$json" "${CX_LAST_SCHEMA_DESC:-}" "${CX_LAST_SCHEMA_PROMPT:-}" 2>/dev/null || true)"
       echo "${tool_name}: missing required key '$k'" >&2
+      if [[ -n "$qid" ]]; then
+        echo "${tool_name}: quarantine_id=${qid}" >&2
+      fi
       echo "${tool_name}: raw response follows:" >&2
       printf "%s\n" "$json" >&2
       return 1
@@ -465,32 +512,114 @@ EOF
 }
 
 cxfanout() {
-  local objective="$1"
-  local roles role idx=1
+  local objective="${1:-}"
+  local role idx=1 max_tasks
+  local diff_out chunks chunk_list chunk_count
   if [[ -z "${objective:-}" ]]; then
     echo "Usage: cxfanout \"<objective>\"" >&2
     return 2
   fi
-  roles="architect implementer tester reviewer doc"
+  max_tasks=6
 
-  for role in $roles; do
+  _cx_system_capture --var diff_out git diff --no-color >/dev/null 2>&1 || true
+  chunks="$(printf "%s" "$diff_out" | _cx_chunk_text)"
+  chunk_list="$(printf "%s\n" "$chunks" | awk '
+    /^----- cx chunk [0-9]+\/[0-9]+ -----$/ { h=$0; next }
+    {
+      if (h != "" && !(h in seen) && $0 != "") {
+        print h " " substr($0, 1, 180)
+        seen[h]=1
+      }
+    }
+  ')"
+  chunk_count="$(printf "%s\n" "$chunk_list" | awk 'NF>0{c++} END{print c+0}')"
+  if (( chunk_count <= 0 )); then
+    chunk_list="----- cx chunk 1/1 -----
+(no diff context available)"
+    chunk_count=1
+  fi
+  while IFS= read -r role; do
+    local chunk_preview
+    [[ -n "${role:-}" ]] || continue
+    chunk_preview="$(printf "%s\n" "$chunk_list" | sed -n "${idx}p")"
+    if [[ -z "$chunk_preview" ]]; then
+      chunk_preview="$(printf "%s\n" "$chunk_list" | sed -n "$(( ((idx - 1) % chunk_count) + 1 ))p")"
+    fi
     echo "### Subtask $idx [$role]"
     _cx_role_header "$role"
     cat <<EOF
 Objective:
 - ${objective}
 
+Bounded context:
+- ${chunk_preview}
+
 Task:
-- Produce a focused contribution for this role only.
-- Keep output implementation-ready and independent from other subtasks.
+- Produce one independent deliverable for this role against the bounded context.
+- Keep scope small enough to complete without cross-subtask dependency.
 
 Deliverables:
-- Role-specific results with concrete, verifiable outputs.
-- Clear assumptions and any blockers.
+- Concrete output artifacts for this role.
+- Explicit changes with file/function targets.
+- A role-specific test checklist with pass/fail criteria.
 EOF
     echo
     idx=$((idx + 1))
-  done
+    if (( idx > max_tasks )); then
+      break
+    fi
+  done <<EOF
+architect
+implementer
+reviewer
+tester
+doc
+implementer
+EOF
+}
+
+cxreplay() {
+  local id="${1:-}"
+  local qf tool schema prompt prev_mode prev_chars prev_lines
+  local chars lines
+  if [[ -z "${id:-}" ]]; then
+    echo "Usage: cxreplay <quarantine_id>" >&2
+    return 2
+  fi
+  qf="$(_cx_quarantine_file_by_id "$id" 2>/dev/null || true)"
+  if [[ -z "$qf" || ! -f "$qf" ]]; then
+    echo "cxreplay: quarantine_id not found: $id" >&2
+    return 1
+  fi
+
+  tool="$(jq -r '.tool // "cxreplay"' "$qf" 2>/dev/null)"
+  schema="$(jq -r '.schema // ""' "$qf" 2>/dev/null)"
+  prompt="$(jq -r '.prompt // ""' "$qf" 2>/dev/null)"
+  if [[ -z "$schema" || -z "$prompt" ]]; then
+    echo "cxreplay: quarantine entry missing schema/prompt payload: $qf" >&2
+    return 1
+  fi
+
+  prev_mode="${CX_MODE:-lean}"
+  prev_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  prev_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
+  chars="$prev_chars"
+  lines="$prev_lines"
+  [[ "$chars" =~ ^[0-9]+$ ]] || chars=12000
+  [[ "$lines" =~ ^[0-9]+$ ]] || lines=300
+  export CX_MODE="deterministic"
+  export CX_CONTEXT_BUDGET_CHARS="$(( chars / 2 ))"
+  export CX_CONTEXT_BUDGET_LINES="$(( lines / 2 ))"
+  if (( CX_CONTEXT_BUDGET_CHARS < 1000 )); then export CX_CONTEXT_BUDGET_CHARS=1000; fi
+  if (( CX_CONTEXT_BUDGET_LINES < 40 )); then export CX_CONTEXT_BUDGET_LINES=40; fi
+
+  _cx_codex_json "${tool}_replay" "$schema" "$prompt"
+  local rc=$?
+
+  export CX_MODE="$prev_mode"
+  export CX_CONTEXT_BUDGET_CHARS="$prev_chars"
+  export CX_CONTEXT_BUDGET_LINES="$prev_lines"
+  return $rc
 }
 
 cxpromptlint() {
@@ -620,10 +749,7 @@ cxo() {
   local out
   _cx_system_capture --var out "$@" || return $?
 
-  printf "%s\n" "$out" \
-    | _cx_codex_jsonl_with_log "cxo" \
-    | jq -r 'select(.type=="item.completed" and .item.type=="agent_message") | .item.text' \
-    | tail -n 1
+  printf "%s\n" "$out" | _cx_codex_jsonl_with_log "cxo" | _cx_extract_agent_message "last"
 }
 
 cxol() {
@@ -664,7 +790,7 @@ cxnext() {
     }
   )"
 
-  json="$(_cx_codex_json "cxnext" "$schema" "$prompt")" || return 1
+  json="$(_cx_codex_json_schema "cxnext" "$schema" "$prompt")" || return 1
   _cx_json_require_keys "cxnext" "$json" "commands" || return 1
 
   printf "%s" "$json" | jq -r '.commands[]?'
@@ -730,7 +856,7 @@ cxfix_run() {
       printf "%s\n" "$out"
     }
   )"
-  json="$(_cx_codex_json "cxfix_run" "$schema" "$prompt")" || return $status
+  json="$(_cx_codex_json_schema "cxfix_run" "$schema" "$prompt")" || return $status
   _cx_json_require_keys "cxfix_run" "$json" "analysis" "commands" || return $status
 
   cmds="$(echo "$json" | jq -r '.commands[]?')"
@@ -773,16 +899,11 @@ cxfix_run() {
   return $status
 }
 
-cxdiffsum() {
-  local diff_out
+_cxdiffsum_from_diff() {
+  local tool_name="$1"
+  local diff_label="$2"
+  local diff_out="$3"
   local schema prompt json pr_fmt
-  _cx_system_capture --var diff_out git diff --no-color || return $?
-
-  if [[ -z "$diff_out" ]]; then
-    echo "cxdiffsum: no unstaged changes." >&2
-    return 1
-  fi
-
   pr_fmt="$(_cx_state_get "preferences.pr_summary_format" 2>/dev/null)"
   if [[ -z "$pr_fmt" ]]; then
     pr_fmt="standard"
@@ -796,16 +917,17 @@ cxdiffsum() {
 }'
   prompt="$(
     {
-      echo "Write a PR-ready summary of this diff."
+      echo "Write a PR-ready summary of this ${diff_label}."
       echo "Keep bullets concise and actionable."
+      echo "$(_cx_mode_render_hint)"
       echo "Preferred PR summary format: $pr_fmt"
       echo
-      echo "DIFF:"
+      echo "${diff_label^^}:"
       printf "%s\n" "$diff_out"
     }
   )"
-  json="$(_cx_codex_json "cxdiffsum" "$schema" "$prompt")" || return 1
-  _cx_json_require_keys "cxdiffsum" "$json" "title" "summary" "risk_edge_cases" "suggested_tests" || return 1
+  json="$(_cx_codex_json_schema "$tool_name" "$schema" "$prompt")" || return 1
+  _cx_json_require_keys "$tool_name" "$json" "title" "summary" "risk_edge_cases" "suggested_tests" || return 1
 
   printf "%s" "$json" | jq -r '
     "Title: " + (.title // ""),
@@ -821,6 +943,18 @@ cxdiffsum() {
   '
 }
 
+cxdiffsum() {
+  local diff_out
+  _cx_system_capture --var diff_out git diff --no-color || return $?
+
+  if [[ -z "$diff_out" ]]; then
+    echo "cxdiffsum: no unstaged changes." >&2
+    return 1
+  fi
+
+  _cxdiffsum_from_diff "cxdiffsum" "diff" "$diff_out"
+}
+
 cxdiffsum_staged() {
   local diff_out
   _cx_system_capture --var diff_out git diff --staged --no-color || return $?
@@ -830,17 +964,7 @@ cxdiffsum_staged() {
     return 1
   fi
 
-  {
-    echo "Write a PR-ready summary of the STAGED diff."
-    echo "Format:"
-    echo "- Title: <short>"
-    echo "- Summary: 3-6 bullets"
-    echo "- Risk/edge cases: 2-5 bullets"
-    echo "- Suggested tests: bullets"
-    echo
-    echo "STAGED DIFF:"
-    printf "%s\n" "$diff_out"
-  } | _codex_text
+  _cxdiffsum_from_diff "cxdiffsum_staged" "staged diff" "$diff_out"
 }
 
 cxcommitjson() {
@@ -876,7 +1000,7 @@ cxcommitjson() {
       printf "%s\n" "$diff_out"
     }
   )"
-  json="$(_cx_codex_json "cxcommitjson" "$schema" "$prompt")" || return 1
+  json="$(_cx_codex_json_schema "cxcommitjson" "$schema" "$prompt")" || return 1
   _cx_json_require_keys "cxcommitjson" "$json" "subject" "body" "breaking" "tests" || return 1
   json="$(printf "%s" "$json" | jq 'if has("scope") then . else . + {scope:null} end')"
   printf "%s\n" "$json"

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/cx.sh"
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: cx <cx-function> [args...]" >&2
+  echo "Example: cx cxversion" >&2
+  exit 2
+fi
+
+fn="$1"
+shift
+
+if ! declare -F "$fn" >/dev/null 2>&1; then
+  echo "cx: unknown function '$fn'" >&2
+  exit 2
+fi
+
+"$fn" "$@"
