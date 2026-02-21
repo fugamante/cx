@@ -15,6 +15,7 @@ Current scope:
 - execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
 - operational helpers: `budget`, `log-tail`, `health`
 - system capture path includes RTK routing (when available) + context clipping budgets
+- Rust command runs now emit repo-aware `runs.jsonl` entries with token usage (when available)
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution

@@ -88,6 +88,29 @@ struct QuarantineRecord {
     raw_sha256: String,
 }
 
+#[derive(Debug, Default, Clone)]
+struct CaptureStats {
+    system_output_len_raw: Option<u64>,
+    system_output_len_processed: Option<u64>,
+    system_output_len_clipped: Option<u64>,
+    system_output_lines_raw: Option<u64>,
+    system_output_lines_processed: Option<u64>,
+    system_output_lines_clipped: Option<u64>,
+    clipped: Option<bool>,
+    budget_chars: Option<u64>,
+    budget_lines: Option<u64>,
+    clip_mode: Option<String>,
+    clip_footer: Option<bool>,
+    rtk_used: Option<bool>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct UsageStats {
+    input_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
     println!();
@@ -208,6 +231,93 @@ fn append_jsonl(path: &Path, value: &Value) -> Result<(), String> {
     line.push('\n');
     f.write_all(line.as_bytes())
         .map_err(|e| format!("failed writing {}: {e}", path.display()))
+}
+
+fn prompt_preview(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+fn usage_from_jsonl(jsonl: &str) -> UsageStats {
+    let mut out = UsageStats::default();
+    for line in jsonl.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("turn.completed") {
+            continue;
+        }
+        let usage = v.get("usage").cloned().unwrap_or(Value::Null);
+        out.input_tokens = usage.get("input_tokens").and_then(Value::as_u64);
+        out.cached_input_tokens = usage.get("cached_input_tokens").and_then(Value::as_u64);
+        out.output_tokens = usage.get("output_tokens").and_then(Value::as_u64);
+    }
+    out
+}
+
+fn effective_input_tokens(input: Option<u64>, cached: Option<u64>) -> Option<u64> {
+    match (input, cached) {
+        (Some(i), Some(c)) => Some(i.saturating_sub(c)),
+        (Some(i), None) => Some(i),
+        _ => None,
+    }
+}
+
+fn log_codex_run(
+    tool: &str,
+    prompt: &str,
+    duration_ms: u64,
+    usage: Option<&UsageStats>,
+    capture: Option<&CaptureStats>,
+    schema_ok: bool,
+    schema_reason: Option<&str>,
+    quarantine_id: Option<&str>,
+) -> Result<(), String> {
+    let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
+    let cwd = env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let root = repo_root()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let scope = if root.is_empty() { "global" } else { "repo" };
+
+    let input = usage.and_then(|u| u.input_tokens);
+    let cached = usage.and_then(|u| u.cached_input_tokens);
+    let output = usage.and_then(|u| u.output_tokens);
+    let effective = effective_input_tokens(input, cached);
+    let cap = capture.cloned().unwrap_or_default();
+
+    let row = json!({
+      "ts": utc_now_iso(),
+      "tool": tool,
+      "cwd": cwd,
+      "scope": scope,
+      "repo_root": root,
+      "duration_ms": duration_ms,
+      "input_tokens": input,
+      "cached_input_tokens": cached,
+      "effective_input_tokens": effective,
+      "output_tokens": output,
+      "system_output_len_raw": cap.system_output_len_raw,
+      "system_output_len_processed": cap.system_output_len_processed,
+      "system_output_len_clipped": cap.system_output_len_clipped,
+      "system_output_lines_raw": cap.system_output_lines_raw,
+      "system_output_lines_processed": cap.system_output_lines_processed,
+      "system_output_lines_clipped": cap.system_output_lines_clipped,
+      "clipped": cap.clipped,
+      "budget_chars": cap.budget_chars,
+      "budget_lines": cap.budget_lines,
+      "clip_mode": cap.clip_mode,
+      "clip_footer": cap.clip_footer,
+      "rtk_used": cap.rtk_used,
+      "schema_ok": schema_ok,
+      "schema_reason": schema_reason.unwrap_or(""),
+      "quarantine_id": quarantine_id.unwrap_or(""),
+      "prompt_sha256": sha256_hex(prompt),
+      "prompt_preview": prompt_preview(prompt, 180),
+    });
+    append_jsonl(&run_log, &row)
 }
 
 fn sha256_hex(s: &str) -> String {
@@ -1397,7 +1507,7 @@ fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
     )
 }
 
-fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
+fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureStats), String> {
     if cmd.is_empty() {
         return Err("missing command".to_string());
     }
@@ -1454,7 +1564,7 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
         s.chars().skip(total - n).collect()
     }
 
-    fn clip_text(input: &str) -> String {
+    fn clip_text(input: &str) -> (String, CaptureStats) {
         let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
@@ -1505,14 +1615,31 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
         let kept_chars = char_limited.chars().count();
         let kept_lines = char_limited.lines().count();
         let clipped = kept_chars < original_chars || kept_lines < original_lines;
-        if clipped && clip_footer {
+        let final_text = if clipped && clip_footer {
             format!(
                 "{char_limited}\n[cx] output clipped: original={}/{}, kept={}/{}, mode={}",
                 original_chars, original_lines, kept_chars, kept_lines, mode_used
             )
         } else {
             char_limited
-        }
+        };
+        (
+            final_text,
+            CaptureStats {
+                system_output_len_raw: Some(original_chars as u64),
+                system_output_len_processed: Some(input.chars().count() as u64),
+                system_output_len_clipped: Some(kept_chars as u64),
+                system_output_lines_raw: Some(original_lines as u64),
+                system_output_lines_processed: Some(input.lines().count() as u64),
+                system_output_lines_clipped: Some(kept_lines as u64),
+                clipped: Some(clipped),
+                budget_chars: Some(budget_chars as u64),
+                budget_lines: Some(budget_lines as u64),
+                clip_mode: Some(mode_used.to_string()),
+                clip_footer: Some(clip_footer),
+                rtk_used: None,
+            },
+        )
     }
 
     let (raw_out, status) = run_capture(cmd)?;
@@ -1531,7 +1658,9 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32), String> {
     } else {
         raw_out.clone()
     };
-    Ok((clip_text(&processed), status))
+    let (clipped_text, mut stats) = clip_text(&processed);
+    stats.rtk_used = Some(rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && has_rtk());
+    Ok((clipped_text, status, stats))
 }
 
 fn run_git_capture(args: &[&str]) -> Result<(String, i32), String> {
@@ -1732,22 +1861,59 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
     if failures > 0 { 1 } else { 0 }
 }
 
-fn run_strict_schema(tool: &str, schema: &str, task_input: &str) -> Result<String, String> {
+fn run_strict_schema(
+    tool: &str,
+    schema: &str,
+    task_input: &str,
+    capture: Option<&CaptureStats>,
+) -> Result<String, String> {
     let full_prompt = build_strict_schema_prompt(schema, task_input);
+    let started = Instant::now();
     let jsonl = run_codex_jsonl(&full_prompt)?;
     let raw = extract_agent_text(&jsonl).unwrap_or_default();
+    let usage = usage_from_jsonl(&jsonl);
     if raw.trim().is_empty() {
         let qid = log_schema_failure(tool, "empty_agent_message", &raw, schema, task_input)
             .unwrap_or_else(|_| "".to_string());
+        let _ = log_codex_run(
+            tool,
+            &full_prompt,
+            started.elapsed().as_millis() as u64,
+            Some(&usage),
+            capture,
+            false,
+            Some("empty_agent_message"),
+            Some(&qid),
+        );
         return Err(format!("empty response from codex; quarantine_id={qid}"));
     }
     if serde_json::from_str::<Value>(&raw).is_err() {
         let qid = log_schema_failure(tool, "invalid_json", &raw, schema, task_input)
             .unwrap_or_else(|_| "".to_string());
+        let _ = log_codex_run(
+            tool,
+            &full_prompt,
+            started.elapsed().as_millis() as u64,
+            Some(&usage),
+            capture,
+            false,
+            Some("invalid_json"),
+            Some(&qid),
+        );
         return Err(format!(
             "invalid JSON response; quarantine_id={qid}; raw={raw}"
         ));
     }
+    let _ = log_codex_run(
+        tool,
+        &full_prompt,
+        started.elapsed().as_millis() as u64,
+        Some(&usage),
+        capture,
+        true,
+        None,
+        None,
+    );
     Ok(raw)
 }
 
@@ -2131,13 +2297,14 @@ fn cmd_promptlint(n: usize) -> i32 {
 }
 
 fn cmd_cx(command: &[String]) -> i32 {
-    let (captured, status) = match run_system_command_capture(command) {
+    let (captured, status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cx: {e}");
             return 1;
         }
     };
+    let started = Instant::now();
     let out = match run_codex_plain(&captured) {
         Ok(v) => v,
         Err(e) => {
@@ -2145,18 +2312,29 @@ fn cmd_cx(command: &[String]) -> i32 {
             return if status == 0 { 1 } else { status };
         }
     };
+    let _ = log_codex_run(
+        "cx",
+        &captured,
+        started.elapsed().as_millis() as u64,
+        None,
+        Some(&capture_stats),
+        true,
+        None,
+        None,
+    );
     print!("{out}");
     if status == 0 { 0 } else { status }
 }
 
 fn cmd_cxj(command: &[String]) -> i32 {
-    let (captured, status) = match run_system_command_capture(command) {
+    let (captured, status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxj: {e}");
             return 1;
         }
     };
+    let started = Instant::now();
     let out = match run_codex_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
@@ -2164,18 +2342,30 @@ fn cmd_cxj(command: &[String]) -> i32 {
             return if status == 0 { 1 } else { status };
         }
     };
+    let usage = usage_from_jsonl(&out);
+    let _ = log_codex_run(
+        "cxj",
+        &captured,
+        started.elapsed().as_millis() as u64,
+        Some(&usage),
+        Some(&capture_stats),
+        true,
+        None,
+        None,
+    );
     print!("{out}");
     if status == 0 { 0 } else { status }
 }
 
 fn cmd_cxo(command: &[String]) -> i32 {
-    let (captured, status) = match run_system_command_capture(command) {
+    let (captured, status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxo: {e}");
             return 1;
         }
     };
+    let started = Instant::now();
     let out = match run_codex_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
@@ -2183,6 +2373,17 @@ fn cmd_cxo(command: &[String]) -> i32 {
             return if status == 0 { 1 } else { status };
         }
     };
+    let usage = usage_from_jsonl(&out);
+    let _ = log_codex_run(
+        "cxo",
+        &captured,
+        started.elapsed().as_millis() as u64,
+        Some(&usage),
+        Some(&capture_stats),
+        true,
+        None,
+        None,
+    );
     let text = extract_agent_text(&out).unwrap_or_default();
     println!("{text}");
     if status == 0 { 0 } else { status }
@@ -2193,13 +2394,14 @@ fn cmd_cxol(command: &[String]) -> i32 {
 }
 
 fn cmd_cxcopy(command: &[String]) -> i32 {
-    let (captured, status) = match run_system_command_capture(command) {
+    let (captured, status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxcopy: {e}");
             return 1;
         }
     };
+    let started = Instant::now();
     let out = match run_codex_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
@@ -2207,6 +2409,17 @@ fn cmd_cxcopy(command: &[String]) -> i32 {
             return if status == 0 { 1 } else { status };
         }
     };
+    let usage = usage_from_jsonl(&out);
+    let _ = log_codex_run(
+        "cxcopy",
+        &captured,
+        started.elapsed().as_millis() as u64,
+        Some(&usage),
+        Some(&capture_stats),
+        true,
+        None,
+        None,
+    );
     let text = extract_agent_text(&out).unwrap_or_default();
     if text.trim().is_empty() {
         eprintln!("cxrs cxcopy: nothing to copy");
@@ -2239,7 +2452,7 @@ fn cmd_cxcopy(command: &[String]) -> i32 {
 }
 
 fn cmd_fix(command: &[String]) -> i32 {
-    let (captured, status) = match run_system_command_capture(command) {
+    let (captured, status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix: {e}");
@@ -2252,6 +2465,7 @@ fn cmd_fix(command: &[String]) -> i32 {
         status,
         captured
     );
+    let started = Instant::now();
     let jsonl = match run_codex_jsonl(&prompt) {
         Ok(v) => v,
         Err(e) => {
@@ -2259,6 +2473,17 @@ fn cmd_fix(command: &[String]) -> i32 {
             return status;
         }
     };
+    let usage = usage_from_jsonl(&jsonl);
+    let _ = log_codex_run(
+        "cxfix",
+        &prompt,
+        started.elapsed().as_millis() as u64,
+        Some(&usage),
+        Some(&capture_stats),
+        true,
+        None,
+        None,
+    );
     let text = extract_agent_text(&jsonl).unwrap_or_default();
     println!("{text}");
     status
@@ -2396,7 +2621,7 @@ fn cmd_health() -> i32 {
 }
 
 fn cmd_next(command: &[String]) -> i32 {
-    let (captured, exit_status) = match run_system_command_capture(command) {
+    let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs next: {e}");
@@ -2413,28 +2638,13 @@ fn cmd_next(command: &[String]) -> i32 {
         exit_status,
         captured
     );
-    let full_prompt = build_strict_schema_prompt(schema, &task_input);
-    let jsonl = match run_codex_jsonl(&full_prompt) {
+    let raw = match run_strict_schema("cxrs_next", schema, &task_input, Some(&capture_stats)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs next: {e}");
             return 1;
         }
     };
-    let raw = extract_agent_text(&jsonl).unwrap_or_default();
-    if raw.trim().is_empty() {
-        match log_schema_failure(
-            "cxrs_next",
-            "empty_agent_message",
-            &raw,
-            schema,
-            &task_input,
-        ) {
-            Ok(qid) => eprintln!("cxrs next: empty response; quarantine_id={qid}"),
-            Err(e) => eprintln!("cxrs next: failed to log schema failure: {e}"),
-        }
-        return 1;
-    }
     let commands = match parse_commands_array(&raw) {
         Ok(v) => v,
         Err(reason) => {
@@ -2454,7 +2664,7 @@ fn cmd_next(command: &[String]) -> i32 {
 }
 
 fn cmd_fix_run(command: &[String]) -> i32 {
-    let (captured, exit_status) = match run_system_command_capture(command) {
+    let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix-run: {e}");
@@ -2472,7 +2682,7 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         exit_status,
         captured
     );
-    let raw = match run_strict_schema("cxrs_fix_run", schema, &task_input) {
+    let raw = match run_strict_schema("cxrs_fix_run", schema, &task_input, Some(&capture_stats)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix-run: {e}");
@@ -2571,7 +2781,7 @@ fn generate_commitjson_value() -> Result<Value, String> {
     let task_input = format!(
         "Generate a commit object from this STAGED diff.\n{style_hint}\n\nSTAGED DIFF:\n{diff_out}"
     );
-    let raw = run_strict_schema("cxrs_commitjson", schema, &task_input)?;
+    let raw = run_strict_schema("cxrs_commitjson", schema, &task_input, None)?;
     let mut v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
 
     let has_subject = v.get("subject").and_then(Value::as_str).is_some();
@@ -2684,7 +2894,7 @@ fn generate_diffsum_value(tool: &str, staged: bool) -> Result<Value, String> {
     let task_input = format!(
         "Write a PR-ready summary of this diff.\nKeep bullets concise and actionable.\nPreferred PR summary format: {pr_fmt}\n\n{diff_label}:\n{diff_out}"
     );
-    let raw = run_strict_schema(tool, schema, &task_input)?;
+    let raw = run_strict_schema(tool, schema, &task_input, None)?;
     let v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
 
     let has_title = v.get("title").and_then(Value::as_str).is_some();
