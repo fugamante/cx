@@ -46,6 +46,28 @@ cxdoctor
 cxwhere | sed -n '1,40p'
 ```
 
+Expected output examples:
+
+```text
+$ cxdoctor
+== binaries ==
+codex: /.../codex
+jq:    /.../jq
+...
+PASS: core pipeline looks healthy.
+```
+
+```text
+$ cxwhere | sed -n '1,12p'
+_codex_text is a function
+_codex_last is a function
+_cx_codex_json is a function
+_cx_log_schema_failure is a function
+cxo is a function
+cxdiffsum_staged is a function
+...
+```
+
 ## Command groups
 
 ### Codex wrappers
