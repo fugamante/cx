@@ -16,6 +16,7 @@ Current scope:
 - operational helpers: `budget`, `log-tail`, `health`
 - process-local utility toggles: `log-off`, `alert-show`, `alert-off`
 - system capture path includes RTK routing (when available) + context clipping budgets
+- chunking utility: `chunk` (stdin -> `----- cx chunk i/N -----` blocks by char budget)
 - Rust command runs now emit repo-aware `runs.jsonl` entries with token usage (when available)
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
 - typed `runs.jsonl` + `state.json` models
@@ -94,6 +95,7 @@ cargo run -- fix ls /does-not-exist
 cargo run -- budget
 cargo run -- log-tail 3
 cargo run -- health
+printf 'very long text...' | CX_CONTEXT_BUDGET_CHARS=2000 cargo run -- chunk
 cargo run -- metrics 50
 cargo run -- metrics 50 | jq .
 cargo run -- prompt implement "add cache diagnostics"

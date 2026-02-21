@@ -136,6 +136,7 @@ fn print_help() {
     println!("  log-off            Disable cx logging in this process");
     println!("  alert-show         Show active alert thresholds/toggles");
     println!("  alert-off          Disable alerts in this process");
+    println!("  chunk              Chunk stdin text by context budget chars");
     println!("  metrics [N]        Token and duration aggregates from last N runs");
     println!("  prompt <mode> <request>  Generate Codex-ready prompt block");
     println!("  roles [role]       List roles or print role-specific prompt header");
@@ -2723,6 +2724,50 @@ fn cmd_alert_off() -> i32 {
     0
 }
 
+fn chunk_text_by_budget(input: &str, chunk_chars: usize) -> Vec<String> {
+    if chunk_chars == 0 || input.is_empty() {
+        return vec![input.to_string()];
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_count = 0usize;
+    for ch in input.chars() {
+        cur.push(ch);
+        cur_count += 1;
+        if cur_count >= chunk_chars {
+            chunks.push(cur);
+            cur = String::new();
+            cur_count = 0;
+        }
+    }
+    if !cur.is_empty() || chunks.is_empty() {
+        chunks.push(cur);
+    }
+    chunks
+}
+
+fn cmd_chunk() -> i32 {
+    let mut buf = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+        eprintln!("cxrs chunk: failed to read stdin: {e}");
+        return 1;
+    }
+    let budget = env::var("CX_CONTEXT_BUDGET_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(12000);
+    let chunks = chunk_text_by_budget(&buf, budget);
+    let total = chunks.len();
+    for (i, ch) in chunks.iter().enumerate() {
+        println!("----- cx chunk {}/{} -----", i + 1, total);
+        print!("{ch}");
+        if !ch.ends_with('\n') {
+            println!();
+        }
+    }
+    0
+}
+
 fn cmd_next(command: &[String]) -> i32 {
     let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
@@ -3438,6 +3483,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
         "cxlog_off" | "log-off" => cmd_log_off(),
         "cxalert_show" | "alert-show" => cmd_alert_show(),
         "cxalert_off" | "alert-off" => cmd_alert_off(),
+        "cxchunk" | "chunk" => cmd_chunk(),
         "cxfix_run" | "fix-run" => {
             if args.len() < 2 {
                 eprintln!("Usage: {APP_NAME} cx fix-run <command> [args...]");
@@ -3544,6 +3590,8 @@ fn is_compat_name(name: &str) -> bool {
             | "alert-show"
             | "cxalert_off"
             | "alert-off"
+            | "cxchunk"
+            | "chunk"
             | "cxfix_run"
             | "fix-run"
             | "cxreplay"
@@ -3710,6 +3758,7 @@ fn main() {
         "log-off" => cmd_log_off(),
         "alert-show" => cmd_alert_show(),
         "alert-off" => cmd_alert_off(),
+        "chunk" => cmd_chunk(),
         "cx-compat" => cmd_cx_compat(&args[2..]),
         "profile" => {
             let n = args
