@@ -14,6 +14,7 @@ Current scope:
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
 - operational helpers: `budget`, `log-tail`, `health`
+- process-local utility toggles: `log-off`, `alert-show`, `alert-off`
 - system capture path includes RTK routing (when available) + context clipping budgets
 - Rust command runs now emit repo-aware `runs.jsonl` entries with token usage (when available)
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)

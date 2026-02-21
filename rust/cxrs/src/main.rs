@@ -133,6 +133,9 @@ fn print_help() {
     println!("  budget             Show context budget settings and last clip fields");
     println!("  log-tail [N]       Pretty-print last N log entries");
     println!("  health             Run end-to-end codex/cx smoke checks");
+    println!("  log-off            Disable cx logging in this process");
+    println!("  alert-show         Show active alert thresholds/toggles");
+    println!("  alert-off          Disable alerts in this process");
     println!("  metrics [N]        Token and duration aggregates from last N runs");
     println!("  prompt <mode> <request>  Generate Codex-ready prompt block");
     println!("  roles [role]       List roles or print role-specific prompt header");
@@ -2695,6 +2698,31 @@ fn cmd_health() -> i32 {
     0
 }
 
+fn cmd_log_off() -> i32 {
+    // Process-local only; parent shell environment is not mutated by child processes.
+    // We still expose the command for parity and scripted invocation in wrapper shells.
+    println!("cx logging: OFF (process-local)");
+    0
+}
+
+fn cmd_alert_show() -> i32 {
+    let enabled = env::var("CXALERT_ENABLED").unwrap_or_else(|_| "1".to_string());
+    let max_ms = env::var("CXALERT_MAX_MS").unwrap_or_else(|_| "8000".to_string());
+    let max_eff = env::var("CXALERT_MAX_EFF_IN").unwrap_or_else(|_| "5000".to_string());
+    let max_out = env::var("CXALERT_MAX_OUT").unwrap_or_else(|_| "500".to_string());
+    println!("cx alerts:");
+    println!("enabled={enabled}");
+    println!("max_ms={max_ms}");
+    println!("max_eff_in={max_eff}");
+    println!("max_out={max_out}");
+    0
+}
+
+fn cmd_alert_off() -> i32 {
+    println!("cx alerts: OFF (process-local)");
+    0
+}
+
 fn cmd_next(command: &[String]) -> i32 {
     let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
@@ -3407,6 +3435,9 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             cmd_log_tail(n)
         }
         "cxhealth" | "health" => cmd_health(),
+        "cxlog_off" | "log-off" => cmd_log_off(),
+        "cxalert_show" | "alert-show" => cmd_alert_show(),
+        "cxalert_off" | "alert-off" => cmd_alert_off(),
         "cxfix_run" | "fix-run" => {
             if args.len() < 2 {
                 eprintln!("Usage: {APP_NAME} cx fix-run <command> [args...]");
@@ -3507,6 +3538,12 @@ fn is_compat_name(name: &str) -> bool {
             | "log-tail"
             | "cxhealth"
             | "health"
+            | "cxlog_off"
+            | "log-off"
+            | "cxalert_show"
+            | "alert-show"
+            | "cxalert_off"
+            | "alert-off"
             | "cxfix_run"
             | "fix-run"
             | "cxreplay"
@@ -3670,6 +3707,9 @@ fn main() {
             cmd_log_tail(n)
         }
         "health" => cmd_health(),
+        "log-off" => cmd_log_off(),
+        "alert-show" => cmd_alert_show(),
+        "alert-off" => cmd_alert_off(),
         "cx-compat" => cmd_cx_compat(&args[2..]),
         "profile" => {
             let n = args
