@@ -5,7 +5,7 @@
 Current scope:
 - standalone binary scaffold
 - stable CLI surface for experimentation
-- non-interactive `doctor` checks
+- non-interactive `doctor` checks (binaries + Codex JSON pipeline + text probe)
 - typed `state` command (`show/get/set`) with atomic JSON writes
 - `policy` command for dangerous-command classification rules
 - `bench` command for repeated runtime/token summaries

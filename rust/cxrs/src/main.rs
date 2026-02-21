@@ -706,13 +706,88 @@ fn print_doctor() -> i32 {
             println!("WARN: {bin} not found (optional)");
         }
     }
-    if missing_required == 0 {
-        println!("PASS: environment is ready for cxrs spike development.");
-        0
-    } else {
+    if missing_required > 0 {
         println!("FAIL: install required binaries before using cxrs.");
-        1
+        return 1;
     }
+
+    println!();
+    println!("== codex json pipeline ==");
+    let probe = match run_codex_jsonl("ping") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("FAIL: codex json pipeline failed: {e}");
+            return 1;
+        }
+    };
+    let mut agent_count = 0u64;
+    let mut reasoning_count = 0u64;
+    for line in probe.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("item.completed") {
+            continue;
+        }
+        let t = v
+            .get("item")
+            .and_then(|i| i.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if t == "agent_message" {
+            agent_count += 1;
+        } else if t == "reasoning" {
+            reasoning_count += 1;
+        }
+    }
+    println!("agent_message events: {agent_count}");
+    println!("reasoning events:     {reasoning_count}");
+    if agent_count < 1 {
+        eprintln!("FAIL: expected >=1 agent_message event");
+        return 1;
+    }
+
+    println!();
+    println!("== _codex_text equivalent ==");
+    let probe2 = match run_codex_jsonl("2+2? (just the number)") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("FAIL: codex text probe failed: {e}");
+            return 1;
+        }
+    };
+    let txt = extract_agent_text(&probe2).unwrap_or_default();
+    println!("output: {txt}");
+    if txt.trim() != "4" {
+        println!("WARN: expected '4', got '{}'", txt.trim());
+    }
+
+    println!();
+    println!("== git context (optional) ==");
+    match Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            println!("in git repo: yes");
+            if let Ok(branch_out) = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .output()
+            {
+                let branch = String::from_utf8_lossy(&branch_out.stdout)
+                    .trim()
+                    .to_string();
+                if !branch.is_empty() {
+                    println!("branch: {branch}");
+                }
+            }
+        }
+        _ => println!("in git repo: no (skip git-based checks)"),
+    }
+
+    println!();
+    println!("PASS: core pipeline looks healthy.");
+    0
 }
 
 fn print_where() -> i32 {
