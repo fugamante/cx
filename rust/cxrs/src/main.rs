@@ -595,6 +595,41 @@ fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String> {
     Ok(runs)
 }
 
+fn file_len(path: &Path) -> u64 {
+    fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+fn load_runs_appended(log_file: &Path, offset: u64) -> Result<Vec<RunEntry>, String> {
+    let len = file_len(log_file);
+    if len <= offset {
+        return Ok(Vec::new());
+    }
+    let mut file =
+        File::open(log_file).map_err(|e| format!("cannot open {}: {e}", log_file.display()))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read {}: {e}", log_file.display()))?;
+    let start = (offset as usize).min(bytes.len());
+    let tail = &bytes[start..];
+    let slice = String::from_utf8_lossy(tail);
+    let mut out = Vec::new();
+    for line in slice.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(entry) = serde_json::from_str::<RunEntry>(line) {
+            out.push(entry);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_ts_epoch(ts: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|dt| dt.timestamp())
+}
+
 fn print_profile(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
         eprintln!("cxrs: unable to resolve log file");
@@ -1369,20 +1404,18 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
     let mut eff_totals: Vec<u64> = Vec::new();
     let mut out_totals: Vec<u64> = Vec::new();
     let mut failures = 0usize;
+    let mut prompt_hash_matched = 0usize;
+    let mut appended_row_total = 0usize;
 
     for _ in 0..runs {
-        let before_runs = if let Some(path) = &log_file {
-            if path.exists() {
-                load_runs(path, usize::MAX).unwrap_or_default()
-            } else {
-                Vec::new()
-            }
+        let before_offset = if let Some(path) = &log_file {
+            if path.exists() { file_len(path) } else { 0 }
         } else {
-            Vec::new()
+            0
         };
-        let before_len = before_runs.len();
 
         let started = Instant::now();
+        let started_epoch = Utc::now().timestamp();
         let code = match run_command_for_bench(command, disable_cx_log, passthru) {
             Ok(c) => c,
             Err(e) => {
@@ -1390,6 +1423,7 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
                 return 1;
             }
         };
+        let ended_epoch = Utc::now().timestamp();
         let elapsed_ms = started.elapsed().as_millis() as u64;
         durations.push(elapsed_ms);
         if code != 0 {
@@ -1397,28 +1431,65 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
         }
 
         if let Some(path) = &log_file {
-            if path.exists() {
-                let after_runs = load_runs(path, usize::MAX).unwrap_or_default();
-                if after_runs.len() > before_len {
-                    let mut eff_sum = 0u64;
-                    let mut out_sum = 0u64;
-                    let mut any_eff = false;
-                    let mut any_out = false;
-                    for r in after_runs.iter().skip(before_len) {
-                        if let Some(v) = r.effective_input_tokens {
-                            eff_sum += v;
-                            any_eff = true;
-                        }
-                        if let Some(v) = r.output_tokens {
-                            out_sum += v;
-                            any_out = true;
+            if path.exists() && !disable_cx_log {
+                let appended = load_runs_appended(path, before_offset).unwrap_or_default();
+                if !appended.is_empty() {
+                    let windowed: Vec<RunEntry> = appended
+                        .into_iter()
+                        .filter(|r| {
+                            let Some(ts) = r.ts.as_deref() else {
+                                return true;
+                            };
+                            let Some(epoch) = parse_ts_epoch(ts) else {
+                                return true;
+                            };
+                            epoch >= started_epoch.saturating_sub(1)
+                                && epoch <= ended_epoch.saturating_add(1)
+                        })
+                        .collect();
+                    appended_row_total += windowed.len();
+
+                    let mut hash_counts: HashMap<String, usize> = HashMap::new();
+                    for r in &windowed {
+                        if let Some(h) = r.prompt_sha256.as_deref() {
+                            if !h.is_empty() {
+                                *hash_counts.entry(h.to_string()).or_insert(0) += 1;
+                            }
                         }
                     }
-                    if any_eff {
-                        eff_totals.push(eff_sum);
-                    }
-                    if any_out {
-                        out_totals.push(out_sum);
+
+                    let preferred_hash = hash_counts.into_iter().max_by(|a, b| a.1.cmp(&b.1));
+                    let correlated: Vec<&RunEntry> = if let Some((h, _)) = preferred_hash {
+                        prompt_hash_matched += 1;
+                        windowed
+                            .iter()
+                            .filter(|r| r.prompt_sha256.as_deref() == Some(h.as_str()))
+                            .collect()
+                    } else {
+                        windowed.iter().collect()
+                    };
+
+                    if !correlated.is_empty() {
+                        let mut eff_sum = 0u64;
+                        let mut out_sum = 0u64;
+                        let mut any_eff = false;
+                        let mut any_out = false;
+                        for r in correlated {
+                            if let Some(v) = r.effective_input_tokens {
+                                eff_sum += v;
+                                any_eff = true;
+                            }
+                            if let Some(v) = r.output_tokens {
+                                out_sum += v;
+                                any_out = true;
+                            }
+                        }
+                        if any_eff {
+                            eff_totals.push(eff_sum);
+                        }
+                        if any_out {
+                            out_totals.push(out_sum);
+                        }
                     }
                 }
             }
@@ -1460,6 +1531,12 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
         "cxbench_passthru: {}",
         if passthru { "enabled" } else { "disabled" }
     );
+    if !disable_cx_log {
+        println!(
+            "cxbench_correlation: prompt_hash_matches={}/{} runs, appended_rows={}",
+            prompt_hash_matched, runs, appended_row_total
+        );
+    }
 
     if failures > 0 { 1 } else { 0 }
 }

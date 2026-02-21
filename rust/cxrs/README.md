@@ -9,6 +9,7 @@ Current scope:
 - typed `state` command (`show/get/set`) with atomic JSON writes
 - `policy` command for dangerous-command classification rules
 - `bench` command for repeated runtime/token summaries
+- `bench` log correlation using appended-run windows + prompt-hash preference
 - `metrics` parity command for token/time aggregates
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - `cx` compatibility shim for bash-style command names
@@ -94,6 +95,5 @@ cargo run -- replay <id>
 
 ## Next steps
 
-- improve `bench` run correlation with prompt hashes for tighter token attribution
 - add richer prompt templates by mode with optional schema snippets
 - add a compatibility wrapper (`cxrs cx...`) to ease side-by-side Bash/Rust validation
