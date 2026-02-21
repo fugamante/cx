@@ -88,6 +88,8 @@ fn print_help() {
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
+    println!("  diffsum            Summarize unstaged diff (strict schema)");
+    println!("  diffsum-staged     Summarize staged diff (strict schema)");
     println!("  commitjson         Generate strict JSON commit object from staged diff");
     println!("  commitmsg          Generate commit message text from staged diff");
     println!("  replay <id>        Replay quarantined schema run in strict mode");
@@ -822,6 +824,133 @@ fn generate_commitjson_value() -> Result<Value, String> {
     Ok(v)
 }
 
+fn render_bullets(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| v.as_str().unwrap_or("").trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Some(Value::String(s)) => {
+            if s.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![s.trim().to_string()]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn print_diffsum_human(v: &Value) {
+    let title = v.get("title").and_then(Value::as_str).unwrap_or("");
+    let summary = render_bullets(v.get("summary"));
+    let risks = render_bullets(v.get("risk_edge_cases"));
+    let tests = render_bullets(v.get("suggested_tests"));
+
+    println!("Title: {title}");
+    println!();
+    println!("Summary:");
+    if summary.is_empty() {
+        println!("- n/a");
+    } else {
+        for s in summary {
+            println!("- {s}");
+        }
+    }
+    println!();
+    println!("Risk/edge cases:");
+    if risks.is_empty() {
+        println!("- n/a");
+    } else {
+        for s in risks {
+            println!("- {s}");
+        }
+    }
+    println!();
+    println!("Suggested tests:");
+    if tests.is_empty() {
+        println!("- n/a");
+    } else {
+        for s in tests {
+            println!("- {s}");
+        }
+    }
+}
+
+fn generate_diffsum_value(tool: &str, staged: bool) -> Result<Value, String> {
+    let git_args = if staged {
+        vec!["diff", "--staged", "--no-color"]
+    } else {
+        vec!["diff", "--no-color"]
+    };
+    let (diff_out, status) = run_git_capture(&git_args)?;
+    if status != 0 {
+        return Err(format!(
+            "git {} failed with status {status}",
+            git_args.join(" ")
+        ));
+    }
+    if diff_out.trim().is_empty() {
+        if staged {
+            return Err("no staged changes.".to_string());
+        }
+        return Err("no unstaged changes.".to_string());
+    }
+
+    let pr_fmt = read_state()
+        .and_then(|s| s.preferences.pr_summary_format)
+        .unwrap_or_else(|| "standard".to_string());
+    let schema = r#"{
+  "title": "short title",
+  "summary": ["bullet", "bullet"],
+  "risk_edge_cases": ["bullet", "bullet"],
+  "suggested_tests": ["bullet", "bullet"]
+}"#;
+    let diff_label = if staged { "STAGED DIFF" } else { "DIFF" };
+    let task_input = format!(
+        "Write a PR-ready summary of this diff.\nKeep bullets concise and actionable.\nPreferred PR summary format: {pr_fmt}\n\n{diff_label}:\n{diff_out}"
+    );
+    let raw = run_strict_schema(tool, schema, &task_input)?;
+    let v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
+
+    let has_title = v.get("title").and_then(Value::as_str).is_some();
+    let has_summary = v.get("summary").is_some();
+    let has_risks = v.get("risk_edge_cases").is_some();
+    let has_tests = v.get("suggested_tests").is_some();
+    if !(has_title && has_summary && has_risks && has_tests) {
+        let reason =
+            "missing_or_invalid_required_keys:title,summary,risk_edge_cases,suggested_tests";
+        let qid = log_schema_failure(tool, reason, &raw, schema, &task_input)
+            .unwrap_or_else(|_| "".to_string());
+        return Err(format!(
+            "schema validation failed; quarantine_id={qid}; raw={raw}"
+        ));
+    }
+    Ok(v)
+}
+
+fn cmd_diffsum(staged: bool) -> i32 {
+    let tool = if staged {
+        "cxrs_diffsum_staged"
+    } else {
+        "cxrs_diffsum"
+    };
+    match generate_diffsum_value(tool, staged) {
+        Ok(v) => {
+            print_diffsum_human(&v);
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "cxrs {}: {e}",
+                if staged { "diffsum-staged" } else { "diffsum" }
+            );
+            1
+        }
+    }
+}
+
 fn cmd_commitjson() -> i32 {
     match generate_commitjson_value() {
         Ok(v) => match serde_json::to_string_pretty(&v) {
@@ -1059,6 +1188,8 @@ fn main() {
             }
             cmd_next(&args[2..])
         }
+        "diffsum" => cmd_diffsum(false),
+        "diffsum-staged" => cmd_diffsum(true),
         "commitjson" => cmd_commitjson(),
         "commitmsg" => cmd_commitmsg(),
         "replay" => {
