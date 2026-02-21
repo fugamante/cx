@@ -8,6 +8,8 @@ Current scope:
 - non-interactive `doctor` checks
 - typed `runs.jsonl` + `state.json` models
 - `profile` summary command using repo-aware log resolution
+- `alert` anomaly report command with threshold-based summaries
+- `optimize` recommendation engine from run telemetry
 - `trace` command for run-level deep dive
 - schema failure quarantine storage + logging
 - strict `replay` command for quarantined schema runs
@@ -34,6 +36,10 @@ cargo run -- version
 cargo run -- doctor
 cargo run -- profile
 cargo run -- profile 100
+cargo run -- alert
+cargo run -- alert 200
+cargo run -- optimize
+cargo run -- optimize 200
 cargo run -- trace
 cargo run -- trace 5
 cargo run -- next git -C ~/cxcodex status --short

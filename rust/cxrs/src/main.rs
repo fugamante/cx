@@ -2,6 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -86,6 +87,8 @@ fn print_help() {
     println!("  version            Print tool version");
     println!("  doctor             Run non-interactive environment checks");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
+    println!("  alert [N]          Report anomalies from last N runs (default 50)");
+    println!("  optimize [N]       Recommend cost/latency improvements from last N runs");
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
     println!("  diffsum            Summarize unstaged diff (strict schema)");
@@ -525,6 +528,302 @@ fn print_profile(n: usize) -> i32 {
     } else {
         println!("Heaviest context: n/a");
     }
+    println!("log_file: {}", log_file.display());
+    0
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    env::var(name)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn print_alert(n: usize) -> i32 {
+    let Some(log_file) = resolve_log_file() else {
+        eprintln!("cxrs: unable to resolve log file");
+        return 1;
+    };
+    if !log_file.exists() {
+        println!("== cxrs alert (last {n} runs) ==");
+        println!("Runs: 0");
+        println!("Slow threshold violations: 0");
+        println!("Token threshold violations: 0");
+        println!("Avg cache hit rate: n/a");
+        println!("Top 5 slowest: n/a");
+        println!("Top 5 heaviest: n/a");
+        println!("log_file: {}", log_file.display());
+        return 0;
+    }
+    let runs = match load_runs(&log_file, n) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs alert: {e}");
+            return 1;
+        }
+    };
+    let total = runs.len();
+    let max_ms = env_u64("CXALERT_MAX_MS", 12000);
+    let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
+
+    let mut slow_violations = 0usize;
+    let mut token_violations = 0usize;
+    let mut sum_in: u64 = 0;
+    let mut sum_cached: u64 = 0;
+
+    for run in &runs {
+        let d = run.duration_ms.unwrap_or(0);
+        let eff = run.effective_input_tokens.unwrap_or(0);
+        if d > max_ms {
+            slow_violations += 1;
+        }
+        if eff > max_eff {
+            token_violations += 1;
+        }
+        sum_in += run.input_tokens.unwrap_or(0);
+        sum_cached += run.cached_input_tokens.unwrap_or(0);
+    }
+
+    let mut slowest: Vec<(u64, String, String)> = runs
+        .iter()
+        .filter_map(|r| {
+            r.duration_ms.map(|d| {
+                (
+                    d,
+                    r.tool.clone().unwrap_or_else(|| "unknown".to_string()),
+                    r.ts.clone().unwrap_or_else(|| "n/a".to_string()),
+                )
+            })
+        })
+        .collect();
+    slowest.sort_by(|a, b| b.0.cmp(&a.0));
+    slowest.truncate(5);
+
+    let mut heaviest: Vec<(u64, String, String)> = runs
+        .iter()
+        .filter_map(|r| {
+            r.effective_input_tokens.map(|e| {
+                (
+                    e,
+                    r.tool.clone().unwrap_or_else(|| "unknown".to_string()),
+                    r.ts.clone().unwrap_or_else(|| "n/a".to_string()),
+                )
+            })
+        })
+        .collect();
+    heaviest.sort_by(|a, b| b.0.cmp(&a.0));
+    heaviest.truncate(5);
+
+    let cache_hit = if sum_in == 0 {
+        None
+    } else {
+        Some((sum_cached as f64 / sum_in as f64) * 100.0)
+    };
+
+    println!("== cxrs alert (last {n} runs) ==");
+    println!("Runs: {total}");
+    println!("Thresholds: max_ms={max_ms}, max_eff_in={max_eff}");
+    println!("Slow threshold violations: {slow_violations}");
+    println!("Token threshold violations: {token_violations}");
+    match cache_hit {
+        Some(v) => println!("Avg cache hit rate: {}%", v.round() as i64),
+        None => println!("Avg cache hit rate: n/a"),
+    }
+
+    if slowest.is_empty() {
+        println!("Top 5 slowest: n/a");
+    } else {
+        println!("Top 5 slowest:");
+        for (d, tool, ts) in slowest {
+            println!("- {d}ms | {tool} | {ts}");
+        }
+    }
+
+    if heaviest.is_empty() {
+        println!("Top 5 heaviest: n/a");
+    } else {
+        println!("Top 5 heaviest:");
+        for (e, tool, ts) in heaviest {
+            println!("- {e} effective tokens | {tool} | {ts}");
+        }
+    }
+    println!("log_file: {}", log_file.display());
+    0
+}
+
+fn print_optimize(n: usize) -> i32 {
+    let Some(log_file) = resolve_log_file() else {
+        eprintln!("cxrs: unable to resolve log file");
+        return 1;
+    };
+    if !log_file.exists() {
+        println!("== cxrs optimize (last {n} runs) ==");
+        println!("scoreboard: no runs");
+        println!("log_file: {}", log_file.display());
+        return 0;
+    }
+    let runs = match load_runs(&log_file, n) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs optimize: {e}");
+            return 1;
+        }
+    };
+    if runs.is_empty() {
+        println!("== cxrs optimize (last {n} runs) ==");
+        println!("scoreboard: no runs");
+        println!("log_file: {}", log_file.display());
+        return 0;
+    }
+
+    let max_ms = env_u64("CXALERT_MAX_MS", 12000);
+    let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
+    let total = runs.len() as u64;
+
+    let mut tool_eff: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut tool_dur: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut alerts = 0u64;
+    let mut schema_fails = 0u64;
+
+    let mut sum_in: u64 = 0;
+    let mut sum_cached: u64 = 0;
+
+    for r in &runs {
+        let tool = r.tool.clone().unwrap_or_else(|| "unknown".to_string());
+        let eff = r.effective_input_tokens.unwrap_or(0);
+        let dur = r.duration_ms.unwrap_or(0);
+
+        let eff_entry = tool_eff.entry(tool.clone()).or_insert((0, 0));
+        eff_entry.0 += eff;
+        eff_entry.1 += 1;
+
+        let dur_entry = tool_dur.entry(tool).or_insert((0, 0));
+        dur_entry.0 += dur;
+        dur_entry.1 += 1;
+
+        if dur > max_ms || eff > max_eff {
+            alerts += 1;
+        }
+        if r.tool
+            .as_deref()
+            .unwrap_or_default()
+            .contains("schema_failure")
+        {
+            schema_fails += 1;
+        }
+
+        sum_in += r.input_tokens.unwrap_or(0);
+        sum_cached += r.cached_input_tokens.unwrap_or(0);
+    }
+
+    let mut top_eff: Vec<(String, u64)> = tool_eff
+        .into_iter()
+        .map(|(tool, (sum, count))| (tool, if count == 0 { 0 } else { sum / count }))
+        .collect();
+    top_eff.sort_by(|a, b| b.1.cmp(&a.1));
+    top_eff.truncate(5);
+
+    let mut top_dur: Vec<(String, u64)> = tool_dur
+        .into_iter()
+        .map(|(tool, (sum, count))| (tool, if count == 0 { 0 } else { sum / count }))
+        .collect();
+    top_dur.sort_by(|a, b| b.1.cmp(&a.1));
+    top_dur.truncate(5);
+
+    let cache_all = if sum_in == 0 {
+        None
+    } else {
+        Some(sum_cached as f64 / sum_in as f64)
+    };
+
+    let mid = runs.len() / 2;
+    let (first, second) = runs.split_at(mid.max(1).min(runs.len()));
+    let first_in: u64 = first.iter().map(|r| r.input_tokens.unwrap_or(0)).sum();
+    let first_cached: u64 = first
+        .iter()
+        .map(|r| r.cached_input_tokens.unwrap_or(0))
+        .sum();
+    let second_in: u64 = second.iter().map(|r| r.input_tokens.unwrap_or(0)).sum();
+    let second_cached: u64 = second
+        .iter()
+        .map(|r| r.cached_input_tokens.unwrap_or(0))
+        .sum();
+    let first_cache = if first_in == 0 {
+        None
+    } else {
+        Some(first_cached as f64 / first_in as f64)
+    };
+    let second_cache = if second_in == 0 {
+        None
+    } else {
+        Some(second_cached as f64 / second_in as f64)
+    };
+
+    println!("== cxrs optimize (last {n} runs) ==");
+    println!(
+        "scoreboard: runs={}, alerts={} ({}%), schema_failures={} ({}%)",
+        total,
+        alerts,
+        ((alerts as f64 / total as f64) * 100.0).round() as i64,
+        schema_fails,
+        ((schema_fails as f64 / total as f64) * 100.0).round() as i64
+    );
+    match cache_all {
+        Some(v) => println!("cache_hit_rate: {}%", (v * 100.0).round() as i64),
+        None => println!("cache_hit_rate: n/a"),
+    }
+    match (first_cache, second_cache) {
+        (Some(a), Some(b)) => println!(
+            "cache_trend: first_half={}%, second_half={}%, delta={}pp",
+            (a * 100.0).round() as i64,
+            (b * 100.0).round() as i64,
+            ((b - a) * 100.0).round() as i64
+        ),
+        _ => println!("cache_trend: n/a"),
+    }
+
+    println!();
+    println!("Top tools by avg effective_input_tokens:");
+    for (tool, avg_eff) in &top_eff {
+        println!("- {tool}: {avg_eff}");
+    }
+    println!("Top tools by avg duration_ms:");
+    for (tool, avg_dur) in &top_dur {
+        println!("- {tool}: {avg_dur}ms");
+    }
+
+    println!();
+    println!("Recommendations:");
+    if let Some((tool, avg_eff)) = top_eff.first() {
+        if *avg_eff > max_eff / 2 {
+            println!(
+                "- {tool} has high avg effective tokens ({avg_eff}); reduce prompt context and prefer strict schema output."
+            );
+        }
+    }
+    if let Some((tool, avg_dur)) = top_dur.first() {
+        if *avg_dur > max_ms / 2 {
+            println!(
+                "- {tool} is latency-heavy ({avg_dur}ms avg); split large tasks and trim embedded command output."
+            );
+        }
+    }
+    if let (Some(a), Some(b)) = (first_cache, second_cache) {
+        if b + 0.05 < a {
+            println!(
+                "- Cache hit rate dropped across the window; prompts may be drifting. Stabilize templates and reusable context."
+            );
+        }
+    }
+    if schema_fails > 0 {
+        println!(
+            "- Schema failures detected ({schema_fails}); inspect quarantine entries and tighten schema prompts."
+        );
+    }
+    if alerts == 0 && schema_fails == 0 {
+        println!("- No significant anomalies in this window.");
+    }
+
     println!("log_file: {}", log_file.display());
     0
 }
@@ -1303,6 +1602,22 @@ fn main() {
                 .filter(|v| *v > 0)
                 .unwrap_or(50);
             print_profile(n)
+        }
+        "alert" => {
+            let n = args
+                .get(2)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(50);
+            print_alert(n)
+        }
+        "optimize" => {
+            let n = args
+                .get(2)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(200);
+            print_optimize(n)
         }
         "trace" => {
             let n = args
