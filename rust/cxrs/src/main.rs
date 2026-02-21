@@ -12,7 +12,11 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Deserialize, Default, Clone)]
 struct RunEntry {
     #[serde(default)]
+    ts: Option<String>,
+    #[serde(default)]
     tool: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
     #[serde(default)]
     duration_ms: Option<u64>,
     #[serde(default)]
@@ -23,6 +27,14 @@ struct RunEntry {
     effective_input_tokens: Option<u64>,
     #[serde(default)]
     output_tokens: Option<u64>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    repo_root: Option<String>,
+    #[serde(default)]
+    prompt_sha256: Option<String>,
+    #[serde(default)]
+    prompt_preview: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -49,6 +61,7 @@ fn print_help() {
     println!("  version     Print tool version");
     println!("  doctor      Run non-interactive environment checks");
     println!("  profile [N] Summarize last N runs from resolved cx log (default 50)");
+    println!("  trace [N]   Show Nth most-recent run from resolved cx log (default 1)");
     println!("  help        Print this help");
 }
 
@@ -308,6 +321,62 @@ fn print_profile(n: usize) -> i32 {
     0
 }
 
+fn show_field<T: ToString>(label: &str, value: Option<T>) {
+    match value {
+        Some(v) => println!("{label}: {}", v.to_string()),
+        None => println!("{label}: n/a"),
+    }
+}
+
+fn print_trace(n: usize) -> i32 {
+    let Some(log_file) = resolve_log_file() else {
+        eprintln!("cxrs: unable to resolve log file");
+        return 1;
+    };
+    if !log_file.exists() {
+        eprintln!("cxrs trace: no log file at {}", log_file.display());
+        return 1;
+    }
+
+    let runs = match load_runs(&log_file, usize::MAX) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs trace: {e}");
+            return 1;
+        }
+    };
+    if runs.is_empty() {
+        eprintln!("cxrs trace: no runs in {}", log_file.display());
+        return 1;
+    }
+    if n == 0 || n > runs.len() {
+        eprintln!(
+            "cxrs trace: run index out of range (requested {}, available {})",
+            n,
+            runs.len()
+        );
+        return 2;
+    }
+    let idx = runs.len() - n;
+    let run = runs.get(idx).cloned().unwrap_or_default();
+
+    println!("== cxrs trace (run #{n} most recent) ==");
+    show_field("ts", run.ts);
+    show_field("tool", run.tool);
+    show_field("cwd", run.cwd);
+    show_field("duration_ms", run.duration_ms);
+    show_field("input_tokens", run.input_tokens);
+    show_field("cached_input_tokens", run.cached_input_tokens);
+    show_field("effective_input_tokens", run.effective_input_tokens);
+    show_field("output_tokens", run.output_tokens);
+    show_field("scope", run.scope);
+    show_field("repo_root", run.repo_root);
+    show_field("prompt_sha256", run.prompt_sha256);
+    show_field("prompt_preview", run.prompt_preview);
+    println!("log_file: {}", log_file.display());
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("help");
@@ -328,6 +397,14 @@ fn main() {
                 .filter(|v| *v > 0)
                 .unwrap_or(50);
             print_profile(n)
+        }
+        "trace" => {
+            let n = args
+                .get(2)
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(1);
+            print_trace(n)
         }
         _ => {
             eprintln!("{APP_NAME}: unknown command '{cmd}'");
