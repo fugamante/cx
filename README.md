@@ -127,3 +127,8 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `jq`
 - `git`
 - optional: `rtk` (system-output compression route)
+
+## Rust spike
+
+An isolated Rust implementation track exists at `rust/cxrs` for incremental
+porting and experimentation without impacting the production Bash toolchain.
