@@ -50,6 +50,13 @@ Development wrapper (uses release binary when present, otherwise `cargo run`):
 ./bin/cxrs help
 ```
 
+Compatibility check against Bash baseline:
+
+```bash
+cd rust/cxrs
+make compat-check N=50
+```
+
 ## Run
 
 ```bash
@@ -72,6 +79,7 @@ cargo run -- promptlint 200
 cargo run -- cx cxmetrics 50 | jq .
 cargo run -- cx cxdiffsum_staged
 cargo run -- cx cxcommitmsg
+./scripts/compat_check.sh 50
 cargo run -- profile
 cargo run -- profile 100
 cargo run -- alert
