@@ -1,0 +1,50 @@
+name: cxrs-compat
+
+on:
+  push:
+    branches:
+      - codex/rust-spike
+    paths:
+      - rust/cxrs/**
+      - lib/cx/**
+      - cx.sh
+      - .github/workflows/cxrs-compat.yml
+  pull_request:
+    branches:
+      - codex/rust-spike
+    paths:
+      - rust/cxrs/**
+      - lib/cx/**
+      - cx.sh
+      - .github/workflows/cxrs-compat.yml
+  workflow_dispatch:
+
+jobs:
+  compat-check:
+    if: ${{ vars.CXRS_COMPAT_CHECK != '0' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/cxrs
+
+      - name: Rust check
+        run: |
+          cd rust/cxrs
+          cargo fmt --check
+          cargo check
+
+      - name: Compat check
+        run: |
+          cd rust/cxrs
+          ./scripts/compat_check.sh 50

@@ -64,6 +64,11 @@ Current compat coverage:
 - `alert`
 - `worklog`
 
+GitHub Actions:
+- Workflow: `cxrs-compat` (`/path/to/cxcodex/.github/workflows/cxrs-compat.yml`)
+- Triggered on pushes/PRs to `codex/rust-spike` when Rust/Bash-compat paths change.
+- Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
+
 ## Run
 
 ```bash
