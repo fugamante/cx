@@ -6,6 +6,8 @@ Current scope:
 - standalone binary scaffold
 - stable CLI surface for experimentation
 - non-interactive `doctor` checks
+- typed `runs.jsonl` + `state.json` models
+- `profile` summary command using repo-aware log resolution
 
 This crate is intentionally isolated from the production Bash toolchain and can
 evolve independently on the `codex/rust-spike` branch.
@@ -23,6 +25,8 @@ cargo build
 cargo run -- help
 cargo run -- version
 cargo run -- doctor
+cargo run -- profile
+cargo run -- profile 100
 ```
 
 ## Next steps
