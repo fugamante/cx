@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build release install check fmt compat-check
+.PHONY: build release install check fmt compat-check parity-check
 
 fmt:
 	cargo fmt
@@ -23,3 +23,6 @@ install: release
 
 compat-check:
 	./scripts/compat_check.sh $(N)
+
+parity-check:
+	./scripts/parity_check.sh

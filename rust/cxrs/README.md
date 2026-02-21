@@ -61,6 +61,7 @@ Compatibility check against Bash baseline:
 ```bash
 cd rust/cxrs
 make compat-check N=50
+make parity-check
 ```
 
 Current compat coverage:
