@@ -57,6 +57,13 @@ cd rust/cxrs
 make compat-check N=50
 ```
 
+Current compat coverage:
+- `metrics`
+- `profile`
+- `trace`
+- `alert`
+- `worklog`
+
 ## Run
 
 ```bash
