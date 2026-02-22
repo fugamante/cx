@@ -1,77 +1,152 @@
-# cxcodex (Main Branch)
+# cxcodex
 
-`main` is the operational branch for `cx`.
+`cx` is a Rust-first CLI/toolchain for deterministic LLM-assisted development workflows.
 
-Current direction: Bash remains available, but Rust (`rust/cxrs`) is now the preferred growth path. New backend work (including Ollama alternative routing) is implemented in `cxrs` first.
+- Canonical runtime: `rust/cxrs`
+- Authoritative entrypoint: `bin/cx` (Rust-first routing)
+- Bash layer: compatibility/bootstrap fallback only
+- Default backend: Codex
+- Optional backend: Ollama
 
-## Branch identity
+## Architecture
 
-- Stable baseline: Bash runtime (`cx.sh`, `lib/cx/*.sh`)
-- Preferred evolution path: Rust runtime (`rust/cxrs`)
-- Default LLM backend remains Codex
-- Optional local alternative backend: Ollama
+The runtime pipeline is unified in Rust:
 
-## What to use today
+1. Capture system output
+2. Optional RTK routing (system output only)
+3. Optional native reduction
+4. Mandatory context budgeting (chars + lines)
+5. LLM execution
+6. Schema validation (for structured commands)
+7. Quarantine on schema failure
+8. Append-only JSONL logging
 
-Bash (existing shell workflow):
-```bash
-source ~/cxcodex/cx.sh
-cxversion
-```
+Structured commands are schema-enforced from `.codex/schemas/` and deterministic by default.
 
-Rust (recommended for new features):
-```bash
-cd ~/cxcodex/rust/cxrs
-cargo run -- version
-cargo run -- doctor
-```
+## Repository Layout
 
-## Rust backend routing (Codex primary)
-
-`cxrs` supports:
-- `CX_LLM_BACKEND=codex|ollama` (default `codex`)
-- `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
-- `cxrs llm set-backend <codex|ollama>`
-- `cxrs llm set-model <model>`
-- `cxrs llm clear-model`
-- `cxrs llm use <codex|ollama> [model]`
-- `cxrs llm unset <backend|model|all>`
-
-If Ollama backend is selected and no model is configured, `cxrs` prompts once in interactive terminals and persists the selection in `.codex/state.json`.
-
-Examples:
-```bash
-cd ~/cxcodex/rust/cxrs
-cargo run -- doctor
-CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
-CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
-```
-
-Repo wrapper (Rust-first, Bash fallback):
-
-```bash
-cd ~/cxcodex
-./bin/cx cxversion
-```
-
-Compatibility checks:
-
-```bash
-cd ~/cxcodex/rust/cxrs
-./scripts/parity_check.sh
-./scripts/compat_check.sh 50
-```
-
-## Key paths
-
-- Bash entrypoint: `cx.sh`
-- Bash modules: `lib/cx/core.sh`, `lib/cx/commands.sh`
-- Rust runtime: `rust/cxrs/src/main.rs`
-- Rust docs: `rust/cxrs/README.md`
+- `bin/cx` - single entrypoint, Rust-first dispatcher
+- `rust/cxrs/src/main.rs` - canonical implementation
+- `lib/cx/*.sh` - compatibility shell layer
+- `.codex/schemas/` - JSON schema registry
+- `.codex/cxlogs/` - run + schema failure logs (runtime)
+- `.codex/quarantine/` - invalid schema outputs (runtime)
 
 ## Requirements
 
+- OS: macOS or Linux
 - `bash`, `git`, `jq`
-- `codex` (default backend)
-- optional: `ollama` (local backend), `rtk`
-- Rust toolchain (`cargo`, `rustc`) for `cxrs`
+- `codex` CLI (default provider)
+- optional: `ollama`, `rtk`
+- Rust toolchain (`cargo`, `rustc`) for development
+
+## Quick Start
+
+```bash
+cd ~/cxcodex
+./bin/cx version
+./bin/cx core
+./bin/cx cxo git status
+```
+
+## Backend Selection
+
+`cxrs` resolves backend/model using:
+
+1. CLI intent
+2. environment variables
+3. persisted state (`.codex/state.json`)
+4. default (`codex`)
+
+Examples:
+
+```bash
+./bin/cx llm show
+./bin/cx llm use codex
+./bin/cx llm use ollama llama3.1
+./bin/cx llm unset model
+```
+
+## Structured Commands
+
+Schema-enforced commands:
+
+- `commitjson`
+- `diffsum`
+- `diffsum-staged`
+- `next`
+- `fix-run`
+
+Schema registry inspection:
+
+```bash
+./bin/cx schema list
+./bin/cx schema list --json | jq .
+```
+
+Relaxed mode override (not default):
+
+```bash
+CX_SCHEMA_RELAXED=1 ./bin/cx next git status
+```
+
+## Logging + Quarantine
+
+Run log:
+
+- `.codex/cxlogs/runs.jsonl`
+
+Schema failure log:
+
+- `.codex/cxlogs/schema_failures.jsonl`
+
+Quarantine directory:
+
+- `.codex/quarantine/`
+
+Useful commands:
+
+```bash
+./bin/cx metrics 20
+./bin/cx trace
+./bin/cx quarantine list
+./bin/cx replay <quarantine_id>
+```
+
+## Task Graph + Safety + Optimization
+
+Stage II runtime commands:
+
+```bash
+./bin/cx task add "Implement parser hardening" --role implementer
+./bin/cx task list --status pending
+./bin/cx task fanout "Ship release notes improvements" --from staged-diff
+./bin/cx task run <task_id> --mode deterministic --backend codex
+./bin/cx task run-all --status pending
+
+./bin/cx optimize 200
+./bin/cx optimize 200 --json | jq .
+
+./bin/cx policy show
+./bin/cx logs validate --fix=false
+```
+
+## Validation
+
+```bash
+cd rust/cxrs
+cargo check
+cargo test --tests
+
+cd ../..
+./test/bin_cx_entrypoint.sh
+./test/provenance_tools.sh
+./test/schema_registry.sh
+./test/core_pipeline.sh
+```
+
+## Notes
+
+- No automatic checks run during shell startup.
+- Diagnostics are sent to stderr; pipeline-oriented command output remains on stdout.
+- RTK is never used to transform schema JSON outputs.
