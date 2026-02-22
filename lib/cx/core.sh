@@ -117,7 +117,7 @@ fi
 export CX_RTK_MODE="${CX_RTK_MODE:-condense}"
 export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
 export CX_RTK_LAST_ERROR=0
-export CX_RTK_MIN_VERSION="${CX_RTK_MIN_VERSION:-0.0.0}"
+export CX_RTK_MIN_VERSION="${CX_RTK_MIN_VERSION:-0.22.1}"
 export CX_RTK_MAX_VERSION="${CX_RTK_MAX_VERSION:-}"
 export CX_CONTEXT_BUDGET_CHARS="${CX_CONTEXT_BUDGET_CHARS:-12000}"
 export CX_CONTEXT_BUDGET_LINES="${CX_CONTEXT_BUDGET_LINES:-300}"
@@ -224,7 +224,7 @@ cxversion() {
   echo "rtk_enabled: ${rtk_enabled}"
   echo "rtk_system: ${rtk_system}"
   echo "rtk_version: ${rtk_ver}"
-  echo "rtk_supported_min: ${CX_RTK_MIN_VERSION:-0.0.0}"
+  echo "rtk_supported_min: ${CX_RTK_MIN_VERSION:-0.22.1}"
   echo "rtk_supported_max: ${CX_RTK_MAX_VERSION:-<unset>}"
   echo "rtk_usable: ${rtk_ok}"
   echo "budget_chars: ${budget_chars}"
@@ -244,7 +244,7 @@ cxrtk() {
   enabled="${CX_RTK_ENABLED:-0}"
   system="${CX_RTK_SYSTEM:-0}"
   mode="${CX_RTK_MODE:-condense}"
-  min="${CX_RTK_MIN_VERSION:-0.0.0}"
+  min="${CX_RTK_MIN_VERSION:-0.22.1}"
   max="${CX_RTK_MAX_VERSION:-}"
   ver="$(_cx_rtk_version 2>/dev/null || echo "unavailable")"
   if _cx_rtk_usable 1; then

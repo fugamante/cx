@@ -97,7 +97,7 @@ GitHub Actions:
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
 
 RTK version guard:
-- Default: `CX_RTK_MIN_VERSION=0.0.0`, `CX_RTK_MAX_VERSION` unset.
+- Default: `CX_RTK_MIN_VERSION=0.22.1`, `CX_RTK_MAX_VERSION` unset.
 - If installed `rtk` is outside range, `cxrs` warns and falls back to raw system capture.
 
 ## Codex access and session modes

@@ -654,7 +654,7 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
-    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     let rtk_usable = rtk_is_usable();
     let quarantine_dir = resolve_quarantine_dir()
@@ -1158,7 +1158,7 @@ fn rtk_is_usable() -> bool {
     {
         return false;
     }
-    let min_v = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let min_v = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let max_v = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     let ver_raw = rtk_version_raw().unwrap_or_default();
     let Some(cur) = parse_semver_triplet(&ver_raw) else {
@@ -2817,7 +2817,7 @@ fn cmd_rtk_status() -> i32 {
     let enabled = env::var("CX_RTK_ENABLED").unwrap_or_else(|_| "0".to_string());
     let system = env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "0".to_string());
     let mode = env::var("CX_RTK_MODE").unwrap_or_else(|_| "condense".to_string());
-    let min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     let ver = rtk_version_raw().unwrap_or_else(|| "unavailable".to_string());
     let usable = rtk_is_usable();

@@ -124,7 +124,7 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 
 RTK guard behavior:
 - If installed `rtk` is outside `[CX_RTK_MIN_VERSION, CX_RTK_MAX_VERSION]` (max optional), cx emits a warning once and auto-falls back to raw command output.
-- Default range: min `0.0.0`, max unset.
+- Default range: min `0.22.1`, max unset.
 
 ## Machine requirements
 
