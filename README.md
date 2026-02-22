@@ -116,9 +116,14 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `CXLOG_ENABLED=0|1`
 - `CXALERT_ENABLED=0|1`
 - `CX_RTK_SYSTEM=0|1`
+- `CX_RTK_MIN_VERSION` / `CX_RTK_MAX_VERSION`
 - `CX_CONTEXT_BUDGET_CHARS` / `CX_CONTEXT_BUDGET_LINES`
 - `CX_CONTEXT_CLIP_MODE=smart|head|tail`
 - `CX_CONTEXT_CLIP_FOOTER=0|1`
+
+RTK guard behavior:
+- If installed `rtk` is outside `[CX_RTK_MIN_VERSION, CX_RTK_MAX_VERSION]` (max optional), cx emits a warning once and auto-falls back to raw command output.
+- Default range: min `0.0.0`, max unset.
 
 ## Machine requirements
 

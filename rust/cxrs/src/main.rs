@@ -8,11 +8,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+static RTK_WARNED_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize, Default, Clone)]
 struct RunEntry {
@@ -651,6 +653,9 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
+    let rtk_usable = rtk_is_usable();
     let quarantine_dir = resolve_quarantine_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
@@ -674,6 +679,16 @@ fn print_version() {
     println!("quarantine_dir: {quarantine_dir}");
     println!("mode: {mode}");
     println!("schema_relaxed: {schema_relaxed}");
+    println!("rtk_supported_range_min: {rtk_min}");
+    println!(
+        "rtk_supported_range_max: {}",
+        if rtk_max.is_empty() {
+            "<unset>"
+        } else {
+            &rtk_max
+        }
+    );
+    println!("rtk_usable: {rtk_usable}");
     println!("state.preferences.conventional_commits: {cc}");
     println!("state.preferences.pr_summary_format: {pr_fmt}");
 }
@@ -709,6 +724,9 @@ fn print_doctor() -> i32 {
         } else {
             println!("WARN: {bin} not found (optional)");
         }
+    }
+    if bin_in_path("rtk") && !rtk_is_usable() {
+        println!("WARN: rtk version unsupported by configured range; raw fallback will be used.");
     }
     if missing_required > 0 {
         println!("FAIL: install required binaries before using cxrs.");
@@ -1092,6 +1110,85 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(default)
+}
+
+fn parse_semver_triplet(raw: &str) -> Option<(u64, u64, u64)> {
+    let candidate = raw
+        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .find(|s| s.chars().filter(|c| *c == '.').count() >= 1 && !s.is_empty())?;
+    let mut it = candidate.split('.');
+    let major = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let minor = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let patch = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+fn semver_cmp(a: (u64, u64, u64), b: (u64, u64, u64)) -> i8 {
+    if a.0 != b.0 {
+        return if a.0 > b.0 { 1 } else { -1 };
+    }
+    if a.1 != b.1 {
+        return if a.1 > b.1 { 1 } else { -1 };
+    }
+    if a.2 != b.2 {
+        return if a.2 > b.2 { 1 } else { -1 };
+    }
+    0
+}
+
+fn rtk_version_raw() -> Option<String> {
+    let out = Command::new("rtk").arg("--version").output().ok()?;
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() {
+        s = String::from_utf8_lossy(&out.stderr).to_string();
+    }
+    let t = s.trim().to_string();
+    if t.is_empty() { None } else { Some(t) }
+}
+
+fn rtk_is_usable() -> bool {
+    if Command::new("rtk")
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        return false;
+    }
+    let min_v = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let max_v = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
+    let ver_raw = rtk_version_raw().unwrap_or_default();
+    let Some(cur) = parse_semver_triplet(&ver_raw) else {
+        if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
+            eprintln!("cxrs: unable to parse rtk version; falling back to raw command output.");
+        }
+        return false;
+    };
+    let min = parse_semver_triplet(&min_v).unwrap_or((0, 0, 0));
+    if semver_cmp(cur, min) < 0 {
+        if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
+            eprintln!(
+                "cxrs: rtk version '{}' is below supported minimum '{}'; falling back to raw command output.",
+                ver_raw, min_v
+            );
+        }
+        return false;
+    }
+    if !max_v.is_empty() {
+        let max = parse_semver_triplet(&max_v).unwrap_or((u64::MAX, u64::MAX, u64::MAX));
+        if semver_cmp(cur, max) > 0 {
+            if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
+                eprintln!(
+                    "cxrs: rtk version '{}' is above supported maximum '{}'; falling back to raw command output.",
+                    ver_raw, max_v
+                );
+            }
+            return false;
+        }
+    }
+    true
 }
 
 fn print_alert(n: usize) -> i32 {
@@ -1614,16 +1711,6 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         Ok((combined, status))
     }
 
-    fn has_rtk() -> bool {
-        Command::new("rtk")
-            .arg("--help")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    }
-
     fn is_rtk_supported_prefix(cmd0: &str) -> bool {
         matches!(
             cmd0,
@@ -1727,7 +1814,8 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         .and_then(|v| v.parse::<u8>().ok())
         .unwrap_or(1)
         == 1;
-    let processed = if rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && has_rtk() {
+    let rtk_usable = rtk_is_usable();
+    let processed = if rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable {
         let mut rtk_cmd = vec!["rtk".to_string()];
         rtk_cmd.extend_from_slice(cmd);
         match run_capture(&rtk_cmd) {
@@ -1738,7 +1826,7 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         raw_out.clone()
     };
     let (clipped_text, mut stats) = clip_text(&processed);
-    stats.rtk_used = Some(rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && has_rtk());
+    stats.rtk_used = Some(rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable);
     Ok((clipped_text, status, stats))
 }
 

@@ -59,6 +59,7 @@ Required binaries:
 Platform notes:
 - `cxcopy` currently uses macOS `pbcopy`.
 - Shell examples assume POSIX `bash`.
+- RTK routing is guarded by a supported-version range (`CX_RTK_MIN_VERSION`, `CX_RTK_MAX_VERSION`).
 
 ## Install
 
@@ -93,6 +94,10 @@ GitHub Actions:
 - Workflow: `cxrs-compat` (`/path/to/cxcodex/.github/workflows/cxrs-compat.yml`)
 - Triggered on pushes/PRs to `codex/rust-spike` when Rust/Bash-compat paths change.
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
+
+RTK version guard:
+- Default: `CX_RTK_MIN_VERSION=0.0.0`, `CX_RTK_MAX_VERSION` unset.
+- If installed `rtk` is outside range, `cxrs` warns and falls back to raw system capture.
 
 ## Codex access and session modes
 

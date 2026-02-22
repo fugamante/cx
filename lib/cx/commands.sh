@@ -250,7 +250,7 @@ _cx_system_capture() {
   processed_out="$raw_out"
   processed_status=$raw_status
 
-  if [[ "${CX_RTK_SYSTEM:-0}" == "1" ]] && [[ "$rtk_candidate" -eq 1 ]] && _cx_has_rtk; then
+  if [[ "${CX_RTK_SYSTEM:-0}" == "1" ]] && [[ "$rtk_candidate" -eq 1 ]] && _cx_rtk_usable; then
     processed_out="$(rtk "$@" 2>/dev/null)"
     processed_status=$?
     if [[ "$processed_status" -eq 0 ]]; then

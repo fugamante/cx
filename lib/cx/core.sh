@@ -26,15 +26,89 @@ _cx_has_rtk() {
   command -v rtk >/dev/null 2>&1
 }
 
+_cx_rtk_version() {
+  local out ver
+  if ! _cx_has_rtk; then
+    return 1
+  fi
+  out="$(rtk --version 2>/dev/null || true)"
+  ver="$(printf "%s" "$out" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1)"
+  [[ -n "$ver" ]] || return 1
+  printf "%s" "$ver"
+}
+
+_cx_semver_cmp() {
+  local a b
+  a="${1:-0.0.0}"
+  b="${2:-0.0.0}"
+  awk -v A="$a" -v B="$b" '
+    function norm(v, arr, n, i) {
+      n=split(v, arr, /\./);
+      for(i=n+1;i<=3;i++) arr[i]=0;
+    }
+    BEGIN {
+      norm(A, a);
+      norm(B, b);
+      for(i=1;i<=3;i++){
+        if ((a[i]+0) < (b[i]+0)) { print -1; exit }
+        if ((a[i]+0) > (b[i]+0)) { print 1; exit }
+      }
+      print 0
+    }'
+}
+
+_cx_rtk_supported() {
+  local ver min max cmp_min cmp_max
+  _cx_has_rtk || return 1
+  ver="$(_cx_rtk_version 2>/dev/null || true)"
+  [[ -n "$ver" ]] || return 1
+  min="${CX_RTK_MIN_VERSION:-0.0.0}"
+  max="${CX_RTK_MAX_VERSION:-}"
+  cmp_min="$(_cx_semver_cmp "$ver" "$min")"
+  [[ "$cmp_min" -ge 0 ]] || return 1
+  if [[ -n "$max" ]]; then
+    cmp_max="$(_cx_semver_cmp "$ver" "$max")"
+    [[ "$cmp_max" -le 0 ]] || return 1
+  fi
+  return 0
+}
+
+_cx_warn_rtk_unsupported_once() {
+  local ver min max
+  if [[ "${CX_RTK_WARNED_UNSUPPORTED:-0}" == "1" ]]; then
+    return 0
+  fi
+  ver="$(_cx_rtk_version 2>/dev/null || echo "unknown")"
+  min="${CX_RTK_MIN_VERSION:-0.0.0}"
+  max="${CX_RTK_MAX_VERSION:-}"
+  if [[ -n "$max" ]]; then
+    echo "cx: rtk version '$ver' is outside supported range [$min, $max]; falling back to raw command output." >&2
+  else
+    echo "cx: rtk version '$ver' is below supported minimum '$min' or unreadable; falling back to raw command output." >&2
+  fi
+  export CX_RTK_WARNED_UNSUPPORTED=1
+}
+
+_cx_rtk_usable() {
+  local quiet="${1:-0}"
+  if _cx_rtk_supported; then
+    return 0
+  fi
+  if [[ "$quiet" != "1" ]] && _cx_has_rtk; then
+    _cx_warn_rtk_unsupported_once
+  fi
+  return 1
+}
+
 if [[ -z "${CX_RTK_ENABLED+x}" ]]; then
-  if _cx_has_rtk; then
+  if _cx_rtk_usable 1; then
     export CX_RTK_ENABLED=1
   else
     export CX_RTK_ENABLED=0
   fi
 fi
 if [[ -z "${CX_RTK_SYSTEM+x}" ]]; then
-  if _cx_has_rtk; then
+  if _cx_rtk_usable 1; then
     export CX_RTK_SYSTEM=1
   else
     export CX_RTK_SYSTEM=0
@@ -43,6 +117,8 @@ fi
 export CX_RTK_MODE="${CX_RTK_MODE:-condense}"
 export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
 export CX_RTK_LAST_ERROR=0
+export CX_RTK_MIN_VERSION="${CX_RTK_MIN_VERSION:-0.0.0}"
+export CX_RTK_MAX_VERSION="${CX_RTK_MAX_VERSION:-}"
 export CX_CONTEXT_BUDGET_CHARS="${CX_CONTEXT_BUDGET_CHARS:-12000}"
 export CX_CONTEXT_BUDGET_LINES="${CX_CONTEXT_BUDGET_LINES:-300}"
 export CX_CONTEXT_CLIP_MODE="${CX_CONTEXT_CLIP_MODE:-smart}"
@@ -111,6 +187,7 @@ _cx_log_file() {
 cxversion() {
   local root sha ts src logf version_file version_text
   local mode rtk_enabled rtk_system budget_chars budget_lines clip_mode
+  local rtk_ver rtk_ok
   root="$(_cx_git_root)"
   if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
     sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
@@ -134,12 +211,22 @@ cxversion() {
   budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
   budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
   clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  rtk_ver="$(_cx_rtk_version 2>/dev/null || echo "unavailable")"
+  if _cx_rtk_usable; then
+    rtk_ok="true"
+  else
+    rtk_ok="false"
+  fi
   echo "cx version: ${version_text}"
   echo "source=${src}"
   echo "log_file: ${logf}"
   echo "mode: ${mode}"
   echo "rtk_enabled: ${rtk_enabled}"
   echo "rtk_system: ${rtk_system}"
+  echo "rtk_version: ${rtk_ver}"
+  echo "rtk_supported_min: ${CX_RTK_MIN_VERSION:-0.0.0}"
+  echo "rtk_supported_max: ${CX_RTK_MAX_VERSION:-<unset>}"
+  echo "rtk_usable: ${rtk_ok}"
   echo "budget_chars: ${budget_chars}"
   echo "budget_lines: ${budget_lines}"
   echo "clip_mode: ${clip_mode}"
@@ -1415,11 +1502,20 @@ cxdoctor() (
   echo "== binaries =="
   command -v codex >/dev/null 2>&1 || { echo "FAIL: codex not found in PATH"; return 1; }
   command -v jq >/dev/null 2>&1 || { echo "FAIL: jq not found (brew install jq)"; return 1; }
-  command -v rtk >/dev/null 2>&1 || { echo "FAIL: rtk not found (brew install rtk)"; return 1; }
+  if ! command -v rtk >/dev/null 2>&1; then
+    echo "WARN: rtk not found (optional; raw capture fallback will be used)"
+  fi
 
   echo "codex: $(command -v codex)"
   echo "jq:    $(command -v jq)"
-  echo "rtk:   $(command -v rtk)"
+  if command -v rtk >/dev/null 2>&1; then
+    echo "rtk:   $(command -v rtk)"
+    if _cx_rtk_supported; then
+      echo "rtk_version: $(_cx_rtk_version) (supported)"
+    else
+      echo "WARN: rtk version unsupported by configured range; raw fallback enabled"
+    fi
+  fi
   codex --version || { echo "FAIL: codex --version"; return 1; }
 
   echo
