@@ -1,136 +1,55 @@
 # cxcodex (Main Branch)
 
-`main` is the production Bash implementation of `cx`.
+`main` is the operational branch for `cx`.
 
-This branch is the stable, sourceable shell toolchain used from `~/.bashrc`, with repo-aware logging, deterministic structured outputs, safety gates, and operational diagnostics.
+Current direction: Bash remains available, but Rust (`rust/cxrs`) is now the preferred growth path. New backend work (including Ollama alternative routing) is implemented in `cxrs` first.
 
 ## Branch identity
 
-- Primary focus: Bash runtime (`cx.sh` + `lib/cx/*.sh`)
-- Stability level: operational baseline
-- Canonical usage: source from shell bootstrap (`~/.bashrc`)
-- Rust experimentation lives separately on `codex/rust-spike`
+- Stable baseline: Bash runtime (`cx.sh`, `lib/cx/*.sh`)
+- Preferred evolution path: Rust runtime (`rust/cxrs`)
+- Default LLM backend remains Codex
+- Optional local alternative backend: Ollama
 
-If you want the Rust porting track, switch branches:
+## What to use today
 
+Bash (existing shell workflow):
 ```bash
-git checkout codex/rust-spike
-```
-
-## Core design
-
-- Canonical runtime is sourceable and idempotent.
-- `~/.bashrc` should stay a thin loader + env defaults.
-- No automatic checkups on shell startup.
-- Diagnostics go to `stderr`; command data stays pipeline-safe on `stdout`.
-- Structured commands are schema-validated and quarantined on failure.
-
-## Repo layout
-
-- `VERSION`: toolchain version stamp
-- `cx.sh`: compatibility shim entrypoint (sources `lib/cx.sh`)
-- `lib/cx.sh`: canonical source entrypoint
-- `lib/cx/core.sh`: logging, modes, state, schema failure/quarantine
-- `lib/cx/commands.sh`: user commands and structured workflows
-- `bin/cx`: thin executable wrapper
-- `bin/cx-install` / `bin/cx-uninstall`: bootstrap helpers
-- `test/smoke.sh`: function availability smoke test
-
-## Install / bootstrap
-
-```bash
-cd ~/cxcodex
-./bin/cx-install
-source "${CX_SHELL_RC:-$HOME/.bash_profile}"
+source ~/cxcodex/cx.sh
 cxversion
 ```
 
-## Quick validation
-
+Rust (recommended for new features):
 ```bash
-cxdoctor
-cxwhere | sed -n '1,40p'
+cd ~/cxcodex/rust/cxrs
+cargo run -- version
+cargo run -- doctor
 ```
 
-Expected output examples:
+## Rust backend routing (Codex primary)
 
-```text
-$ cxdoctor
-== binaries ==
-codex: /.../codex
-jq:    /.../jq
-...
-PASS: core pipeline looks healthy.
+`cxrs` supports:
+- `CX_LLM_BACKEND=codex|ollama` (default `codex`)
+- `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
+
+Examples:
+```bash
+cd ~/cxcodex/rust/cxrs
+cargo run -- doctor
+CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
+CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
 ```
 
-```text
-$ cxwhere | sed -n '1,12p'
-_codex_text is a function
-_codex_last is a function
-_cx_codex_json is a function
-_cx_log_schema_failure is a function
-cxo is a function
-cxdiffsum_staged is a function
-...
-```
+## Key paths
 
-## Command groups
-
-### Codex wrappers
-- `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`
-
-### Structured (schema-enforced)
-- `cxcommitjson`, `cxcommitmsg`
-- `cxdiffsum`, `cxdiffsum_staged`
-- `cxnext`
-- `cxfix_run`
-
-### Diagnostics and observability
-- `cxmetrics`, `cxprofile`, `cxtrace`
-- `cxalert`, `cxworklog`, `cxoptimize`
-- `cxbudget`, `cxlog_tail`
-
-### Safety and policy
-- `cxpolicy`
-- `cxfix` / `cxfix_run`
-
-### Prompt tooling
-- `cxprompt`, `cxroles`, `cxfanout`, `cxpromptlint`
-
-### State and replay
-- `cxstate`
-- `cxreplay <quarantine_id>`
-
-### Environment/source checks
-- `cxversion`
-- `cxwhere`
-- `cxrtk`
-
-## Logging and files
-
-- Run log: `.codex/cxlogs/runs.jsonl` (repo-aware fallback to `~/.codex/cxlogs/runs.jsonl`)
-- Schema failures: `.codex/cxlogs/schema_failures.jsonl`
-- Quarantine payloads: `.codex/quarantine/<id>.json`
-- Repo state: `.codex/state.json`
-
-## Key toggles
-
-- `CX_MODE=lean|deterministic|verbose`
-- `CX_SCHEMA_RELAXED=0|1`
-- `CXLOG_ENABLED=0|1`
-- `CXALERT_ENABLED=0|1`
-- `CX_RTK_SYSTEM=0|1`
-- `CX_RTK_MIN_VERSION` / `CX_RTK_MAX_VERSION`
-- `CX_CAPTURE_PROVIDER=auto|rtk|native`
-- `CX_NATIVE_REDUCE=0|1`
-- `CX_CONTEXT_BUDGET_CHARS` / `CX_CONTEXT_BUDGET_LINES`
-- `CX_CONTEXT_CLIP_MODE=smart|head|tail`
-- `CX_CONTEXT_CLIP_FOOTER=0|1`
+- Bash entrypoint: `cx.sh`
+- Bash modules: `lib/cx/core.sh`, `lib/cx/commands.sh`
+- Rust runtime: `rust/cxrs/src/main.rs`
+- Rust docs: `rust/cxrs/README.md`
 
 ## Requirements
 
-- `bash`
-- `codex`
-- `jq`
-- `git`
-- optional: `rtk`
+- `bash`, `git`, `jq`
+- `codex` (default backend)
+- optional: `ollama` (local backend), `rtk`
+- Rust toolchain (`cargo`, `rustc`) for `cxrs`
