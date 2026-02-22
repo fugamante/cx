@@ -1,34 +1,40 @@
-# cxcodex
+# cxcodex (Main Branch)
 
-`cxcodex` is a Bash toolchain around Codex CLI focused on predictable terminal workflows:
+`main` is the production Bash implementation of `cx`.
 
-- repo-aware logging and analytics
-- strict schema-first structured commands
-- bounded context capture (RTK + clipping/chunking)
-- safer command execution and replay on failures
+This branch is the stable, sourceable shell toolchain used from `~/.bashrc`, with repo-aware logging, deterministic structured outputs, safety gates, and operational diagnostics.
 
-The repo is the canonical source of truth, while your shell startup file acts as a thin bootstrap loader.
+## Branch identity
+
+- Primary focus: Bash runtime (`cx.sh` + `lib/cx/*.sh`)
+- Stability level: operational baseline
+- Canonical usage: source from shell bootstrap (`~/.bashrc`)
+- Rust experimentation lives separately on `codex/rust-spike`
+
+If you want the Rust porting track, switch branches:
+
+```bash
+git checkout codex/rust-spike
+```
 
 ## Core design
 
-- Canonical runtime lives in this repo and is sourceable on any machine.
-- Bootstrap prefers repo canonical entrypoint when present (`~/cxcodex/cx.sh`).
-- No automatic checkups at shell startup.
-- Diagnostics go to `stderr`; command outputs remain pipeline-friendly on `stdout`.
-- Structured commands are schema-validated and quarantine invalid responses.
+- Canonical runtime is sourceable and idempotent.
+- `~/.bashrc` should stay a thin loader + env defaults.
+- No automatic checkups on shell startup.
+- Diagnostics go to `stderr`; command data stays pipeline-safe on `stdout`.
+- Structured commands are schema-validated and quarantined on failure.
 
 ## Repo layout
 
 - `VERSION`: toolchain version stamp
 - `cx.sh`: compatibility shim entrypoint (sources `lib/cx.sh`)
 - `lib/cx.sh`: canonical source entrypoint
-- `lib/cx/core.sh`: logging, modes, state, schema failure/quarantine, diagnostics
+- `lib/cx/core.sh`: logging, modes, state, schema failure/quarantine
 - `lib/cx/commands.sh`: user commands and structured workflows
-- `bin/cx`: thin executable wrapper (`bin/cx <function> [args...]`)
-- `bin/cx-install`: append repo source line to your shell startup file
-- `bin/cx-uninstall`: remove repo source line from your shell startup file
+- `bin/cx`: thin executable wrapper
+- `bin/cx-install` / `bin/cx-uninstall`: bootstrap helpers
 - `test/smoke.sh`: function availability smoke test
-- `PROJECT_CONTEXT.md`: architecture baseline
 
 ## Install / bootstrap
 
@@ -79,28 +85,26 @@ cxdiffsum_staged is a function
 - `cxnext`
 - `cxfix_run`
 
-These run in strict deterministic schema mode by default.
-Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
-
 ### Diagnostics and observability
 - `cxmetrics`, `cxprofile`, `cxtrace`
 - `cxalert`, `cxworklog`, `cxoptimize`
 - `cxbudget`, `cxlog_tail`
 
 ### Safety and policy
-- `cxpolicy` (dangerous command classifier)
-- `cxfix` / `cxfix_run` (safety-gated remediation execution)
+- `cxpolicy`
+- `cxfix` / `cxfix_run`
 
 ### Prompt tooling
 - `cxprompt`, `cxroles`, `cxfanout`, `cxpromptlint`
 
 ### State and replay
-- `cxstate` (per-repo `.codex/state.json`)
-- `cxreplay <quarantine_id>` (rerun quarantined schema failures with stricter settings)
+- `cxstate`
+- `cxreplay <quarantine_id>`
 
-### Environment and source checks
-- `cxversion` (version + source + log path + key toggles)
-- `cxwhere` (where key functions are defined)
+### Environment/source checks
+- `cxversion`
+- `cxwhere`
+- `cxrtk`
 
 ## Logging and files
 
@@ -116,6 +120,9 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `CXLOG_ENABLED=0|1`
 - `CXALERT_ENABLED=0|1`
 - `CX_RTK_SYSTEM=0|1`
+- `CX_RTK_MIN_VERSION` / `CX_RTK_MAX_VERSION`
+- `CX_CAPTURE_PROVIDER=auto|rtk|native`
+- `CX_NATIVE_REDUCE=0|1`
 - `CX_CONTEXT_BUDGET_CHARS` / `CX_CONTEXT_BUDGET_LINES`
 - `CX_CONTEXT_CLIP_MODE=smart|head|tail`
 - `CX_CONTEXT_CLIP_FOOTER=0|1`
@@ -126,4 +133,4 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `codex`
 - `jq`
 - `git`
-- optional: `rtk` (system-output compression route)
+- optional: `rtk`
