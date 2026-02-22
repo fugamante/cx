@@ -119,6 +119,8 @@ export CX_RTK_MAX_CHARS="${CX_RTK_MAX_CHARS:-}"
 export CX_RTK_LAST_ERROR=0
 export CX_RTK_MIN_VERSION="${CX_RTK_MIN_VERSION:-0.22.1}"
 export CX_RTK_MAX_VERSION="${CX_RTK_MAX_VERSION:-}"
+export CX_CAPTURE_PROVIDER="${CX_CAPTURE_PROVIDER:-auto}"   # auto|rtk|native
+export CX_NATIVE_REDUCE="${CX_NATIVE_REDUCE:-1}"           # 1=on,0=off
 export CX_CONTEXT_BUDGET_CHARS="${CX_CONTEXT_BUDGET_CHARS:-12000}"
 export CX_CONTEXT_BUDGET_LINES="${CX_CONTEXT_BUDGET_LINES:-300}"
 export CX_CONTEXT_CLIP_MODE="${CX_CONTEXT_CLIP_MODE:-smart}"
@@ -187,6 +189,7 @@ _cx_log_file() {
 cxversion() {
   local root sha ts src logf version_file version_text
   local mode rtk_enabled rtk_system budget_chars budget_lines clip_mode
+  local capture_provider native_reduce
   local rtk_ver rtk_ok
   root="$(_cx_git_root)"
   if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
@@ -211,6 +214,8 @@ cxversion() {
   budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
   budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
   clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  capture_provider="${CX_CAPTURE_PROVIDER:-auto}"
+  native_reduce="${CX_NATIVE_REDUCE:-1}"
   rtk_ver="$(_cx_rtk_version 2>/dev/null || echo "unavailable")"
   if _cx_rtk_usable; then
     rtk_ok="true"
@@ -223,6 +228,8 @@ cxversion() {
   echo "mode: ${mode}"
   echo "rtk_enabled: ${rtk_enabled}"
   echo "rtk_system: ${rtk_system}"
+  echo "capture_provider: ${capture_provider}"
+  echo "native_reduce: ${native_reduce}"
   echo "rtk_version: ${rtk_ver}"
   echo "rtk_supported_min: ${CX_RTK_MIN_VERSION:-0.22.1}"
   echo "rtk_supported_max: ${CX_RTK_MAX_VERSION:-<unset>}"
@@ -603,7 +610,7 @@ PY
   local schema_ok schema_reason quarantine_id
   local sys_len_raw sys_len_processed sys_len_clipped
   local sys_lines_raw sys_lines_processed sys_lines_clipped
-  local clipped clip_mode clip_footer budget_chars budget_lines rtk_used
+  local clipped clip_mode clip_footer budget_chars budget_lines rtk_used capture_provider
   prompt_hash_raw="$(printf "%s" "$prompt_raw" | shasum -a 256 | awk '{print $1}')"
   prompt_hash_processed="$(printf "%s" "$prompt_processed" | shasum -a 256 | awk '{print $1}')"
   prompt_len_raw="$(printf "%s" "$prompt_raw" | wc -c | tr -d ' ')"
@@ -628,6 +635,7 @@ PY
     else
       rtk_used="false"
     fi
+    capture_provider="${CX_SYSTEM_CAPTURE_PROVIDER:-native}"
   else
     sys_len_raw="null"
     sys_len_processed="null"
@@ -638,6 +646,7 @@ PY
     clipped="false"
     clip_footer="$([[ "$clip_footer" == "1" ]] && echo "true" || echo "false")"
     rtk_used="false"
+    capture_provider="native"
   fi
   prompt_hash="$prompt_hash_processed"
   prompt_preview="$(printf "%s" "$prompt_processed" | tr '\n' ' ' | cut -c1-160)"
@@ -676,6 +685,7 @@ PY
       printf '"clip_mode":%s,' "$(printf "%s" "$clip_mode" | _cx_json_escape)"
       printf '"clip_footer":%s,' "$clip_footer"
       printf '"rtk_used":%s,' "$rtk_used"
+      printf '"capture_provider":%s,' "$(printf "%s" "$capture_provider" | _cx_json_escape)"
       printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
       printf '"schema_ok":%s,' "$schema_ok"
       printf '"schema_reason":%s,' "$(printf "%s" "$schema_reason" | _cx_json_escape)"
@@ -689,7 +699,7 @@ PY
   _cx_emit_alerts "$tool" "$dur_ms" "${eff_in:-null}" "${out_tok:-null}" "$log_file"
   unset CX_SYSTEM_CAPTURE_SET CX_SYSTEM_OUTPUT_LEN_RAW CX_SYSTEM_OUTPUT_LEN_PROCESSED CX_SYSTEM_OUTPUT_LEN_CLIPPED
   unset CX_SYSTEM_OUTPUT_LINES_RAW CX_SYSTEM_OUTPUT_LINES_PROCESSED CX_SYSTEM_OUTPUT_LINES_CLIPPED
-  unset CX_SYSTEM_CLIPPED CX_SYSTEM_CLIP_MODE_USED CX_SYSTEM_CLIP_FOOTER_USED CX_SYSTEM_RTK_USED
+  unset CX_SYSTEM_CLIPPED CX_SYSTEM_CLIP_MODE_USED CX_SYSTEM_CLIP_FOOTER_USED CX_SYSTEM_RTK_USED CX_SYSTEM_CAPTURE_PROVIDER
   rm -f "$tmpjsonl" 2>/dev/null || true
 }
 

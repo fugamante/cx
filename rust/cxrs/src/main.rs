@@ -66,6 +66,8 @@ struct RunEntry {
     clip_footer: Option<bool>,
     #[serde(default)]
     rtk_used: Option<bool>,
+    #[serde(default)]
+    capture_provider: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -104,6 +106,7 @@ struct CaptureStats {
     clip_mode: Option<String>,
     clip_footer: Option<bool>,
     rtk_used: Option<bool>,
+    capture_provider: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -318,6 +321,7 @@ fn log_codex_run(
       "clip_mode": cap.clip_mode,
       "clip_footer": cap.clip_footer,
       "rtk_used": cap.rtk_used,
+      "capture_provider": cap.capture_provider,
       "schema_ok": schema_ok,
       "schema_reason": schema_reason.unwrap_or(""),
       "quarantine_id": quarantine_id.unwrap_or(""),
@@ -654,6 +658,8 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
     let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     let rtk_usable = rtk_is_usable();
@@ -680,6 +686,8 @@ fn print_version() {
     println!("quarantine_dir: {quarantine_dir}");
     println!("mode: {mode}");
     println!("schema_relaxed: {schema_relaxed}");
+    println!("capture_provider: {capture_provider}");
+    println!("native_reduce: {native_reduce}");
     println!("rtk_supported_range_min: {rtk_min}");
     println!(
         "rtk_supported_range_max: {}",
@@ -1719,6 +1727,99 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         )
     }
 
+    fn normalize_generic(input: &str) -> String {
+        let mut out = String::new();
+        let mut blank_seen = false;
+        for mut line in input.lines().map(|l| l.to_string()) {
+            if line.trim().is_empty() {
+                if !blank_seen {
+                    out.push('\n');
+                }
+                blank_seen = true;
+                continue;
+            }
+            blank_seen = false;
+            if line.chars().count() > 600 {
+                line = format!("{}…", line.chars().take(600).collect::<String>());
+            }
+            out.push_str(&line);
+            out.push('\n');
+        }
+        out
+    }
+
+    fn reduce_git_status(input: &str) -> String {
+        let mut out: Vec<String> = Vec::new();
+        for line in input.lines() {
+            let t = line.trim_start();
+            if line.starts_with("On branch ")
+                || line.starts_with("HEAD detached")
+                || line.starts_with("Your branch ")
+                || line.starts_with("Changes to be committed:")
+                || line.starts_with("Changes not staged for commit:")
+                || line.starts_with("Untracked files:")
+                || line.starts_with("nothing to commit")
+                || line.starts_with("no changes added to commit")
+                || t.starts_with("modified:")
+                || t.starts_with("new file:")
+                || t.starts_with("deleted:")
+                || t.starts_with("renamed:")
+                || t.starts_with("both modified:")
+                || t.starts_with("both added:")
+                || t.starts_with("both deleted:")
+            {
+                out.push(line.to_string());
+            }
+        }
+        if out.is_empty() {
+            input
+                .lines()
+                .take(120)
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            out.join("\n")
+        }
+    }
+
+    fn reduce_diff_like(input: &str) -> String {
+        let mut out: Vec<String> = Vec::new();
+        let mut changed = 0usize;
+        for line in input.lines() {
+            if line.starts_with("diff --git ")
+                || line.starts_with("index ")
+                || line.starts_with("--- ")
+                || line.starts_with("+++ ")
+                || line.starts_with("@@ ")
+                || line.starts_with("Binary files ")
+                || line.starts_with("rename from ")
+                || line.starts_with("rename to ")
+            {
+                out.push(line.to_string());
+            } else if (line.starts_with('+') || line.starts_with('-')) && changed < 300 {
+                out.push(line.to_string());
+                changed += 1;
+            }
+        }
+        if out.is_empty() {
+            input.to_string()
+        } else {
+            out.join("\n")
+        }
+    }
+
+    fn native_reduce_output(cmd: &[String], input: &str) -> String {
+        let cmd0 = cmd.first().map(String::as_str).unwrap_or("");
+        let cmd1 = cmd.get(1).map(String::as_str).unwrap_or("");
+        let reduced = match (cmd0, cmd1) {
+            ("git", "status") => reduce_git_status(input),
+            ("git", "diff") | ("diff", _) => reduce_diff_like(input),
+            _ => input.to_string(),
+        };
+        normalize_generic(&reduced)
+    }
+
     fn first_n_chars(s: &str, n: usize) -> String {
         s.chars().take(n).collect()
     }
@@ -1805,6 +1906,7 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
                 clip_mode: Some(mode_used.to_string()),
                 clip_footer: Some(clip_footer),
                 rtk_used: None,
+                capture_provider: None,
             },
         )
     }
@@ -1815,19 +1917,44 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         .and_then(|v| v.parse::<u8>().ok())
         .unwrap_or(1)
         == 1;
+    let native_reduce = env::var("CX_NATIVE_REDUCE")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(1)
+        == 1;
+    let provider_mode = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let provider_mode = match provider_mode.as_str() {
+        "rtk" | "native" | "auto" => provider_mode,
+        _ => "auto".to_string(),
+    };
     let rtk_usable = rtk_is_usable();
-    let processed = if rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable {
+    let use_rtk = match provider_mode.as_str() {
+        "rtk" => rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable,
+        "native" => false,
+        _ => rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable,
+    };
+    let mut provider_used = if use_rtk { "rtk" } else { "native" }.to_string();
+    let processed = if use_rtk {
         let mut rtk_cmd = vec!["rtk".to_string()];
         rtk_cmd.extend_from_slice(cmd);
         match run_capture(&rtk_cmd) {
             Ok((rtk_out, rtk_status)) if rtk_status == 0 && !rtk_out.trim().is_empty() => rtk_out,
-            _ => raw_out.clone(),
+            _ => {
+                provider_used = "native".to_string();
+                raw_out.clone()
+            }
         }
     } else {
         raw_out.clone()
     };
-    let (clipped_text, mut stats) = clip_text(&processed);
-    stats.rtk_used = Some(rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable);
+    let reduced = if native_reduce {
+        native_reduce_output(cmd, &processed)
+    } else {
+        processed
+    };
+    let (clipped_text, mut stats) = clip_text(&reduced);
+    stats.rtk_used = Some(provider_used == "rtk");
+    stats.capture_provider = Some(provider_used);
     Ok((clipped_text, status, stats))
 }
 
@@ -2709,6 +2836,7 @@ fn cmd_budget() -> i32 {
         show_field("clip_mode", last.clip_mode.clone());
         show_field("clip_footer", last.clip_footer);
         show_field("rtk_used", last.rtk_used);
+        show_field("capture_provider", last.capture_provider.clone());
     }
     0
 }

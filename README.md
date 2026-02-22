@@ -118,6 +118,8 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 - `CXALERT_ENABLED=0|1`
 - `CX_RTK_SYSTEM=0|1`
 - `CX_RTK_MIN_VERSION` / `CX_RTK_MAX_VERSION`
+- `CX_CAPTURE_PROVIDER=auto|rtk|native`
+- `CX_NATIVE_REDUCE=0|1`
 - `CX_CONTEXT_BUDGET_CHARS` / `CX_CONTEXT_BUDGET_LINES`
 - `CX_CONTEXT_CLIP_MODE=smart|head|tail`
 - `CX_CONTEXT_CLIP_FOOTER=0|1`
@@ -125,6 +127,10 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 RTK guard behavior:
 - If installed `rtk` is outside `[CX_RTK_MIN_VERSION, CX_RTK_MAX_VERSION]` (max optional), cx emits a warning once and auto-falls back to raw command output.
 - Default range: min `0.22.1`, max unset.
+- Capture provider behavior:
+  - `auto` (default): use RTK when available/supported, otherwise native reducer path.
+  - `rtk`: prefer RTK, but still fail-safe to native reducer on errors.
+  - `native`: never call RTK; use built-in reducers + budget clipping.
 
 ## Machine requirements
 

@@ -61,6 +61,8 @@ Platform notes:
 - `cxcopy` currently uses macOS `pbcopy`.
 - Shell examples assume POSIX `bash`.
 - RTK routing is guarded by a supported-version range (`CX_RTK_MIN_VERSION`, `CX_RTK_MAX_VERSION`).
+- System capture provider is selectable with `CX_CAPTURE_PROVIDER=auto|rtk|native`.
+- Native reduction can be toggled with `CX_NATIVE_REDUCE=1|0` (default `1`).
 
 ## Install
 
@@ -99,6 +101,8 @@ GitHub Actions:
 RTK version guard:
 - Default: `CX_RTK_MIN_VERSION=0.22.1`, `CX_RTK_MAX_VERSION` unset.
 - If installed `rtk` is outside range, `cxrs` warns and falls back to raw system capture.
+- Default capture provider: `auto` (RTK when usable; native fallback otherwise).
+- To force RTK independence, use `CX_CAPTURE_PROVIDER=native`.
 
 ## Codex access and session modes
 
@@ -135,6 +139,7 @@ cargo run -- budget
 cargo run -- log-tail 3
 cargo run -- health
 cargo run -- rtk-status
+CX_CAPTURE_PROVIDER=native cargo run -- cxo git status
 printf 'very long text...' | CX_CONTEXT_BUDGET_CHARS=2000 cargo run -- chunk
 cargo run -- metrics 50
 cargo run -- metrics 50 | jq .

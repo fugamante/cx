@@ -236,10 +236,12 @@ _cx_system_capture() {
   fi
 
   local cmd="$1"
+  local provider
   local raw_out processed_out
   local raw_status processed_status
   local rtk_candidate=0
   local rtk_used=0
+  local provider_used="native"
 
   case "$cmd" in
     git|diff|ls|tree|grep|test|log|read) rtk_candidate=1 ;;
@@ -249,17 +251,34 @@ _cx_system_capture() {
   raw_status=$?
   processed_out="$raw_out"
   processed_status=$raw_status
+  provider="${CX_CAPTURE_PROVIDER:-auto}"
+  if [[ "$provider" != "auto" && "$provider" != "rtk" && "$provider" != "native" ]]; then
+    provider="auto"
+  fi
 
-  if [[ "${CX_RTK_SYSTEM:-0}" == "1" ]] && [[ "$rtk_candidate" -eq 1 ]] && _cx_rtk_usable; then
+  if [[ "$provider" == "rtk" ]] || [[ "$provider" == "auto" && "${CX_RTK_SYSTEM:-0}" == "1" && "$rtk_candidate" -eq 1 ]]; then
+    if _cx_rtk_usable; then
     processed_out="$(rtk "$@" 2>/dev/null)"
     processed_status=$?
     if [[ "$processed_status" -eq 0 ]]; then
       rtk_used=1
+        provider_used="rtk"
     else
       processed_out="$raw_out"
       processed_status=$raw_status
       rtk_used=0
+        provider_used="native"
     fi
+    else
+      provider_used="native"
+    fi
+  fi
+
+  if [[ "${CX_NATIVE_REDUCE:-1}" == "1" ]]; then
+    processed_out="$(
+      _cx_native_reduce_output "$@" <<< "$processed_out"
+    )"
+    processed_status=$?
   fi
 
   local clipped_out
@@ -274,6 +293,7 @@ _cx_system_capture() {
   export CX_SYSTEM_CLIP_MODE_USED="${CX_CLIP_MODE_USED:-${CX_CONTEXT_CLIP_MODE:-smart}}"
   export CX_SYSTEM_CLIP_FOOTER_USED="${CX_CLIP_FOOTER_USED:-${CX_CONTEXT_CLIP_FOOTER:-1}}"
   export CX_SYSTEM_RTK_USED="$rtk_used"
+  export CX_SYSTEM_CAPTURE_PROVIDER="$provider_used"
   export CX_SYSTEM_CAPTURE_SET=1
 
   if [[ -n "$out_var" ]]; then
@@ -282,6 +302,61 @@ _cx_system_capture() {
     printf "%s" "$clipped_out"
   fi
   return "$processed_status"
+}
+
+_cx_native_reduce_output() {
+  local cmd0="${1:-}"
+  local cmd1="${2:-}"
+  local input line blank_count
+  input="$(cat)"
+  # Strip ANSI escapes if present.
+  input="$(printf "%s" "$input" | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g')"
+
+  case "$cmd0:$cmd1" in
+    git:status)
+      local reduced
+      reduced="$(printf "%s\n" "$input" | awk '
+        /^On branch / || /^HEAD detached/ || /^Your branch / || /^Changes to be committed:/ || /^Changes not staged for commit:/ || /^Untracked files:/ || /^nothing to commit/ || /^no changes added to commit/ {
+          print; next
+        }
+        /^[[:space:]]+(modified:|new file:|deleted:|renamed:|both modified:|both added:|both deleted:|[A-Z?]{1,2}[[:space:]])/ {
+          print; next
+        }')"
+      if [[ -n "$reduced" ]]; then
+        printf "%s\n" "$reduced"
+      else
+        # fallback: if no structured matches, emit first 120 lines
+        printf "%s\n" "$input" | awk 'NR<=120 {print}'
+      fi
+      return 0
+      ;;
+    git:diff|diff:*)
+      printf "%s\n" "$input" | awk '
+        /^diff --git / || /^index / || /^--- / || /^\+\+\+ / || /^@@ / || /^Binary files / || /^rename from / || /^rename to / {print; next}
+        /^[+-]/ { if (changed<300) { print; changed++ } ; next }
+      '
+      return 0
+      ;;
+  esac
+
+  # Generic reducer: collapse excessive blank lines and trim very long lines.
+  prev_blank=0
+  blank_count=0
+  while IFS= read -r line; do
+    if [[ -z "$line" ]]; then
+      blank_count=$((blank_count + 1))
+      if (( blank_count <= 1 )); then
+        printf "\n"
+      fi
+      continue
+    fi
+    blank_count=0
+    if (( ${#line} > 600 )); then
+      printf "%s…\n" "${line:0:600}"
+    else
+      printf "%s\n" "$line"
+    fi
+  done <<< "$input"
 }
 
 _cx_codex_json() {
