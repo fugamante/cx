@@ -68,6 +68,10 @@ struct RunEntry {
     rtk_used: Option<bool>,
     #[serde(default)]
     capture_provider: Option<String>,
+    #[serde(default)]
+    llm_backend: Option<String>,
+    #[serde(default)]
+    llm_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -129,15 +133,15 @@ fn print_help() {
     println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
     println!("  policy [check ...] Show safety rules or classify a command");
     println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
-    println!("  cx <cmd...>        Run command output through codex text mode");
-    println!("  cxj <cmd...>       Run command output through codex JSONL mode");
+    println!("  cx <cmd...>        Run command output through LLM text mode");
+    println!("  cxj <cmd...>       Run command output through LLM JSONL mode");
     println!("  cxo <cmd...>       Run command output and print last agent message");
-    println!("  cxol <cmd...>      Run command output through codex plain mode");
+    println!("  cxol <cmd...>      Run command output through LLM plain mode");
     println!("  cxcopy <cmd...>    Copy cxo output to clipboard (pbcopy)");
     println!("  fix <cmd...>       Explain failures and suggest next steps (text)");
     println!("  budget             Show context budget settings and last clip fields");
     println!("  log-tail [N]       Pretty-print last N log entries");
-    println!("  health             Run end-to-end codex/cx smoke checks");
+    println!("  health             Run end-to-end selected-LLM/cx smoke checks");
     println!("  rtk-status         Show RTK version/range decision and fallback mode");
     println!("  log-off            Disable cx logging in this process");
     println!("  alert-show         Show active alert thresholds/toggles");
@@ -272,6 +276,33 @@ fn effective_input_tokens(input: Option<u64>, cached: Option<u64>) -> Option<u64
     }
 }
 
+fn llm_backend() -> String {
+    match env::var("CX_LLM_BACKEND")
+        .unwrap_or_else(|_| "codex".to_string())
+        .to_lowercase()
+        .as_str()
+    {
+        "ollama" => "ollama".to_string(),
+        _ => "codex".to_string(),
+    }
+}
+
+fn llm_model() -> String {
+    if llm_backend() == "ollama" {
+        env::var("CX_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1".to_string())
+    } else {
+        env::var("CX_MODEL").unwrap_or_default()
+    }
+}
+
+fn llm_bin_name() -> &'static str {
+    if llm_backend() == "ollama" {
+        "ollama"
+    } else {
+        "codex"
+    }
+}
+
 fn log_codex_run(
     tool: &str,
     prompt: &str,
@@ -297,6 +328,8 @@ fn log_codex_run(
     let output = usage.and_then(|u| u.output_tokens);
     let effective = effective_input_tokens(input, cached);
     let cap = capture.cloned().unwrap_or_default();
+    let backend = llm_backend();
+    let model = llm_model();
 
     let row = json!({
       "ts": utc_now_iso(),
@@ -322,6 +355,8 @@ fn log_codex_run(
       "clip_footer": cap.clip_footer,
       "rtk_used": cap.rtk_used,
       "capture_provider": cap.capture_provider,
+      "llm_backend": backend,
+      "llm_model": if model.is_empty() { Value::Null } else { Value::String(model) },
       "schema_ok": schema_ok,
       "schema_reason": schema_reason.unwrap_or(""),
       "quarantine_id": quarantine_id.unwrap_or(""),
@@ -658,6 +693,8 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let backend = llm_backend();
+    let model = llm_model();
     let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
     let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
     let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
@@ -685,6 +722,11 @@ fn print_version() {
     println!("state_file: {state_file}");
     println!("quarantine_dir: {quarantine_dir}");
     println!("mode: {mode}");
+    println!("llm_backend: {backend}");
+    println!(
+        "llm_model: {}",
+        if model.is_empty() { "<unset>" } else { &model }
+    );
     println!("schema_relaxed: {schema_relaxed}");
     println!("capture_provider: {capture_provider}");
     println!("native_reduce: {native_reduce}");
@@ -714,7 +756,9 @@ fn bin_in_path(bin: &str) -> bool {
 }
 
 fn print_doctor() -> i32 {
-    let required = ["git", "jq", "codex"];
+    let backend = llm_backend();
+    let llm_bin = llm_bin_name();
+    let required = ["git", "jq"];
     let optional = ["rtk"];
     let mut missing_required = 0;
 
@@ -725,6 +769,19 @@ fn print_doctor() -> i32 {
         } else {
             println!("MISSING: {bin}");
             missing_required += 1;
+        }
+    }
+    if bin_in_path(llm_bin) {
+        println!("OK: {llm_bin} (selected backend: {backend})");
+    } else {
+        println!("MISSING: {llm_bin} (selected backend: {backend})");
+        missing_required += 1;
+    }
+    if backend != "codex" {
+        if bin_in_path("codex") {
+            println!("OK: codex (recommended primary backend)");
+        } else {
+            println!("WARN: codex not found (recommended primary backend)");
         }
     }
     for bin in optional {
@@ -743,11 +800,11 @@ fn print_doctor() -> i32 {
     }
 
     println!();
-    println!("== codex json pipeline ==");
-    let probe = match run_codex_jsonl("ping") {
+    println!("== llm json pipeline ({backend}) ==");
+    let probe = match run_llm_jsonl("ping") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("FAIL: codex json pipeline failed: {e}");
+            eprintln!("FAIL: {backend} json pipeline failed: {e}");
             return 1;
         }
     };
@@ -780,10 +837,10 @@ fn print_doctor() -> i32 {
 
     println!();
     println!("== _codex_text equivalent ==");
-    let probe2 = match run_codex_jsonl("2+2? (just the number)") {
+    let probe2 = match run_llm_jsonl("2+2? (just the number)") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("FAIL: codex text probe failed: {e}");
+            eprintln!("FAIL: {backend} text probe failed: {e}");
             return 1;
         }
     };
@@ -833,8 +890,15 @@ fn print_where() -> i32 {
     let state_file = resolve_state_file()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
+    let backend = llm_backend();
+    let model = llm_model();
     println!("binary: {exe}");
     println!("source: {source}");
+    println!("llm_backend: {backend}");
+    println!(
+        "llm_model: {}",
+        if model.is_empty() { "<unset>" } else { &model }
+    );
     println!("log_file: {log_file}");
     println!("state_file: {state_file}");
     0
@@ -1609,6 +1673,8 @@ fn print_trace(n: usize) -> i32 {
     show_field("output_tokens", run.output_tokens);
     show_field("scope", run.scope);
     show_field("repo_root", run.repo_root);
+    show_field("llm_backend", run.llm_backend);
+    show_field("llm_model", run.llm_model);
     show_field("prompt_sha256", run.prompt_sha256);
     show_field("prompt_preview", run.prompt_preview);
     println!("log_file: {}", log_file.display());
@@ -1684,6 +1750,52 @@ fn run_codex_plain(prompt: &str) -> Result<String, String> {
         return Err(format!("codex exited with status {}", out.status));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn run_ollama_plain(prompt: &str) -> Result<String, String> {
+    let model = env::var("CX_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
+    let mut child = Command::new("ollama")
+        .args(["run", &model])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to start ollama: {e}"))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("failed writing prompt to ollama stdin: {e}"))?;
+    }
+
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("failed waiting for ollama: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("ollama exited with status {}", out.status));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn run_llm_plain(prompt: &str) -> Result<String, String> {
+    if llm_backend() == "ollama" {
+        run_ollama_plain(prompt)
+    } else {
+        run_codex_plain(prompt)
+    }
+}
+
+fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
+    if llm_backend() != "ollama" {
+        return run_codex_jsonl(prompt);
+    }
+    let text = run_ollama_plain(prompt)?;
+    let wrapped = json!({
+      "type":"item.completed",
+      "item":{"type":"agent_message","text":text}
+    });
+    serde_json::to_string(&wrapped)
+        .map_err(|e| format!("failed to serialize ollama JSONL wrapper: {e}"))
 }
 
 fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
@@ -2164,7 +2276,7 @@ fn run_strict_schema(
 ) -> Result<String, String> {
     let full_prompt = build_strict_schema_prompt(schema, task_input);
     let started = Instant::now();
-    let jsonl = run_codex_jsonl(&full_prompt)?;
+    let jsonl = run_llm_jsonl(&full_prompt)?;
     let raw = extract_agent_text(&jsonl).unwrap_or_default();
     let usage = usage_from_jsonl(&jsonl);
     if raw.trim().is_empty() {
@@ -2180,7 +2292,10 @@ fn run_strict_schema(
             Some("empty_agent_message"),
             Some(&qid),
         );
-        return Err(format!("empty response from codex; quarantine_id={qid}"));
+        return Err(format!(
+            "empty response from {}; quarantine_id={qid}",
+            llm_backend()
+        ));
     }
     if serde_json::from_str::<Value>(&raw).is_err() {
         let qid = log_schema_failure(tool, "invalid_json", &raw, schema, task_input)
@@ -2600,7 +2715,7 @@ fn cmd_cx(command: &[String]) -> i32 {
         }
     };
     let started = Instant::now();
-    let out = match run_codex_plain(&captured) {
+    let out = match run_llm_plain(&captured) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cx: {e}");
@@ -2630,7 +2745,7 @@ fn cmd_cxj(command: &[String]) -> i32 {
         }
     };
     let started = Instant::now();
-    let out = match run_codex_jsonl(&captured) {
+    let out = match run_llm_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxj: {e}");
@@ -2661,7 +2776,7 @@ fn cmd_cxo(command: &[String]) -> i32 {
         }
     };
     let started = Instant::now();
-    let out = match run_codex_jsonl(&captured) {
+    let out = match run_llm_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxo: {e}");
@@ -2697,7 +2812,7 @@ fn cmd_cxcopy(command: &[String]) -> i32 {
         }
     };
     let started = Instant::now();
-    let out = match run_codex_jsonl(&captured) {
+    let out = match run_llm_jsonl(&captured) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxcopy: {e}");
@@ -2761,7 +2876,7 @@ fn cmd_fix(command: &[String]) -> i32 {
         captured
     );
     let started = Instant::now();
-    let jsonl = match run_codex_jsonl(&prompt) {
+    let jsonl = match run_llm_jsonl(&prompt) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix: {e}");
@@ -2879,20 +2994,28 @@ fn cmd_log_tail(n: usize) -> i32 {
 }
 
 fn cmd_health() -> i32 {
-    println!("== codex version ==");
-    match Command::new("codex").arg("--version").output() {
+    let backend = llm_backend();
+    let llm_bin = llm_bin_name();
+    println!("== {backend} version ==");
+    let mut version_cmd = Command::new(llm_bin);
+    if backend == "codex" {
+        version_cmd.arg("--version");
+    } else {
+        version_cmd.arg("--version");
+    }
+    match version_cmd.output() {
         Ok(out) => print!("{}", String::from_utf8_lossy(&out.stdout)),
         Err(e) => {
-            eprintln!("cxrs health: codex --version failed: {e}");
+            eprintln!("cxrs health: {backend} --version failed: {e}");
             return 1;
         }
     }
     println!();
-    println!("== codex json ==");
-    let jsonl = match run_codex_jsonl("ping") {
+    println!("== {backend} json ==");
+    let jsonl = match run_llm_jsonl("ping") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs health: codex json failed: {e}");
+            eprintln!("cxrs health: {backend} json failed: {e}");
             return 1;
         }
     };
@@ -3420,7 +3543,7 @@ fn cmd_replay(id: &str) -> i32 {
     }
 
     let full_prompt = build_strict_schema_prompt(&rec.schema, &rec.prompt);
-    let jsonl = match run_codex_jsonl(&full_prompt) {
+    let jsonl = match run_llm_jsonl(&full_prompt) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs replay: {e}");

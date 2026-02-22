@@ -23,6 +23,7 @@ Rust (`cxrs`) currently includes:
 - context budgeting + clipping + chunking
 - RTK-aware system capture with native fallback reducers
 - compatibility entrypoints (`cx-compat`) for key Bash-style commands
+- selectable LLM backend with Codex primary + Ollama alternative
 
 Bash files remain in-repo for parity checks and migration safety, but they are not the primary development target on this branch.
 
@@ -64,6 +65,8 @@ For stable Bash-focused docs and operational guidance, see `main` branch README.
 
 ## Environment knobs (shared concepts)
 
+- `CX_LLM_BACKEND=codex|ollama` (default `codex`)
+- `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
 - `CX_MODE=lean|deterministic|verbose`
 - `CX_SCHEMA_RELAXED=0|1`
 - `CXLOG_ENABLED=0|1`
@@ -79,11 +82,12 @@ For stable Bash-focused docs and operational guidance, see `main` branch README.
 ## Requirements
 
 - Rust toolchain (`cargo`, `rustc`) for primary branch workflows
-- `codex`, `jq`, `git`
+- `jq`, `git`
+- default backend: `codex`
+- optional alternative backend: `ollama` + a local pulled model
 - optional: `rtk`
 - Bash still required for compatibility scripts
 
 ## Related docs
 
 - Rust detailed docs: `rust/cxrs/README.md`
-- Bash architecture baseline: `PROJECT_CONTEXT.md`

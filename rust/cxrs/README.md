@@ -32,6 +32,7 @@ Current scope:
 - strict `commitjson` and `commitmsg` from staged diff
 - strict `diffsum` and `diffsum-staged` PR-summary generators
 - strict `fix-run` remediation suggestions with dangerous-command blocking
+- LLM backend routing: `codex` (default) or `ollama` (local alternative)
 
 This crate is intentionally isolated from the production Bash toolchain and can
 evolve independently on the `codex/rust-spike` branch.
@@ -51,10 +52,11 @@ Operating system:
 - Windows: use WSL for now
 
 Required binaries:
-- `codex`
 - `git`
 - `jq`
 - Rust toolchain (`cargo`, `rustc`)
+- default backend: `codex`
+- optional backend: `ollama` (with local model)
 - optional: `rtk`
 
 Platform notes:
@@ -107,8 +109,8 @@ RTK version guard:
 ## Codex access and session modes
 
 Current implementation:
-- The Rust branch assumes `codex` CLI is already authenticated and usable.
-- This reflects development/testing on a machine with an active personal account/subscription.
+- `codex` remains the primary/default backend (`CX_LLM_BACKEND=codex`).
+- `ollama` can be used as a local alternative (`CX_LLM_BACKEND=ollama` + `CX_OLLAMA_MODEL`).
 - No explicit "session mode" handshake exists yet before command execution.
 
 Planned implementation:
@@ -125,6 +127,9 @@ cargo run -- help
 cargo run -- version
 cargo run -- where
 cargo run -- doctor
+cargo run -- where
+CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
+CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
 cargo run -- state show
 cargo run -- state set preferences.conventional_commits true
 cargo run -- state get preferences.conventional_commits
