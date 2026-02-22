@@ -45,6 +45,13 @@ cargo run -- doctor
 cargo run -- llm show
 ```
 
+Repo wrapper (Rust-first, Bash fallback):
+
+```bash
+cd ~/cxcodex
+./bin/cx cxversion
+```
+
 Compatibility checks:
 
 ```bash

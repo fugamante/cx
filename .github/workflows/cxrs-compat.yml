@@ -43,6 +43,7 @@ jobs:
           cd rust/cxrs
           cargo fmt --check
           cargo check
+          cargo test --tests
 
       - name: Compat check
         run: |
