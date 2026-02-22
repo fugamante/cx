@@ -239,6 +239,35 @@ cxwhere() {
   done
 }
 
+cxrtk() {
+  local ver min max usable enabled system mode
+  enabled="${CX_RTK_ENABLED:-0}"
+  system="${CX_RTK_SYSTEM:-0}"
+  mode="${CX_RTK_MODE:-condense}"
+  min="${CX_RTK_MIN_VERSION:-0.0.0}"
+  max="${CX_RTK_MAX_VERSION:-}"
+  ver="$(_cx_rtk_version 2>/dev/null || echo "unavailable")"
+  if _cx_rtk_usable 1; then
+    usable="true"
+  else
+    usable="false"
+  fi
+
+  echo "cxrtk: version=${ver} range=[${min}, ${max:-<unset>}] usable=${usable} enabled=${enabled} system=${system} mode=${mode}"
+  echo "rtk_version: ${ver}"
+  echo "rtk_supported_min: ${min}"
+  echo "rtk_supported_max: ${max:-<unset>}"
+  echo "rtk_usable: ${usable}"
+  echo "rtk_enabled: ${enabled}"
+  echo "rtk_system: ${system}"
+  echo "rtk_mode: ${mode}"
+  if [[ "$usable" != "true" ]]; then
+    echo "fallback: raw command output"
+  else
+    echo "fallback: none"
+  fi
+}
+
 _cxlog_init() {
   local f dir
   f="$(_cx_log_file)"
@@ -1571,7 +1600,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxwhere cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint cxreplay; do
+  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxwhere cxrtk cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint cxreplay; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

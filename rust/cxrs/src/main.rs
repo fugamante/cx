@@ -135,6 +135,7 @@ fn print_help() {
     println!("  budget             Show context budget settings and last clip fields");
     println!("  log-tail [N]       Pretty-print last N log entries");
     println!("  health             Run end-to-end codex/cx smoke checks");
+    println!("  rtk-status         Show RTK version/range decision and fallback mode");
     println!("  log-off            Disable cx logging in this process");
     println!("  alert-show         Show active alert thresholds/toggles");
     println!("  alert-off          Disable alerts in this process");
@@ -2812,6 +2813,42 @@ fn cmd_alert_off() -> i32 {
     0
 }
 
+fn cmd_rtk_status() -> i32 {
+    let enabled = env::var("CX_RTK_ENABLED").unwrap_or_else(|_| "0".to_string());
+    let system = env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "0".to_string());
+    let mode = env::var("CX_RTK_MODE").unwrap_or_else(|_| "condense".to_string());
+    let min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+    let max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
+    let ver = rtk_version_raw().unwrap_or_else(|| "unavailable".to_string());
+    let usable = rtk_is_usable();
+
+    println!(
+        "cxrtk: version={} range=[{}, {}] usable={} enabled={} system={} mode={}",
+        ver,
+        min,
+        if max.is_empty() { "<unset>" } else { &max },
+        usable,
+        enabled,
+        system,
+        mode
+    );
+    println!("rtk_version: {ver}");
+    println!("rtk_supported_min: {min}");
+    println!(
+        "rtk_supported_max: {}",
+        if max.is_empty() { "<unset>" } else { &max }
+    );
+    println!("rtk_usable: {usable}");
+    println!("rtk_enabled: {enabled}");
+    println!("rtk_system: {system}");
+    println!("rtk_mode: {mode}");
+    println!(
+        "fallback: {}",
+        if usable { "none" } else { "raw command output" }
+    );
+    0
+}
+
 fn chunk_text_by_budget(input: &str, chunk_chars: usize) -> Vec<String> {
     if chunk_chars == 0 || input.is_empty() {
         return vec![input.to_string()];
@@ -3568,6 +3605,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             cmd_log_tail(n)
         }
         "cxhealth" | "health" => cmd_health(),
+        "cxrtk" | "rtk-status" => cmd_rtk_status(),
         "cxlog_off" | "log-off" => cmd_log_off(),
         "cxalert_show" | "alert-show" => cmd_alert_show(),
         "cxalert_off" | "alert-off" => cmd_alert_off(),
@@ -3672,6 +3710,8 @@ fn is_compat_name(name: &str) -> bool {
             | "log-tail"
             | "cxhealth"
             | "health"
+            | "cxrtk"
+            | "rtk-status"
             | "cxlog_off"
             | "log-off"
             | "cxalert_show"
@@ -3843,6 +3883,7 @@ fn main() {
             cmd_log_tail(n)
         }
         "health" => cmd_health(),
+        "rtk-status" => cmd_rtk_status(),
         "log-off" => cmd_log_off(),
         "alert-show" => cmd_alert_show(),
         "alert-off" => cmd_alert_off(),

@@ -101,6 +101,7 @@ Set `CX_SCHEMA_RELAXED=1` to relax this behavior.
 ### Environment and source checks
 - `cxversion` (version + source + log path + key toggles)
 - `cxwhere` (where key functions are defined)
+- `cxrtk` (RTK version/range decision + fallback status)
 
 ## Logging and files
 

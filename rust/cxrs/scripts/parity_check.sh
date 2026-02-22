@@ -9,6 +9,7 @@ help_out="$(cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- help)"
 required_cmds=(
   version where doctor state policy bench
   cx cxj cxo cxol cxcopy fix budget log-tail health
+  rtk-status
   log-off alert-show alert-off chunk
   metrics prompt roles fanout promptlint cx-compat
   profile alert optimize worklog trace
@@ -29,6 +30,7 @@ compat_aliases=(
   cxoptimize cxworklog cxstate cxpolicy cxbench cxprompt cxroles
   cxfanout cxpromptlint cxnext cxfix cxdiffsum cxdiffsum_staged
   cxcommitjson cxcommitmsg cxbudget cxlog_tail cxhealth cxfix_run
+  cxrtk
   cxreplay cxquarantine cxchunk cxalert_show cxalert_off cxlog_off
 )
 

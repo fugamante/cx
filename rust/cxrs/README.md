@@ -14,6 +14,7 @@ Current scope:
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
 - operational helpers: `budget`, `log-tail`, `health`
+- RTK inspection helper: `rtk-status` (and compat alias `cxrtk`)
 - process-local utility toggles: `log-off`, `alert-show`, `alert-off`
 - system capture path includes RTK routing (when available) + context clipping budgets
 - chunking utility: `chunk` (stdin -> `----- cx chunk i/N -----` blocks by char budget)
@@ -133,6 +134,7 @@ cargo run -- fix ls /does-not-exist
 cargo run -- budget
 cargo run -- log-tail 3
 cargo run -- health
+cargo run -- rtk-status
 printf 'very long text...' | CX_CONTEXT_BUDGET_CHARS=2000 cargo run -- chunk
 cargo run -- metrics 50
 cargo run -- metrics 50 | jq .
@@ -144,6 +146,7 @@ cargo run -- promptlint 200
 cargo run -- cx-compat cxmetrics 50 | jq .
 cargo run -- cx-compat cxdiffsum_staged
 cargo run -- cx-compat cxcommitmsg
+cargo run -- cx-compat cxrtk
 cargo run -- cx cxmetrics 50 | jq .   # auto-routed compat
 ./scripts/compat_check.sh 50
 cargo run -- profile
