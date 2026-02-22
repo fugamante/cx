@@ -130,6 +130,9 @@ cargo run -- where
 cargo run -- doctor
 cargo run -- where
 cargo run -- llm show
+cargo run -- llm use ollama llama3.1
+cargo run -- llm unset model
+cargo run -- llm unset backend
 cargo run -- llm set-backend ollama
 cargo run -- llm set-model llama3.1
 cargo run -- llm set-backend codex

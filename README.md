@@ -31,8 +31,13 @@ cargo run -- doctor
 `cxrs` supports:
 - `CX_LLM_BACKEND=codex|ollama` (default `codex`)
 - `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
-- `cxrs llm set-backend <codex|ollama>` / `cxrs llm set-model <model>` to persist defaults
-- If Ollama backend is selected with no model configured, `cxrs` prompts once in interactive terminals and stores the chosen model.
+- `cxrs llm set-backend <codex|ollama>`
+- `cxrs llm set-model <model>`
+- `cxrs llm clear-model`
+- `cxrs llm use <codex|ollama> [model]`
+- `cxrs llm unset <backend|model|all>`
+
+If Ollama backend is selected and no model is configured, `cxrs` prompts once in interactive terminals and persists the selection in `.codex/state.json`.
 
 Examples:
 ```bash
