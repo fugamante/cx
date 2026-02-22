@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cx://schemas/commitjson.v1",
+  "title": "cx commitjson",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject", "body", "breaking", "scope", "tests"],
+  "properties": {
+    "subject": { "type": "string", "minLength": 1, "maxLength": 72 },
+    "body": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "breaking": { "type": "boolean" },
+    "scope": { "type": ["string", "null"] },
+    "tests": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

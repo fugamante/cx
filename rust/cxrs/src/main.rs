@@ -1,8 +1,10 @@
 use chrono::Utc;
+use fs2::FileExt;
+use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
@@ -17,6 +19,7 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 static RTK_WARNED_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize, Default, Clone)]
+#[allow(dead_code)]
 struct RunEntry {
     #[serde(default)]
     ts: Option<String>,
@@ -72,6 +75,18 @@ struct RunEntry {
     llm_backend: Option<String>,
     #[serde(default)]
     llm_model: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    task_parent_id: Option<String>,
+    #[serde(default)]
+    schema_enforced: Option<bool>,
+    #[serde(default)]
+    schema_valid: Option<bool>,
+    #[serde(default)]
+    policy_blocked: Option<bool>,
+    #[serde(default)]
+    policy_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -120,6 +135,111 @@ struct UsageStats {
     output_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LlmOutputKind {
+    Plain,
+    Jsonl,
+    AgentText,
+    SchemaJson,
+}
+
+#[derive(Debug, Clone)]
+enum TaskInput {
+    Prompt(String),
+    SystemCommand(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+struct TaskSpec {
+    command_name: String,
+    input: TaskInput,
+    output_kind: LlmOutputKind,
+    schema: Option<LoadedSchema>,
+    schema_task_input: Option<String>,
+    logging_enabled: bool,
+    capture_override: Option<CaptureStats>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct ExecutionResult {
+    stdout: String,
+    stderr: String,
+    duration_ms: u64,
+    schema_valid: Option<bool>,
+    quarantine_id: Option<String>,
+    capture_stats: CaptureStats,
+    execution_id: String,
+    usage: UsageStats,
+    system_status: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+struct LoadedSchema {
+    name: String,
+    path: PathBuf,
+    value: Value,
+    id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ExecutionLog {
+    execution_id: String,
+    timestamp: String,
+    ts: String,
+    command: String,
+    tool: String,
+    cwd: String,
+    scope: String,
+    repo_root: String,
+    backend_used: String,
+    llm_backend: String,
+    llm_model: Option<String>,
+    capture_provider: Option<String>,
+    execution_mode: String,
+    duration_ms: Option<u64>,
+    schema_enforced: bool,
+    schema_name: Option<String>,
+    schema_valid: bool,
+    schema_ok: bool,
+    schema_reason: Option<String>,
+    quarantine_id: Option<String>,
+    task_id: Option<String>,
+    task_parent_id: Option<String>,
+    input_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
+    effective_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    system_output_len_raw: Option<u64>,
+    system_output_len_processed: Option<u64>,
+    system_output_len_clipped: Option<u64>,
+    system_output_lines_raw: Option<u64>,
+    system_output_lines_processed: Option<u64>,
+    system_output_lines_clipped: Option<u64>,
+    clipped: Option<bool>,
+    budget_chars: Option<u64>,
+    budget_lines: Option<u64>,
+    clip_mode: Option<String>,
+    clip_footer: Option<bool>,
+    rtk_used: Option<bool>,
+    prompt_sha256: Option<String>,
+    prompt_preview: Option<String>,
+    policy_blocked: Option<bool>,
+    policy_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct TaskRecord {
+    id: String,
+    parent_id: Option<String>,
+    role: String,
+    objective: String,
+    context_ref: String,
+    status: String,
+    created_at: String,
+    updated_at: String,
+}
+
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
     println!();
@@ -129,12 +249,22 @@ fn print_help() {
     println!("Commands:");
     println!("  version            Print tool version");
     println!("  where              Show binary/source/log resolution details");
+    println!("  routes [--json] [cmd...]  Show routing map/introspection");
+    println!("  diag               Non-interactive diagnostic report");
+    println!("  parity             Run Rust/Bash parity invariants");
+    println!("  schema list [--json]  List registered schemas");
+    println!("  logs validate [--fix=false]  Validate execution log JSONL contract");
+    println!("  core               Show execution-core pipeline config");
+    println!(
+        "  task <op> [...]    Task graph management (add/list/claim/complete/fail/show/fanout)"
+    );
     println!("  doctor             Run non-interactive environment checks");
+    println!("  supports <name>    Exit 0 if subcommand is supported by cxrs");
     println!(
         "  llm <op> [...]     Manage LLM backend/model defaults (show|use|unset|set-backend|set-model|clear-model)"
     );
     println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
-    println!("  policy [check ...] Show safety rules or classify a command");
+    println!("  policy [show|check ...] Show safety rules or classify a command");
     println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
     println!("  cx <cmd...>        Run command output through LLM text mode");
     println!("  cxj <cmd...>       Run command output through LLM JSONL mode");
@@ -158,7 +288,7 @@ fn print_help() {
     println!("  cx-compat <cmd...> Compatibility shim for bash-style cx command names");
     println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
     println!("  alert [N]          Report anomalies from last N runs (default 50)");
-    println!("  optimize [N]       Recommend cost/latency improvements from last N runs");
+    println!("  optimize [N] [--json]  Recommend cost/latency improvements from last N runs");
     println!("  worklog [N]        Emit Markdown worklog from last N runs (default 50)");
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
@@ -171,6 +301,21 @@ fn print_help() {
     println!("  quarantine list [N]  Show recent quarantine entries (default 20)");
     println!("  quarantine show <id> Show quarantined entry payload");
     println!("  help               Print this help");
+}
+
+fn print_task_help() {
+    println!("cx help task");
+    println!();
+    println!("Task commands:");
+    println!("  cx task add \"<objective>\" --role <architect|implementer|reviewer|tester|doc>");
+    println!("  cx task list [--status pending|in_progress|complete|failed]");
+    println!("  cx task claim <id>");
+    println!("  cx task complete <id>");
+    println!("  cx task fail <id>");
+    println!("  cx task show <id>");
+    println!("  cx task fanout \"<objective>\" [--from staged-diff|worktree|log|file:PATH]");
+    println!("  cx task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]");
+    println!("  cx task run-all [--status pending]");
 }
 
 fn repo_root() -> Option<PathBuf> {
@@ -229,6 +374,100 @@ fn resolve_state_file() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".codex").join("state.json"))
 }
 
+fn resolve_tasks_file() -> Result<PathBuf, String> {
+    let root = repo_root().ok_or_else(|| "cx task: not inside a git repository".to_string())?;
+    Ok(root.join(".codex").join("tasks.json"))
+}
+
+fn resolve_schema_dir() -> Option<PathBuf> {
+    if let Some(root) = repo_root() {
+        return Some(root.join(".codex").join("schemas"));
+    }
+    home_dir().map(|h| h.join(".codex").join("schemas"))
+}
+
+fn normalize_schema_name(name: &str) -> String {
+    if name.ends_with(".schema.json") {
+        name.to_string()
+    } else {
+        format!("{name}.schema.json")
+    }
+}
+
+fn load_schema(schema_name: &str) -> Result<LoadedSchema, String> {
+    let dir = resolve_schema_dir().ok_or_else(|| "unable to resolve schema dir".to_string())?;
+    let name = normalize_schema_name(schema_name);
+    let path = dir.join(&name);
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
+    let id = value
+        .get("$id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    Ok(LoadedSchema {
+        name,
+        path,
+        value,
+        id,
+    })
+}
+
+fn list_schemas() -> Result<Vec<LoadedSchema>, String> {
+    let dir = resolve_schema_dir().ok_or_else(|| "unable to resolve schema dir".to_string())?;
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut out: Vec<LoadedSchema> = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| format!("failed to list {}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| format!("failed reading schema dir entry: {e}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(fname) = path.file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if !fname.ends_with(".schema.json") {
+            continue;
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
+        let id = value
+            .get("$id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        out.push(LoadedSchema {
+            name: fname.to_string(),
+            path,
+            value,
+            id,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn schema_name_for_tool(tool: &str) -> Option<&'static str> {
+    match tool {
+        "cxrs_commitjson" | "cxcommitjson" | "commitjson" | "cxrs_commitmsg" | "cxcommitmsg"
+        | "commitmsg" => Some("commitjson"),
+        "cxrs_diffsum"
+        | "cxdiffsum"
+        | "diffsum"
+        | "cxrs_diffsum_staged"
+        | "cxdiffsum_staged"
+        | "diffsum-staged" => Some("diffsum"),
+        "cxrs_next" | "cxnext" | "next" => Some("next"),
+        "cxrs_fix_run" | "cxfix_run" | "fix-run" => Some("fixrun"),
+        _ => None,
+    }
+}
+
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     let Some(parent) = path.parent() else {
         return Ok(());
@@ -243,11 +482,17 @@ fn append_jsonl(path: &Path, value: &Value) -> Result<(), String> {
         .append(true)
         .open(path)
         .map_err(|e| format!("failed opening {}: {e}", path.display()))?;
+    f.lock_exclusive()
+        .map_err(|e| format!("failed locking {}: {e}", path.display()))?;
     let mut line =
         serde_json::to_string(value).map_err(|e| format!("failed json serialize for log: {e}"))?;
     line.push('\n');
-    f.write_all(line.as_bytes())
-        .map_err(|e| format!("failed writing {}: {e}", path.display()))
+    let write_res = f.write_all(line.as_bytes());
+    let unlock_res = f.unlock();
+    if let Err(e) = write_res {
+        return Err(format!("failed writing {}: {e}", path.display()));
+    }
+    unlock_res.map_err(|e| format!("failed unlocking {}: {e}", path.display()))
 }
 
 fn prompt_preview(s: &str, max: usize) -> String {
@@ -313,6 +558,14 @@ fn llm_model() -> String {
                 .map(|s| s.to_string())
         })
         .unwrap_or_default()
+}
+
+fn logging_enabled() -> bool {
+    env::var("CXLOG_ENABLED")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(1)
+        == 1
 }
 
 fn ollama_model_preference() -> String {
@@ -421,6 +674,78 @@ fn llm_bin_name() -> &'static str {
     }
 }
 
+fn repo_root_hint() -> Option<PathBuf> {
+    if let Ok(v) = env::var("CX_REPO_ROOT") {
+        let p = PathBuf::from(v);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    repo_root()
+}
+
+fn toolchain_version_string() -> String {
+    let mut base = APP_VERSION.to_string();
+    if let Some(root) = repo_root_hint() {
+        let version_file = root.join("VERSION");
+        if let Ok(text) = fs::read_to_string(&version_file) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                base = trimmed.to_string();
+            }
+        }
+        if let Ok(out) = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+        {
+            if out.status.success() {
+                let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !sha.is_empty() {
+                    return format!("{base}+{sha}");
+                }
+            }
+        }
+    }
+    base
+}
+
+fn make_execution_id(tool: &str) -> String {
+    format!(
+        "{}_{}_{}",
+        Utc::now().format("%Y%m%dT%H%M%SZ"),
+        tool.replace(
+            |c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-',
+            "_"
+        ),
+        std::process::id()
+    )
+}
+
+fn is_schema_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "cxcommitjson"
+            | "cxcommitmsg"
+            | "cxdiffsum"
+            | "cxdiffsum_staged"
+            | "cxnext"
+            | "cxfix_run"
+            | "cxrs_commitjson"
+            | "cxrs_diffsum"
+            | "cxrs_diffsum_staged"
+            | "cxrs_next"
+            | "cxrs_fix_run"
+            | "commitjson"
+            | "commitmsg"
+            | "diffsum"
+            | "diffsum-staged"
+            | "next"
+            | "fix-run"
+    )
+}
+
 fn log_codex_run(
     tool: &str,
     prompt: &str,
@@ -429,7 +754,10 @@ fn log_codex_run(
     capture: Option<&CaptureStats>,
     schema_ok: bool,
     schema_reason: Option<&str>,
+    schema_name: Option<&str>,
     quarantine_id: Option<&str>,
+    policy_blocked: Option<bool>,
+    policy_reason: Option<&str>,
 ) -> Result<(), String> {
     let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
     let cwd = env::current_dir()
@@ -448,40 +776,67 @@ fn log_codex_run(
     let cap = capture.cloned().unwrap_or_default();
     let backend = llm_backend();
     let model = llm_model();
+    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
+    let exec_id = make_execution_id(tool);
+    let schema_enforced = is_schema_tool(tool);
+    let task_id = current_task_id().unwrap_or_default();
+    let task_parent_id = current_task_parent_id().unwrap_or_default();
 
-    let row = json!({
-      "ts": utc_now_iso(),
-      "tool": tool,
-      "cwd": cwd,
-      "scope": scope,
-      "repo_root": root,
-      "duration_ms": duration_ms,
-      "input_tokens": input,
-      "cached_input_tokens": cached,
-      "effective_input_tokens": effective,
-      "output_tokens": output,
-      "system_output_len_raw": cap.system_output_len_raw,
-      "system_output_len_processed": cap.system_output_len_processed,
-      "system_output_len_clipped": cap.system_output_len_clipped,
-      "system_output_lines_raw": cap.system_output_lines_raw,
-      "system_output_lines_processed": cap.system_output_lines_processed,
-      "system_output_lines_clipped": cap.system_output_lines_clipped,
-      "clipped": cap.clipped,
-      "budget_chars": cap.budget_chars,
-      "budget_lines": cap.budget_lines,
-      "clip_mode": cap.clip_mode,
-      "clip_footer": cap.clip_footer,
-      "rtk_used": cap.rtk_used,
-      "capture_provider": cap.capture_provider,
-      "llm_backend": backend,
-      "llm_model": if model.is_empty() { Value::Null } else { Value::String(model) },
-      "schema_ok": schema_ok,
-      "schema_reason": schema_reason.unwrap_or(""),
-      "quarantine_id": quarantine_id.unwrap_or(""),
-      "prompt_sha256": sha256_hex(prompt),
-      "prompt_preview": prompt_preview(prompt, 180),
-    });
-    append_jsonl(&run_log, &row)
+    let ts = utc_now_iso();
+    let row = ExecutionLog {
+        execution_id: exec_id,
+        timestamp: ts.clone(),
+        ts,
+        command: tool.to_string(),
+        tool: tool.to_string(),
+        cwd,
+        scope: scope.to_string(),
+        repo_root: root,
+        backend_used: backend.clone(),
+        llm_backend: backend,
+        llm_model: if model.is_empty() { None } else { Some(model) },
+        capture_provider: cap.capture_provider.clone(),
+        execution_mode: mode,
+        duration_ms: Some(duration_ms),
+        schema_enforced,
+        schema_name: schema_name.map(|s| s.to_string()),
+        schema_valid: schema_ok,
+        schema_ok,
+        schema_reason: schema_reason.map(|s| s.to_string()),
+        quarantine_id: quarantine_id.map(|s| s.to_string()),
+        task_id: if task_id.is_empty() {
+            None
+        } else {
+            Some(task_id)
+        },
+        task_parent_id: if task_parent_id.is_empty() {
+            None
+        } else {
+            Some(task_parent_id)
+        },
+        input_tokens: input,
+        cached_input_tokens: cached,
+        effective_input_tokens: effective,
+        output_tokens: output,
+        system_output_len_raw: cap.system_output_len_raw,
+        system_output_len_processed: cap.system_output_len_processed,
+        system_output_len_clipped: cap.system_output_len_clipped,
+        system_output_lines_raw: cap.system_output_lines_raw,
+        system_output_lines_processed: cap.system_output_lines_processed,
+        system_output_lines_clipped: cap.system_output_lines_clipped,
+        clipped: cap.clipped,
+        budget_chars: cap.budget_chars,
+        budget_lines: cap.budget_lines,
+        clip_mode: cap.clip_mode,
+        clip_footer: cap.clip_footer,
+        rtk_used: cap.rtk_used,
+        prompt_sha256: Some(sha256_hex(prompt)),
+        prompt_preview: Some(prompt_preview(prompt, 180)),
+        policy_blocked,
+        policy_reason: policy_reason.map(|s| s.to_string()),
+    };
+    let value = serde_json::to_value(row).map_err(|e| format!("failed serialize run log: {e}"))?;
+    append_jsonl(&run_log, &value)
 }
 
 fn sha256_hex(s: &str) -> String {
@@ -575,22 +930,60 @@ fn log_schema_failure(
         .unwrap_or_default();
     let scope = if root.is_empty() { "global" } else { "repo" };
 
-    let run_failure = json!({
-        "ts": utc_now_iso(),
-        "tool": tool,
-        "cwd": cwd,
-        "scope": scope,
-        "repo_root": root,
-        "duration_ms": Value::Null,
-        "input_tokens": Value::Null,
-        "cached_input_tokens": Value::Null,
-        "effective_input_tokens": Value::Null,
-        "output_tokens": Value::Null,
-        "schema_ok": false,
-        "schema_reason": reason,
-        "quarantine_id": qid
-    });
-    append_jsonl(&run_log, &run_failure)?;
+    let ts = utc_now_iso();
+    let task_id = current_task_id();
+    let task_parent_id = current_task_parent_id();
+    let backend = llm_backend();
+    let run_failure = ExecutionLog {
+        execution_id: make_execution_id(tool),
+        timestamp: ts.clone(),
+        ts,
+        command: tool.to_string(),
+        tool: tool.to_string(),
+        cwd,
+        scope: scope.to_string(),
+        repo_root: root,
+        backend_used: backend.clone(),
+        llm_backend: backend,
+        llm_model: {
+            let m = llm_model();
+            if m.is_empty() { None } else { Some(m) }
+        },
+        capture_provider: None,
+        execution_mode: env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string()),
+        duration_ms: None,
+        schema_enforced: true,
+        schema_name: schema_name_for_tool(tool).map(|s| s.to_string()),
+        schema_valid: false,
+        schema_ok: false,
+        schema_reason: Some(reason.to_string()),
+        quarantine_id: Some(qid.clone()),
+        task_id,
+        task_parent_id,
+        input_tokens: None,
+        cached_input_tokens: None,
+        effective_input_tokens: None,
+        output_tokens: None,
+        system_output_len_raw: None,
+        system_output_len_processed: None,
+        system_output_len_clipped: None,
+        system_output_lines_raw: None,
+        system_output_lines_processed: None,
+        system_output_lines_clipped: None,
+        clipped: None,
+        budget_chars: None,
+        budget_lines: None,
+        clip_mode: None,
+        clip_footer: None,
+        rtk_used: None,
+        prompt_sha256: None,
+        prompt_preview: None,
+        policy_blocked: None,
+        policy_reason: None,
+    };
+    let failure_value =
+        serde_json::to_value(run_failure).map_err(|e| format!("failed serialize run log: {e}"))?;
+    append_jsonl(&run_log, &failure_value)?;
 
     Ok(qid)
 }
@@ -618,6 +1011,10 @@ fn default_state_value() -> Value {
             "ollama_model": Value::Null,
             "conventional_commits": Value::Null,
             "pr_summary_format": Value::Null
+        },
+        "runtime": {
+            "current_task_id": Value::Null,
+            "current_task_parent_id": Value::Null
         },
         "alert_overrides": {},
         "last_model": Value::Null
@@ -737,6 +1134,813 @@ fn set_value_at_path(root: &mut Value, path: &str, new_value: Value) -> Result<(
         .ok_or_else(|| "failed to access final state object".to_string())?;
     obj.insert(last.to_string(), new_value);
     Ok(())
+}
+
+fn current_task_id() -> Option<String> {
+    if let Ok(v) = env::var("CX_TASK_ID") {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "runtime.current_task_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn current_task_parent_id() -> Option<String> {
+    if let Ok(v) = env::var("CX_TASK_PARENT_ID") {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "runtime.current_task_parent_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn task_role_valid(role: &str) -> bool {
+    matches!(
+        role,
+        "architect" | "implementer" | "reviewer" | "tester" | "doc"
+    )
+}
+
+fn read_tasks() -> Result<Vec<TaskRecord>, String> {
+    let path = resolve_tasks_file()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let mut s = String::new();
+    File::open(&path)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
+        .read_to_string(&mut s)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    if s.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str::<Vec<TaskRecord>>(&s)
+        .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))
+}
+
+fn write_tasks(tasks: &[TaskRecord]) -> Result<(), String> {
+    let path = resolve_tasks_file()?;
+    let value = serde_json::to_value(tasks).map_err(|e| format!("failed to encode tasks: {e}"))?;
+    write_json_atomic(&path, &value)
+}
+
+fn next_task_id(tasks: &[TaskRecord]) -> String {
+    let mut max_id = 0u64;
+    for t in tasks {
+        if let Some(num) =
+            t.id.strip_prefix("task_")
+                .and_then(|v| v.parse::<u64>().ok())
+        {
+            if num > max_id {
+                max_id = num;
+            }
+        }
+    }
+    format!("task_{:03}", max_id + 1)
+}
+
+fn cmd_task_add(args: &[String]) -> i32 {
+    if args.is_empty() {
+        eprintln!(
+            "Usage: {APP_NAME} task add <objective> [--role <role>] [--parent <id>] [--context <ref>]"
+        );
+        return 2;
+    }
+    let mut obj_parts: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            break;
+        }
+        obj_parts.push(args[i].clone());
+        i += 1;
+    }
+    let objective = obj_parts.join(" ").trim().to_string();
+    if objective.is_empty() {
+        eprintln!("cxrs task add: objective cannot be empty");
+        return 2;
+    }
+    let mut role = "implementer".to_string();
+    let mut parent_id: Option<String> = None;
+    let mut context_ref = String::new();
+    let mut i = i;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--role" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("cxrs task add: --role requires a value");
+                    return 2;
+                };
+                role = v.to_lowercase();
+                i += 2;
+            }
+            "--parent" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("cxrs task add: --parent requires a value");
+                    return 2;
+                };
+                parent_id = Some(v.to_string());
+                i += 2;
+            }
+            "--context" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("cxrs task add: --context requires a value");
+                    return 2;
+                };
+                context_ref = v.to_string();
+                i += 2;
+            }
+            other => {
+                eprintln!("cxrs task add: unknown flag '{other}'");
+                return 2;
+            }
+        }
+    }
+    if !task_role_valid(&role) {
+        eprintln!("cxrs task add: invalid role '{role}'");
+        return 2;
+    }
+
+    let mut tasks = match read_tasks() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let id = next_task_id(&tasks);
+    let now = utc_now_iso();
+    tasks.push(TaskRecord {
+        id: id.clone(),
+        parent_id,
+        role,
+        objective,
+        context_ref,
+        status: "pending".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+    });
+    if let Err(e) = write_tasks(&tasks) {
+        eprintln!("cxrs task add: {e}");
+        return 1;
+    }
+    println!("{id}");
+    0
+}
+
+fn cmd_task_list(status_filter: Option<&str>) -> i32 {
+    let tasks = match read_tasks() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let filtered: Vec<TaskRecord> = match status_filter {
+        Some(s) => tasks.into_iter().filter(|t| t.status == s).collect(),
+        None => tasks,
+    };
+    if filtered.is_empty() {
+        println!("No tasks.");
+        return 0;
+    }
+    println!("id | role | status | parent_id | objective");
+    println!("---|---|---|---|---");
+    for t in filtered {
+        println!(
+            "{} | {} | {} | {} | {}",
+            t.id,
+            t.role,
+            t.status,
+            t.parent_id.unwrap_or_else(|| "-".to_string()),
+            t.objective
+        );
+    }
+    0
+}
+
+fn cmd_task_show(id: &str) -> i32 {
+    let tasks = match read_tasks() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let Some(task) = tasks.into_iter().find(|t| t.id == id) else {
+        eprintln!("cxrs task show: task not found: {id}");
+        return 1;
+    };
+    match serde_json::to_string_pretty(&task) {
+        Ok(s) => {
+            println!("{s}");
+            0
+        }
+        Err(e) => {
+            eprintln!("cxrs task show: render failed: {e}");
+            1
+        }
+    }
+}
+
+fn parse_words(input: &str) -> Vec<String> {
+    input
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn run_task_objective(task: &TaskRecord) -> Result<(i32, Option<String>), String> {
+    let words = parse_words(&task.objective);
+    if let Some(cmd0) = words.first().map(String::as_str) {
+        let args: Vec<String> = words.iter().skip(1).cloned().collect();
+        let status = match cmd0 {
+            "cxcommitjson" | "commitjson" => cmd_commitjson(),
+            "cxcommitmsg" | "commitmsg" => cmd_commitmsg(),
+            "cxdiffsum" | "diffsum" => cmd_diffsum(false),
+            "cxdiffsum_staged" | "diffsum-staged" => cmd_diffsum(true),
+            "cxnext" | "next" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_next(&args)
+                }
+            }
+            "cxfix_run" | "fix-run" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_fix_run(&args)
+                }
+            }
+            "cxfix" | "fix" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_fix(&args)
+                }
+            }
+            "cx" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_cx(&args)
+                }
+            }
+            "cxj" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_cxj(&args)
+                }
+            }
+            "cxo" => {
+                if args.is_empty() {
+                    2
+                } else {
+                    cmd_cxo(&args)
+                }
+            }
+            _ => {
+                let prompt = if task.context_ref.trim().is_empty() {
+                    format!(
+                        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
+                        task.objective
+                    )
+                } else {
+                    format!(
+                        "Task Objective:\n{}\n\nContext Ref:\n{}\n\nRespond with concise execution notes and next actions.",
+                        task.objective, task.context_ref
+                    )
+                };
+                let res = execute_task(TaskSpec {
+                    command_name: "cxtask_run".to_string(),
+                    input: TaskInput::Prompt(prompt),
+                    output_kind: LlmOutputKind::AgentText,
+                    schema: None,
+                    schema_task_input: None,
+                    logging_enabled: true,
+                    capture_override: None,
+                })?;
+                println!("{}", res.stdout);
+                return Ok((0, Some(res.execution_id)));
+            }
+        };
+        return Ok((status, None));
+    }
+
+    let prompt = format!(
+        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
+        task.objective
+    );
+    let res = execute_task(TaskSpec {
+        command_name: "cxtask_run".to_string(),
+        input: TaskInput::Prompt(prompt),
+        output_kind: LlmOutputKind::AgentText,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: None,
+    })?;
+    println!("{}", res.stdout);
+    Ok((0, Some(res.execution_id)))
+}
+
+fn run_task_by_id(
+    id: &str,
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+) -> Result<(i32, Option<String>), String> {
+    let mut tasks = read_tasks()?;
+    let idx = tasks
+        .iter()
+        .position(|t| t.id == id)
+        .ok_or_else(|| format!("cxrs task run: task not found: {id}"))?;
+    if matches!(tasks[idx].status.as_str(), "complete" | "failed") {
+        return Ok((0, None));
+    }
+    tasks[idx].status = "in_progress".to_string();
+    tasks[idx].updated_at = utc_now_iso();
+    write_tasks(&tasks)?;
+    let prev_task_id = current_task_id();
+    let prev_parent_id = current_task_parent_id();
+    let _ = set_state_path("runtime.current_task_id", Value::String(id.to_string()));
+    let _ = set_state_path(
+        "runtime.current_task_parent_id",
+        match tasks[idx].parent_id.as_ref() {
+            Some(v) => Value::String(v.clone()),
+            None => Value::Null,
+        },
+    );
+
+    let prev_mode = env::var("CX_MODE").ok();
+    let prev_backend = env::var("CX_LLM_BACKEND").ok();
+    if let Some(m) = mode_override {
+        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
+        unsafe { env::set_var("CX_MODE", m) };
+    }
+    if let Some(b) = backend_override {
+        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
+        unsafe { env::set_var("CX_LLM_BACKEND", b) };
+    }
+
+    let exec = run_task_objective(&tasks[idx]);
+
+    match prev_mode {
+        Some(v) => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::set_var("CX_MODE", v) }
+        }
+        None => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::remove_var("CX_MODE") }
+        }
+    }
+    match prev_backend {
+        Some(v) => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::set_var("CX_LLM_BACKEND", v) }
+        }
+        None => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::remove_var("CX_LLM_BACKEND") }
+        }
+    }
+    let _ = set_state_path(
+        "runtime.current_task_id",
+        match prev_task_id {
+            Some(v) => Value::String(v),
+            None => Value::Null,
+        },
+    );
+    let _ = set_state_path(
+        "runtime.current_task_parent_id",
+        match prev_parent_id {
+            Some(v) => Value::String(v),
+            None => Value::Null,
+        },
+    );
+
+    let (status_code, execution_id) = exec?;
+
+    let mut tasks = read_tasks()?;
+    let idx = tasks
+        .iter()
+        .position(|t| t.id == id)
+        .ok_or_else(|| format!("cxrs task run: task disappeared: {id}"))?;
+    tasks[idx].status = if status_code == 0 {
+        "complete".to_string()
+    } else {
+        "failed".to_string()
+    };
+    tasks[idx].updated_at = utc_now_iso();
+    write_tasks(&tasks)?;
+    if current_task_id().as_deref() == Some(id) {
+        let _ = set_state_path("runtime.current_task_id", Value::Null);
+    }
+    Ok((status_code, execution_id))
+}
+
+fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
+    let mut tasks = match read_tasks() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
+        eprintln!("cxrs task: task not found: {id}");
+        return 1;
+    };
+    task.status = new_status.to_string();
+    task.updated_at = utc_now_iso();
+    if let Err(e) = write_tasks(&tasks) {
+        eprintln!("cxrs task: {e}");
+        return 1;
+    }
+    if new_status == "in_progress" {
+        let _ = set_state_path("runtime.current_task_id", Value::String(id.to_string()));
+    } else if matches!(new_status, "complete" | "failed") {
+        if current_task_id().as_deref() == Some(id) {
+            let _ = set_state_path("runtime.current_task_id", Value::Null);
+        }
+    }
+    println!("{id}: {new_status}");
+    0
+}
+
+fn cmd_task_fanout(objective: &str, from: Option<&str>) -> i32 {
+    let obj = objective.trim();
+    if obj.is_empty() {
+        eprintln!("Usage: {APP_NAME} task fanout <objective>");
+        return 2;
+    }
+    let mut tasks = match read_tasks() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let parent_id = next_task_id(&tasks);
+    let now = utc_now_iso();
+    tasks.push(TaskRecord {
+        id: parent_id.clone(),
+        parent_id: None,
+        role: "architect".to_string(),
+        objective: obj.to_string(),
+        context_ref: "fanout_parent".to_string(),
+        status: "pending".to_string(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    });
+
+    let source = from.unwrap_or("worktree");
+    let diff = match source {
+        "staged-diff" => Command::new("git")
+            .args(["diff", "--staged", "--no-color"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default(),
+        "worktree" => Command::new("git")
+            .args(["diff", "--no-color"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default(),
+        "log" => Command::new("git")
+            .args(["log", "--oneline", "-n", "200"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default(),
+        x if x.starts_with("file:") => {
+            let p = x.trim_start_matches("file:");
+            fs::read_to_string(p).unwrap_or_default()
+        }
+        _ => {
+            eprintln!("cxrs task fanout: unsupported --from source '{source}'");
+            return 2;
+        }
+    };
+    let budget = env::var("CX_CONTEXT_BUDGET_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(12000);
+    let chunks = if diff.trim().is_empty() {
+        Vec::new()
+    } else {
+        chunk_text_by_budget(&diff, budget)
+    };
+    let chunk_count = chunks.len().clamp(1, 6);
+    let roles_cycle = ["architect", "implementer", "reviewer", "tester", "doc"];
+    let mut created: Vec<TaskRecord> = Vec::new();
+    for i in 0..chunk_count {
+        let ridx = (i + 1) % roles_cycle.len();
+        let role = roles_cycle[ridx].to_string();
+        let id = next_task_id(&tasks);
+        let context_ref = if chunks.is_empty() {
+            format!("objective:{obj}")
+        } else {
+            format!("diff_chunk_{}/{}", i + 1, chunk_count)
+        };
+        let sub_obj = match role.as_str() {
+            "architect" => format!("Define implementation plan for: {obj}"),
+            "implementer" => format!("Implement chunk {} for: {obj}", i + 1),
+            "reviewer" => format!(
+                "Review chunk {} changes for correctness/safety: {obj}",
+                i + 1
+            ),
+            "tester" => format!("Create/execute tests for chunk {}: {obj}", i + 1),
+            _ => format!("Document chunk {} outcomes: {obj}", i + 1),
+        };
+        let rec = TaskRecord {
+            id: id.clone(),
+            parent_id: Some(parent_id.clone()),
+            role,
+            objective: sub_obj,
+            context_ref,
+            status: "pending".to_string(),
+            created_at: utc_now_iso(),
+            updated_at: utc_now_iso(),
+        };
+        tasks.push(rec.clone());
+        created.push(rec);
+    }
+    while created.len() < 3 {
+        let role = roles_cycle[(created.len() + 1) % roles_cycle.len()].to_string();
+        let id = next_task_id(&tasks);
+        let rec = TaskRecord {
+            id: id.clone(),
+            parent_id: Some(parent_id.clone()),
+            role: role.clone(),
+            objective: format!("{} workstream for: {}", role, obj),
+            context_ref: "objective".to_string(),
+            status: "pending".to_string(),
+            created_at: utc_now_iso(),
+            updated_at: utc_now_iso(),
+        };
+        tasks.push(rec.clone());
+        created.push(rec);
+    }
+    if created.len() > 8 {
+        created.truncate(8);
+    }
+    if let Err(e) = write_tasks(&tasks) {
+        eprintln!("cxrs task fanout: {e}");
+        return 1;
+    }
+    println!("parent: {parent_id}");
+    println!("id | role | status | context_ref | objective");
+    println!("---|---|---|---|---");
+    for t in created {
+        println!(
+            "{} | {} | {} | {} | {}",
+            t.id, t.role, t.status, t.context_ref, t.objective
+        );
+    }
+    0
+}
+
+fn cmd_task(args: &[String]) -> i32 {
+    let sub = args.first().map(String::as_str).unwrap_or("list");
+    match sub {
+        "add" => cmd_task_add(&args[1..]),
+        "list" => {
+            let mut status_filter: Option<&str> = None;
+            let mut i = 1usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--status" => {
+                        let Some(v) = args.get(i + 1).map(String::as_str) else {
+                            eprintln!(
+                                "Usage: {APP_NAME} task list [--status pending|in_progress|complete|failed]"
+                            );
+                            return 2;
+                        };
+                        if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
+                            eprintln!("cxrs task list: invalid status '{v}'");
+                            return 2;
+                        }
+                        status_filter = Some(v);
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("cxrs task list: unknown flag '{other}'");
+                        return 2;
+                    }
+                }
+            }
+            cmd_task_list(status_filter)
+        }
+        "show" => {
+            let Some(id) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} task show <id>");
+                return 2;
+            };
+            cmd_task_show(id)
+        }
+        "claim" => {
+            let Some(id) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} task claim <id>");
+                return 2;
+            };
+            cmd_task_set_status(id, "in_progress")
+        }
+        "complete" => {
+            let Some(id) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} task complete <id>");
+                return 2;
+            };
+            cmd_task_set_status(id, "complete")
+        }
+        "fail" => {
+            let Some(id) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} task fail <id>");
+                return 2;
+            };
+            cmd_task_set_status(id, "failed")
+        }
+        "fanout" => {
+            if args.len() < 2 {
+                eprintln!("Usage: {APP_NAME} task fanout <objective>");
+                return 2;
+            }
+            let mut objective_parts: Vec<String> = Vec::new();
+            let mut from: Option<&str> = None;
+            let mut i = 1usize;
+            while i < args.len() {
+                if args[i] == "--from" {
+                    let Some(v) = args.get(i + 1).map(String::as_str) else {
+                        eprintln!(
+                            "Usage: {APP_NAME} task fanout <objective> [--from staged-diff|worktree|log|file:PATH]"
+                        );
+                        return 2;
+                    };
+                    from = Some(v);
+                    i += 2;
+                    continue;
+                }
+                objective_parts.push(args[i].clone());
+                i += 1;
+            }
+            cmd_task_fanout(&objective_parts.join(" "), from)
+        }
+        "run" => {
+            let Some(id) = args.get(1) else {
+                eprintln!(
+                    "Usage: {APP_NAME} task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]"
+                );
+                return 2;
+            };
+            let mut mode_override: Option<&str> = None;
+            let mut backend_override: Option<&str> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--mode" => {
+                        let Some(v) = args.get(i + 1).map(String::as_str) else {
+                            eprintln!(
+                                "Usage: {APP_NAME} task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]"
+                            );
+                            return 2;
+                        };
+                        mode_override = Some(v);
+                        i += 2;
+                    }
+                    "--backend" => {
+                        let Some(v) = args.get(i + 1).map(String::as_str) else {
+                            eprintln!(
+                                "Usage: {APP_NAME} task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]"
+                            );
+                            return 2;
+                        };
+                        backend_override = Some(v);
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("cxrs task run: unknown flag '{other}'");
+                        return 2;
+                    }
+                }
+            }
+            match run_task_by_id(id, mode_override, backend_override) {
+                Ok((code, execution_id)) => {
+                    if let Some(eid) = execution_id {
+                        println!("task_id: {id}");
+                        println!("execution_id: {eid}");
+                    }
+                    if code == 0 {
+                        println!("{id}: complete");
+                    } else {
+                        println!("{id}: failed");
+                    }
+                    code
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    1
+                }
+            }
+        }
+        "run-all" => {
+            let mut status_filter = "pending";
+            let mut i = 1usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--status" => {
+                        let Some(v) = args.get(i + 1).map(String::as_str) else {
+                            eprintln!(
+                                "Usage: {APP_NAME} task run-all [--status pending|in_progress|complete|failed]"
+                            );
+                            return 2;
+                        };
+                        if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
+                            eprintln!("cxrs task run-all: invalid status '{v}'");
+                            return 2;
+                        }
+                        status_filter = v;
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("cxrs task run-all: unknown flag '{other}'");
+                        return 2;
+                    }
+                }
+            }
+            let tasks = match read_tasks() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return 1;
+                }
+            };
+            let pending: Vec<String> = tasks
+                .iter()
+                .filter(|t| t.status == status_filter)
+                .map(|t| t.id.clone())
+                .collect();
+            if pending.is_empty() {
+                println!("No pending tasks.");
+                return 0;
+            }
+            let mut ok = 0usize;
+            let mut failed = 0usize;
+            for id in pending {
+                match run_task_by_id(&id, None, None) {
+                    Ok((code, _)) => {
+                        if code == 0 {
+                            ok += 1;
+                        } else {
+                            failed += 1;
+                            eprintln!("cxrs task run-all: task failed: {id}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("cxrs task run-all: critical error for {id}: {e}");
+                        return 1;
+                    }
+                }
+            }
+            println!("run-all summary: complete={ok}, failed={failed}");
+            if failed > 0 { 1 } else { 0 }
+        }
+        _ => {
+            eprintln!(
+                "Usage: {APP_NAME} task <add|list|show|claim|complete|fail|fanout|run|run-all> ..."
+            );
+            2
+        }
+    }
 }
 
 fn cmd_state_show() -> i32 {
@@ -976,13 +2180,19 @@ fn print_version() {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
     let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let execution_path = env::var("CX_EXECUTION_PATH").unwrap_or_else(|_| "rust".to_string());
     let backend = llm_backend();
     let model = llm_model();
+    let active_model = if model.is_empty() { "<unset>" } else { &model };
     let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
     let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
     let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
+    let rtk_available = bin_in_path("rtk");
     let rtk_usable = rtk_is_usable();
+    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string());
+    let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string());
+    let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
     let quarantine_dir = resolve_quarantine_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
@@ -998,21 +2208,21 @@ fn print_version() {
         .map(value_to_display)
         .unwrap_or_else(|| "n/a".to_string());
     println!("name: {APP_NAME}");
-    println!("version: {APP_VERSION}");
+    println!("version: {}", toolchain_version_string());
     println!("cwd: {cwd}");
+    println!("execution_path: {execution_path}");
     println!("source: {source}");
     println!("log_file: {log_file}");
     println!("state_file: {state_file}");
     println!("quarantine_dir: {quarantine_dir}");
     println!("mode: {mode}");
     println!("llm_backend: {backend}");
-    println!(
-        "llm_model: {}",
-        if model.is_empty() { "<unset>" } else { &model }
-    );
+    println!("llm_model: {active_model}");
+    println!("backend_resolution: backend={backend} model={active_model}");
     println!("schema_relaxed: {schema_relaxed}");
     println!("capture_provider: {capture_provider}");
     println!("native_reduce: {native_reduce}");
+    println!("rtk_available: {rtk_available}");
     println!("rtk_supported_range_min: {rtk_min}");
     println!(
         "rtk_supported_range_max: {}",
@@ -1023,8 +2233,50 @@ fn print_version() {
         }
     );
     println!("rtk_usable: {rtk_usable}");
+    println!("budget_chars: {budget_chars}");
+    println!("budget_lines: {budget_lines}");
+    println!("clip_mode: {clip_mode}");
     println!("state.preferences.conventional_commits: {cc}");
     println!("state.preferences.pr_summary_format: {pr_fmt}");
+}
+
+fn cmd_core() -> i32 {
+    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
+    let backend = llm_backend();
+    let model = llm_model();
+    let active_model = if model.is_empty() { "<unset>" } else { &model };
+    let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let rtk_enabled = env::var("CX_RTK_SYSTEM")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(1)
+        == 1;
+    let rtk_available = rtk_is_usable();
+    let cfg = budget_config_from_env();
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let execution_path = env::var("CX_EXECUTION_PATH").unwrap_or_else(|_| "rust".to_string());
+    let bash_fallback = execution_path.contains("bash");
+
+    println!("== cxcore ==");
+    println!("version: {}", toolchain_version_string());
+    println!("execution_path: {execution_path}");
+    println!("bash_fallback_used: {bash_fallback}");
+    println!("backend: {backend}");
+    println!("active_model: {active_model}");
+    println!("execution_mode: {mode}");
+    println!("capture_provider: {capture_provider}");
+    println!("capture_rtk_enabled: {rtk_enabled}");
+    println!("capture_rtk_available: {rtk_available}");
+    println!("budget_chars: {}", cfg.budget_chars);
+    println!("budget_lines: {}", cfg.budget_lines);
+    println!("clip_mode: {}", cfg.clip_mode);
+    println!("clip_footer: {}", cfg.clip_footer);
+    println!("schema_enforcement: true");
+    println!("logging_enabled: {}", logging_enabled());
+    println!("log_file: {log_file}");
+    0
 }
 
 fn bin_in_path(bin: &str) -> bool {
@@ -1161,11 +2413,344 @@ fn print_doctor() -> i32 {
     0
 }
 
-fn print_where() -> i32 {
+fn bash_type_of_function(repo: &Path, name: &str) -> Option<String> {
+    let cx_sh = repo.join("cx.sh");
+    let cmd = format!(
+        "source '{}' >/dev/null 2>&1; type -a {} 2>/dev/null",
+        cx_sh.display(),
+        name
+    );
+    let out = Command::new("bash").arg("-lc").arg(cmd).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn route_handler_for(name: &str) -> Option<String> {
+    if is_native_name(name) {
+        Some(name.to_string())
+    } else if is_compat_name(name) {
+        Some(format!("cx-compat {name}"))
+    } else {
+        None
+    }
+}
+
+fn rust_route_names() -> Vec<String> {
+    let names = vec![
+        "help",
+        "version",
+        "where",
+        "routes",
+        "logs",
+        "task",
+        "diag",
+        "parity",
+        "doctor",
+        "state",
+        "llm",
+        "policy",
+        "bench",
+        "metrics",
+        "prompt",
+        "roles",
+        "fanout",
+        "promptlint",
+        "cx",
+        "cxj",
+        "cxo",
+        "cxol",
+        "cxcopy",
+        "fix",
+        "budget",
+        "log-tail",
+        "health",
+        "rtk-status",
+        "log-off",
+        "alert-show",
+        "alert-off",
+        "chunk",
+        "cx-compat",
+        "profile",
+        "alert",
+        "optimize",
+        "worklog",
+        "trace",
+        "next",
+        "fix-run",
+        "diffsum",
+        "diffsum-staged",
+        "commitjson",
+        "commitmsg",
+        "replay",
+        "quarantine",
+        "supports",
+        "cxversion",
+        "cxdoctor",
+        "cxwhere",
+        "cxdiag",
+        "cxparity",
+        "cxlogs",
+        "cxmetrics",
+        "cxprofile",
+        "cxtrace",
+        "cxalert",
+        "cxoptimize",
+        "cxworklog",
+        "cxpolicy",
+        "cxstate",
+        "cxllm",
+        "cxbench",
+        "cxprompt",
+        "cxroles",
+        "cxfanout",
+        "cxpromptlint",
+        "cxnext",
+        "cxfix",
+        "cxdiffsum",
+        "cxdiffsum_staged",
+        "cxcommitjson",
+        "cxcommitmsg",
+        "cxbudget",
+        "cxlog_tail",
+        "cxhealth",
+        "cxrtk",
+        "cxlog_off",
+        "cxalert_show",
+        "cxalert_off",
+        "cxchunk",
+        "cxfix_run",
+        "cxreplay",
+        "cxquarantine",
+        "cxtask",
+    ];
+    let mut out: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn cmd_routes(args: &[String]) -> i32 {
+    let json = args.first().is_some_and(|a| a == "--json");
+    let names: Vec<String> = if json {
+        args[1..].to_vec()
+    } else {
+        args.to_vec()
+    };
+    let targets = if names.is_empty() {
+        rust_route_names()
+    } else {
+        names
+    };
+    if json {
+        let arr: Vec<Value> = targets
+            .iter()
+            .filter_map(|name| {
+                route_handler_for(name).map(|handler| {
+                    json!({
+                        "name": name,
+                        "route": "rust",
+                        "handler": handler
+                    })
+                })
+            })
+            .collect();
+        match serde_json::to_string_pretty(&arr) {
+            Ok(s) => {
+                println!("{s}");
+                0
+            }
+            Err(e) => {
+                eprintln!("cxrs routes: failed to render json: {e}");
+                1
+            }
+        }
+    } else {
+        for name in targets {
+            if let Some(handler) = route_handler_for(&name) {
+                println!("{name}: rust ({handler})");
+            }
+        }
+        0
+    }
+}
+
+fn cmd_schema(args: &[String]) -> i32 {
+    let sub = args.first().map(String::as_str).unwrap_or("list");
+    if sub != "list" {
+        eprintln!("Usage: {APP_NAME} schema list [--json]");
+        return 2;
+    }
+    let as_json = args.iter().any(|a| a == "--json");
+    let Some(dir) = resolve_schema_dir() else {
+        eprintln!("cxrs schema: unable to resolve schema directory");
+        return 1;
+    };
+    let schemas = match list_schemas() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs schema: {e}");
+            return 1;
+        }
+    };
+
+    if as_json {
+        let rows: Vec<Value> = schemas
+            .iter()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "path": s.path.display().to_string(),
+                    "id": s.id.clone().unwrap_or_default()
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            json!({
+                "schema_dir": dir.display().to_string(),
+                "file_count": rows.len(),
+                "schemas": rows
+            })
+        );
+        return 0;
+    }
+
+    println!("schema_dir: {}", dir.display());
+    println!("file_count: {}", schemas.len());
+    for s in schemas {
+        let id = s.id.unwrap_or_else(|| "<no $id>".to_string());
+        println!("- {} ({}) [{}]", s.name, s.path.display(), id);
+    }
+    0
+}
+
+fn cmd_logs(args: &[String]) -> i32 {
+    match args.first().map(String::as_str).unwrap_or("validate") {
+        "validate" => {
+            for a in &args[1..] {
+                if a == "--fix=false" || a == "--fix=true" {
+                    continue;
+                }
+                eprintln!("Usage: {APP_NAME} logs validate [--fix=false]");
+                return 2;
+            }
+            let Some(log_file) = resolve_log_file() else {
+                eprintln!("cxrs logs validate: unable to resolve log file");
+                return 1;
+            };
+            if !log_file.exists() {
+                println!("cxrs logs validate: no log file at {}", log_file.display());
+                return 0;
+            }
+            let file = match File::open(&log_file) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!(
+                        "cxrs logs validate: cannot open {}: {e}",
+                        log_file.display()
+                    );
+                    return 1;
+                }
+            };
+            let reader = BufReader::new(file);
+            let required = [
+                "execution_id",
+                "timestamp",
+                "command",
+                "backend_used",
+                "capture_provider",
+                "execution_mode",
+                "duration_ms",
+                "schema_enforced",
+                "schema_valid",
+                "quarantine_id",
+                "task_id",
+                "system_output_len_raw",
+                "system_output_len_processed",
+                "system_output_len_clipped",
+                "system_output_lines_raw",
+                "system_output_lines_processed",
+                "system_output_lines_clipped",
+                "input_tokens",
+                "cached_input_tokens",
+                "effective_input_tokens",
+                "output_tokens",
+                "policy_blocked",
+                "policy_reason",
+            ];
+            let mut total = 0usize;
+            let mut corrupted_lines: BTreeSet<usize> = BTreeSet::new();
+            let mut issues: Vec<String> = Vec::new();
+            for (idx, line_res) in reader.lines().enumerate() {
+                let line_no = idx + 1;
+                let line = match line_res {
+                    Ok(v) => v,
+                    Err(e) => {
+                        corrupted_lines.insert(line_no);
+                        issues.push(format!("line {line_no}: read error: {e}"));
+                        continue;
+                    }
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                total += 1;
+                let parsed: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        corrupted_lines.insert(line_no);
+                        issues.push(format!("line {line_no}: invalid json: {e}"));
+                        continue;
+                    }
+                };
+                let Some(obj) = parsed.as_object() else {
+                    corrupted_lines.insert(line_no);
+                    issues.push(format!("line {line_no}: json is not an object"));
+                    continue;
+                };
+                for k in required {
+                    if !obj.contains_key(k) {
+                        corrupted_lines.insert(line_no);
+                        issues.push(format!("line {line_no}: missing required field '{k}'"));
+                    }
+                }
+            }
+            println!("== cxrs logs validate ==");
+            println!("log_file: {}", log_file.display());
+            println!("entries_scanned: {total}");
+            println!("corrupted_entries: {}", corrupted_lines.len());
+            println!("issue_count: {}", issues.len());
+            if !issues.is_empty() {
+                for issue in issues.iter().take(20) {
+                    println!("- {issue}");
+                }
+                if issues.len() > 20 {
+                    println!("- ... and {} more", issues.len() - 20);
+                }
+                return 1;
+            }
+            println!("status: ok");
+            0
+        }
+        other => {
+            eprintln!("Usage: {APP_NAME} logs validate (unknown subcommand: {other})");
+            2
+        }
+    }
+}
+
+fn print_where(cmds: &[String]) -> i32 {
+    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
     let exe = env::current_exe()
         .ok()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unknown>".to_string());
+    let bin_cx =
+        env::var("CX_BIN_CX").unwrap_or_else(|_| repo.join("bin").join("cx").display().to_string());
+    let bash_lib = repo.join("lib").join("cx.sh").display().to_string();
     let source = env::var("CX_SOURCE_LOCATION").unwrap_or_else(|_| "standalone:cxrs".to_string());
     let log_file = resolve_log_file()
         .map(|p| p.display().to_string())
@@ -1175,15 +2760,40 @@ fn print_where() -> i32 {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let backend = llm_backend();
     let model = llm_model();
-    println!("binary: {exe}");
+    let repo_root = repo.display().to_string();
+    let bash_sourceable = repo.join("lib").join("cx.sh").is_file();
+    println!("== cxwhere ==");
+    println!("bin_cx: {bin_cx}");
+    println!("cxrs_path: {exe}");
+    println!("cxrs_version: {}", toolchain_version_string());
+    println!("bash_lib: {bash_lib}");
+    println!("bash_lib_sourceable: {bash_sourceable}");
+    println!("repo_root: {repo_root}");
+    println!("log_file: {log_file}");
     println!("source: {source}");
-    println!("llm_backend: {backend}");
+    println!("state_file: {state_file}");
+    println!("backend: {backend}");
     println!(
-        "llm_model: {}",
+        "active_model: {}",
         if model.is_empty() { "<unset>" } else { &model }
     );
-    println!("log_file: {log_file}");
-    println!("state_file: {state_file}");
+    if !cmds.is_empty() {
+        println!("routes:");
+        for cmd in cmds {
+            if let Some(handler) = route_handler_for(cmd) {
+                println!("- {cmd}: route=rust handler={handler}");
+                continue;
+            }
+            if let Some(type_out) = bash_type_of_function(&repo, cmd) {
+                println!("- {cmd}: route=bash function={cmd}");
+                for line in type_out.lines() {
+                    println!("  {line}");
+                }
+            } else {
+                println!("- {cmd}: route=unknown");
+            }
+        }
+    }
     0
 }
 
@@ -1659,29 +3269,52 @@ fn print_alert(n: usize) -> i32 {
     0
 }
 
-fn print_optimize(n: usize) -> i32 {
+fn parse_optimize_args(args: &[String], default_n: usize) -> Result<(usize, bool), String> {
+    let mut n = default_n;
+    let mut json_out = false;
+    for a in args {
+        if a == "--json" {
+            json_out = true;
+            continue;
+        }
+        if let Ok(v) = a.parse::<usize>() {
+            if v > 0 {
+                n = v;
+                continue;
+            }
+        }
+        return Err(format!("invalid argument: {a}"));
+    }
+    Ok((n, json_out))
+}
+
+fn optimize_report(n: usize) -> Result<Value, String> {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
-        return 1;
+        return Err("unable to resolve log file".to_string());
     };
     if !log_file.exists() {
-        println!("== cxrs optimize (last {n} runs) ==");
-        println!("scoreboard: no runs");
-        println!("log_file: {}", log_file.display());
-        return 0;
+        return Ok(json!({
+            "window": n,
+            "runs": 0,
+            "scoreboard": {"runs": 0},
+            "anomalies": [],
+            "recommendations": ["No runs available in log window."],
+            "log_file": log_file.display().to_string()
+        }));
     }
     let runs = match load_runs(&log_file, n) {
         Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs optimize: {e}");
-            return 1;
-        }
+        Err(e) => return Err(e),
     };
     if runs.is_empty() {
-        println!("== cxrs optimize (last {n} runs) ==");
-        println!("scoreboard: no runs");
-        println!("log_file: {}", log_file.display());
-        return 0;
+        return Ok(json!({
+            "window": n,
+            "runs": 0,
+            "scoreboard": {"runs": 0},
+            "anomalies": [],
+            "recommendations": ["No runs available in log window."],
+            "log_file": log_file.display().to_string()
+        }));
     }
 
     let max_ms = env_u64("CXALERT_MAX_MS", 12000);
@@ -1692,6 +3325,11 @@ fn print_optimize(n: usize) -> i32 {
     let mut tool_dur: HashMap<String, (u64, u64)> = HashMap::new();
     let mut alerts = 0u64;
     let mut schema_fails = 0u64;
+    let mut schema_total = 0u64;
+    let mut clipped_count = 0u64;
+    let mut clipped_total = 0u64;
+    let mut provider_stats: HashMap<String, (u64, u64, u64, u64)> = HashMap::new();
+    // provider -> (raw_sum, processed_sum, clipped_sum, count)
 
     let mut sum_in: u64 = 0;
     let mut sum_cached: u64 = 0;
@@ -1712,12 +3350,26 @@ fn print_optimize(n: usize) -> i32 {
         if dur > max_ms || eff > max_eff {
             alerts += 1;
         }
-        if r.tool
-            .as_deref()
-            .unwrap_or_default()
-            .contains("schema_failure")
-        {
-            schema_fails += 1;
+        if r.schema_enforced.unwrap_or(false) {
+            schema_total += 1;
+            if r.schema_valid == Some(false) {
+                schema_fails += 1;
+            }
+        }
+        if r.clipped.is_some() {
+            clipped_total += 1;
+            if r.clipped == Some(true) {
+                clipped_count += 1;
+            }
+        }
+        if let Some(provider) = r.capture_provider.as_ref() {
+            let entry = provider_stats
+                .entry(provider.clone())
+                .or_insert((0, 0, 0, 0));
+            entry.0 += r.system_output_len_raw.unwrap_or(0);
+            entry.1 += r.system_output_len_processed.unwrap_or(0);
+            entry.2 += r.system_output_len_clipped.unwrap_or(0);
+            entry.3 += 1;
         }
 
         sum_in += r.input_tokens.unwrap_or(0);
@@ -1766,73 +3418,285 @@ fn print_optimize(n: usize) -> i32 {
     } else {
         Some(second_cached as f64 / second_in as f64)
     };
+    let clip_freq = if clipped_total == 0 {
+        None
+    } else {
+        Some(clipped_count as f64 / clipped_total as f64)
+    };
+    let schema_fail_freq = if schema_total == 0 {
+        None
+    } else {
+        Some(schema_fails as f64 / schema_total as f64)
+    };
+    let mut compression_rows: Vec<Value> = provider_stats
+        .into_iter()
+        .map(|(provider, (raw, processed, clipped, count))| {
+            let processed_ratio = if raw == 0 {
+                Value::Null
+            } else {
+                json!((processed as f64) / (raw as f64))
+            };
+            let clipped_ratio = if raw == 0 {
+                Value::Null
+            } else {
+                json!((clipped as f64) / (raw as f64))
+            };
+            json!({
+                "provider": provider,
+                "runs": count,
+                "raw_sum": raw,
+                "processed_sum": processed,
+                "clipped_sum": clipped,
+                "processed_over_raw": processed_ratio,
+                "clipped_over_raw": clipped_ratio
+            })
+        })
+        .collect();
+    compression_rows.sort_by(|a, b| {
+        let ar = a
+            .get("processed_over_raw")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0);
+        let br = b
+            .get("processed_over_raw")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0);
+        ar.partial_cmp(&br).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    println!("== cxrs optimize (last {n} runs) ==");
-    println!(
-        "scoreboard: runs={}, alerts={} ({}%), schema_failures={} ({}%)",
-        total,
-        alerts,
-        ((alerts as f64 / total as f64) * 100.0).round() as i64,
-        schema_fails,
-        ((schema_fails as f64 / total as f64) * 100.0).round() as i64
-    );
-    match cache_all {
-        Some(v) => println!("cache_hit_rate: {}%", (v * 100.0).round() as i64),
-        None => println!("cache_hit_rate: n/a"),
-    }
-    match (first_cache, second_cache) {
-        (Some(a), Some(b)) => println!(
-            "cache_trend: first_half={}%, second_half={}%, delta={}pp",
-            (a * 100.0).round() as i64,
-            (b * 100.0).round() as i64,
-            ((b - a) * 100.0).round() as i64
-        ),
-        _ => println!("cache_trend: n/a"),
-    }
-
-    println!();
-    println!("Top tools by avg effective_input_tokens:");
-    for (tool, avg_eff) in &top_eff {
-        println!("- {tool}: {avg_eff}");
-    }
-    println!("Top tools by avg duration_ms:");
-    for (tool, avg_dur) in &top_dur {
-        println!("- {tool}: {avg_dur}ms");
-    }
-
-    println!();
-    println!("Recommendations:");
-    if let Some((tool, avg_eff)) = top_eff.first() {
-        if *avg_eff > max_eff / 2 {
-            println!(
-                "- {tool} has high avg effective tokens ({avg_eff}); reduce prompt context and prefer strict schema output."
-            );
+    let mut anomalies: Vec<String> = Vec::new();
+    if let Some((tool, avg)) = top_dur.first() {
+        if *avg > max_ms / 2 {
+            anomalies.push(format!(
+                "High latency concentration: {tool} avg_duration_ms={avg}"
+            ));
         }
     }
-    if let Some((tool, avg_dur)) = top_dur.first() {
-        if *avg_dur > max_ms / 2 {
-            println!(
-                "- {tool} is latency-heavy ({avg_dur}ms avg); split large tasks and trim embedded command output."
-            );
+    if let Some((tool, avg)) = top_eff.first() {
+        if *avg > max_eff / 2 {
+            anomalies.push(format!(
+                "High token load concentration: {tool} avg_effective_input_tokens={avg}"
+            ));
         }
     }
     if let (Some(a), Some(b)) = (first_cache, second_cache) {
         if b + 0.05 < a {
-            println!(
-                "- Cache hit rate dropped across the window; prompts may be drifting. Stabilize templates and reusable context."
-            );
+            anomalies.push(format!(
+                "Cache hit degraded: first_half={}%, second_half={}%",
+                (a * 100.0).round() as i64,
+                (b * 100.0).round() as i64
+            ));
+        }
+    }
+    if let Some(freq) = schema_fail_freq {
+        if freq > 0.05 {
+            anomalies.push(format!(
+                "Schema failure frequency elevated: {}%",
+                (freq * 100.0).round() as i64
+            ));
+        }
+    }
+    if let Some(freq) = clip_freq {
+        if freq > 0.30 {
+            anomalies.push(format!(
+                "Budget clipping frequent: {}% of captured runs",
+                (freq * 100.0).round() as i64
+            ));
+        }
+    }
+
+    let mut recommendations: Vec<String> = Vec::new();
+    if let Some((tool, avg_eff)) = top_eff.first() {
+        recommendations.push(format!(
+            "{tool} exceeds average token threshold ({avg_eff}); recommend lean mode."
+        ));
+    }
+    if let (Some(a), Some(b)) = (first_cache, second_cache) {
+        if b + 0.05 < a {
+            recommendations.push("Cache hit rate degraded; inspect prompt drift.".to_string());
         }
     }
     if schema_fails > 0 {
-        println!(
-            "- Schema failures detected ({schema_fails}); inspect quarantine entries and tighten schema prompts."
-        );
+        let tool = top_eff
+            .first()
+            .map(|v| v.0.clone())
+            .unwrap_or_else(|| "schema command".to_string());
+        recommendations.push(format!(
+            "Schema failures detected for {tool}; enforce deterministic mode."
+        ));
     }
-    if alerts == 0 && schema_fails == 0 {
-        println!("- No significant anomalies in this window.");
+    if recommendations.is_empty() {
+        recommendations.push("No significant anomalies in this window.".to_string());
     }
 
-    println!("log_file: {}", log_file.display());
+    Ok(json!({
+        "window": n,
+        "runs": total,
+        "scoreboard": {
+            "runs": total,
+            "alerts": alerts,
+            "alerts_pct": if total == 0 { 0.0 } else { (alerts as f64 / total as f64) * 100.0 },
+            "top_avg_duration_ms": top_dur,
+            "top_avg_effective_input_tokens": top_eff,
+            "cache_hit_rate": cache_all,
+            "cache_hit_trend": {
+                "first_half": first_cache,
+                "second_half": second_cache,
+                "delta": match (first_cache, second_cache) {
+                    (Some(a), Some(b)) => Some(b - a),
+                    _ => None
+                }
+            },
+            "schema_failure_frequency": {
+                "schema_runs": schema_total,
+                "schema_failures": schema_fails,
+                "rate": schema_fail_freq
+            },
+            "capture_provider_compression": compression_rows,
+            "budget_clipping_frequency": {
+                "captured_runs": clipped_total,
+                "clipped_runs": clipped_count,
+                "rate": clip_freq
+            }
+        },
+        "anomalies": anomalies,
+        "recommendations": recommendations,
+        "log_file": log_file.display().to_string()
+    }))
+}
+
+fn print_optimize(n: usize, json_out: bool) -> i32 {
+    let report = match optimize_report(n) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs optimize: {e}");
+            return 1;
+        }
+    };
+    if json_out {
+        println!("{}", report);
+        return 0;
+    }
+
+    println!("== cxrs optimize (last {n} runs) ==");
+    println!("Section A: Scoreboard");
+    let sb = report
+        .get("scoreboard")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    println!(
+        "runs: {}",
+        sb.get("runs").and_then(Value::as_u64).unwrap_or(0)
+    );
+    println!(
+        "alerts: {}",
+        sb.get("alerts").and_then(Value::as_u64).unwrap_or(0)
+    );
+    if let Some(v) = sb.get("cache_hit_rate").and_then(Value::as_f64) {
+        println!("cache_hit_rate: {}%", (v * 100.0).round() as i64);
+    } else {
+        println!("cache_hit_rate: n/a");
+    }
+    if let Some(tr) = sb.get("cache_hit_trend") {
+        let a = tr.get("first_half").and_then(Value::as_f64);
+        let b = tr.get("second_half").and_then(Value::as_f64);
+        match (a, b) {
+            (Some(x), Some(y)) => println!(
+                "cache_trend: first_half={}%, second_half={}%, delta={}pp",
+                (x * 100.0).round() as i64,
+                (y * 100.0).round() as i64,
+                ((y - x) * 100.0).round() as i64
+            ),
+            _ => println!("cache_trend: n/a"),
+        }
+    }
+    println!("top_by_avg_duration_ms:");
+    if let Some(arr) = sb.get("top_avg_duration_ms").and_then(Value::as_array) {
+        for row in arr {
+            if let Some(pair) = row.as_array() {
+                if pair.len() == 2 {
+                    println!(
+                        "- {}: {}ms",
+                        pair[0].as_str().unwrap_or("unknown"),
+                        pair[1].as_u64().unwrap_or(0)
+                    );
+                }
+            }
+        }
+    }
+    println!("top_by_avg_effective_tokens:");
+    if let Some(arr) = sb
+        .get("top_avg_effective_input_tokens")
+        .and_then(Value::as_array)
+    {
+        for row in arr {
+            if let Some(pair) = row.as_array() {
+                if pair.len() == 2 {
+                    println!(
+                        "- {}: {}",
+                        pair[0].as_str().unwrap_or("unknown"),
+                        pair[1].as_u64().unwrap_or(0)
+                    );
+                }
+            }
+        }
+    }
+    if let Some(c) = sb.get("budget_clipping_frequency") {
+        let rate = c.get("rate").and_then(Value::as_f64);
+        match rate {
+            Some(r) => println!("budget_clipping_frequency: {}%", (r * 100.0).round() as i64),
+            None => println!("budget_clipping_frequency: n/a"),
+        }
+    }
+    println!("capture_provider_compression:");
+    if let Some(arr) = sb
+        .get("capture_provider_compression")
+        .and_then(Value::as_array)
+    {
+        if arr.is_empty() {
+            println!("- n/a");
+        } else {
+            for row in arr {
+                let provider = row
+                    .get("provider")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                let ratio = row
+                    .get("processed_over_raw")
+                    .and_then(Value::as_f64)
+                    .map(|v| format!("{:.2}", v))
+                    .unwrap_or_else(|| "n/a".to_string());
+                println!("- {provider}: processed/raw={ratio}");
+            }
+        }
+    }
+
+    println!();
+    println!("Section B: Anomaly Alerts");
+    if let Some(arr) = report.get("anomalies").and_then(Value::as_array) {
+        if arr.is_empty() {
+            println!("- none");
+        } else {
+            for a in arr {
+                println!("- {}", a.as_str().unwrap_or(""));
+            }
+        }
+    }
+
+    println!();
+    println!("Section C: Actionable Recommendations");
+    if let Some(arr) = report.get("recommendations").and_then(Value::as_array) {
+        for r in arr {
+            println!("- {}", r.as_str().unwrap_or(""));
+        }
+    }
+    println!(
+        "log_file: {}",
+        report
+            .get("log_file")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>")
+    );
     0
 }
 
@@ -2082,9 +3946,235 @@ fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
 }
 
 fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
+    if env::var("CX_SCHEMA_RELAXED").ok().as_deref() == Some("1") {
+        return format!(
+            "You are a structured output generator.\nReturn JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
+        );
+    }
     format!(
         "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema-strict mode: deterministic JSON only; reject ambiguity.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
     )
+}
+
+#[derive(Debug, Clone)]
+struct BudgetConfig {
+    budget_chars: usize,
+    budget_lines: usize,
+    clip_mode: String,
+    clip_footer: bool,
+}
+
+fn budget_config_from_env() -> BudgetConfig {
+    BudgetConfig {
+        budget_chars: env::var("CX_CONTEXT_BUDGET_CHARS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(12000),
+        budget_lines: env::var("CX_CONTEXT_BUDGET_LINES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(300),
+        clip_mode: env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string()),
+        clip_footer: env::var("CX_CONTEXT_CLIP_FOOTER")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(1)
+            == 1,
+    }
+}
+
+fn is_rtk_supported_prefix(cmd0: &str) -> bool {
+    matches!(
+        cmd0,
+        "git" | "diff" | "ls" | "tree" | "grep" | "test" | "log" | "read"
+    )
+}
+
+fn normalize_generic(input: &str) -> String {
+    let mut out = String::new();
+    let mut blank_seen = false;
+    for mut line in input.lines().map(|l| l.to_string()) {
+        if line.trim().is_empty() {
+            if !blank_seen {
+                out.push('\n');
+            }
+            blank_seen = true;
+            continue;
+        }
+        blank_seen = false;
+        if line.chars().count() > 600 {
+            line = format!("{}...", line.chars().take(600).collect::<String>());
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+fn reduce_git_status(input: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in input.lines() {
+        let t = line.trim_start();
+        if line.starts_with("On branch ")
+            || line.starts_with("HEAD detached")
+            || line.starts_with("Your branch ")
+            || line.starts_with("Changes to be committed:")
+            || line.starts_with("Changes not staged for commit:")
+            || line.starts_with("Untracked files:")
+            || line.starts_with("nothing to commit")
+            || line.starts_with("no changes added to commit")
+            || t.starts_with("modified:")
+            || t.starts_with("new file:")
+            || t.starts_with("deleted:")
+            || t.starts_with("renamed:")
+            || t.starts_with("both modified:")
+            || t.starts_with("both added:")
+            || t.starts_with("both deleted:")
+        {
+            out.push(line.to_string());
+        }
+    }
+    if out.is_empty() {
+        input
+            .lines()
+            .take(120)
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        out.join("\n")
+    }
+}
+
+fn reduce_diff_like(input: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut changed = 0usize;
+    for line in input.lines() {
+        if line.starts_with("diff --git ")
+            || line.starts_with("index ")
+            || line.starts_with("--- ")
+            || line.starts_with("+++ ")
+            || line.starts_with("@@ ")
+            || line.starts_with("Binary files ")
+            || line.starts_with("rename from ")
+            || line.starts_with("rename to ")
+        {
+            out.push(line.to_string());
+        } else if (line.starts_with('+') || line.starts_with('-')) && changed < 300 {
+            out.push(line.to_string());
+            changed += 1;
+        }
+    }
+    if out.is_empty() {
+        input.to_string()
+    } else {
+        out.join("\n")
+    }
+}
+
+fn native_reduce_output(cmd: &[String], input: &str) -> String {
+    let cmd0 = cmd.first().map(String::as_str).unwrap_or("");
+    let cmd1 = cmd.get(1).map(String::as_str).unwrap_or("");
+    let reduced = match (cmd0, cmd1) {
+        ("git", "status") => reduce_git_status(input),
+        ("git", "diff") | ("diff", _) => reduce_diff_like(input),
+        _ => input.to_string(),
+    };
+    normalize_generic(&reduced)
+}
+
+fn choose_clip_mode(input: &str, configured_mode: &str) -> String {
+    match configured_mode {
+        "head" => "head".to_string(),
+        "tail" => "tail".to_string(),
+        _ => {
+            let lower = input.to_lowercase();
+            if lower.contains("error") || lower.contains("fail") || lower.contains("warning") {
+                "tail".to_string()
+            } else {
+                "head".to_string()
+            }
+        }
+    }
+}
+
+fn first_n_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+fn last_n_chars(s: &str, n: usize) -> String {
+    let total = s.chars().count();
+    if n >= total {
+        return s.to_string();
+    }
+    s.chars().skip(total - n).collect()
+}
+
+fn clip_text_with_config(input: &str, cfg: &BudgetConfig) -> (String, CaptureStats) {
+    let original_chars = input.chars().count();
+    let original_lines = input.lines().count();
+    let mode_used = choose_clip_mode(input, &cfg.clip_mode);
+    let lines: Vec<&str> = input.lines().collect();
+    let line_limited = if lines.len() <= cfg.budget_lines {
+        input.to_string()
+    } else if mode_used == "tail" {
+        lines[lines.len().saturating_sub(cfg.budget_lines)..].join("\n")
+    } else {
+        lines[..cfg.budget_lines].join("\n")
+    };
+    let char_limited = if line_limited.chars().count() <= cfg.budget_chars {
+        line_limited
+    } else if mode_used == "tail" {
+        last_n_chars(&line_limited, cfg.budget_chars)
+    } else {
+        first_n_chars(&line_limited, cfg.budget_chars)
+    };
+    let kept_chars = char_limited.chars().count();
+    let kept_lines = char_limited.lines().count();
+    let clipped = kept_chars < original_chars || kept_lines < original_lines;
+    let final_text = if clipped && cfg.clip_footer {
+        format!(
+            "{char_limited}\n[cx] output clipped: original={}/{}, kept={}/{}, mode={}",
+            original_chars, original_lines, kept_chars, kept_lines, mode_used
+        )
+    } else {
+        char_limited
+    };
+    (
+        final_text,
+        CaptureStats {
+            system_output_len_raw: Some(original_chars as u64),
+            system_output_len_processed: Some(input.chars().count() as u64),
+            system_output_len_clipped: Some(kept_chars as u64),
+            system_output_lines_raw: Some(original_lines as u64),
+            system_output_lines_processed: Some(input.lines().count() as u64),
+            system_output_lines_clipped: Some(kept_lines as u64),
+            clipped: Some(clipped),
+            budget_chars: Some(cfg.budget_chars as u64),
+            budget_lines: Some(cfg.budget_lines as u64),
+            clip_mode: Some(mode_used),
+            clip_footer: Some(cfg.clip_footer),
+            rtk_used: None,
+            capture_provider: None,
+        },
+    )
+}
+
+fn should_use_rtk(
+    cmd: &[String],
+    provider_mode: &str,
+    rtk_enabled: bool,
+    rtk_usable: bool,
+) -> bool {
+    let supported = cmd
+        .first()
+        .map(|c| is_rtk_supported_prefix(c))
+        .unwrap_or(false);
+    match provider_mode {
+        "rtk" => rtk_enabled && supported && rtk_usable,
+        "native" => false,
+        _ => rtk_enabled && supported && rtk_usable,
+    }
 }
 
 fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureStats), String> {
@@ -2115,197 +4205,6 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         Ok((combined, status))
     }
 
-    fn is_rtk_supported_prefix(cmd0: &str) -> bool {
-        matches!(
-            cmd0,
-            "git" | "diff" | "ls" | "tree" | "grep" | "test" | "log" | "read"
-        )
-    }
-
-    fn normalize_generic(input: &str) -> String {
-        let mut out = String::new();
-        let mut blank_seen = false;
-        for mut line in input.lines().map(|l| l.to_string()) {
-            if line.trim().is_empty() {
-                if !blank_seen {
-                    out.push('\n');
-                }
-                blank_seen = true;
-                continue;
-            }
-            blank_seen = false;
-            if line.chars().count() > 600 {
-                line = format!("{}…", line.chars().take(600).collect::<String>());
-            }
-            out.push_str(&line);
-            out.push('\n');
-        }
-        out
-    }
-
-    fn reduce_git_status(input: &str) -> String {
-        let mut out: Vec<String> = Vec::new();
-        for line in input.lines() {
-            let t = line.trim_start();
-            if line.starts_with("On branch ")
-                || line.starts_with("HEAD detached")
-                || line.starts_with("Your branch ")
-                || line.starts_with("Changes to be committed:")
-                || line.starts_with("Changes not staged for commit:")
-                || line.starts_with("Untracked files:")
-                || line.starts_with("nothing to commit")
-                || line.starts_with("no changes added to commit")
-                || t.starts_with("modified:")
-                || t.starts_with("new file:")
-                || t.starts_with("deleted:")
-                || t.starts_with("renamed:")
-                || t.starts_with("both modified:")
-                || t.starts_with("both added:")
-                || t.starts_with("both deleted:")
-            {
-                out.push(line.to_string());
-            }
-        }
-        if out.is_empty() {
-            input
-                .lines()
-                .take(120)
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            out.join("\n")
-        }
-    }
-
-    fn reduce_diff_like(input: &str) -> String {
-        let mut out: Vec<String> = Vec::new();
-        let mut changed = 0usize;
-        for line in input.lines() {
-            if line.starts_with("diff --git ")
-                || line.starts_with("index ")
-                || line.starts_with("--- ")
-                || line.starts_with("+++ ")
-                || line.starts_with("@@ ")
-                || line.starts_with("Binary files ")
-                || line.starts_with("rename from ")
-                || line.starts_with("rename to ")
-            {
-                out.push(line.to_string());
-            } else if (line.starts_with('+') || line.starts_with('-')) && changed < 300 {
-                out.push(line.to_string());
-                changed += 1;
-            }
-        }
-        if out.is_empty() {
-            input.to_string()
-        } else {
-            out.join("\n")
-        }
-    }
-
-    fn native_reduce_output(cmd: &[String], input: &str) -> String {
-        let cmd0 = cmd.first().map(String::as_str).unwrap_or("");
-        let cmd1 = cmd.get(1).map(String::as_str).unwrap_or("");
-        let reduced = match (cmd0, cmd1) {
-            ("git", "status") => reduce_git_status(input),
-            ("git", "diff") | ("diff", _) => reduce_diff_like(input),
-            _ => input.to_string(),
-        };
-        normalize_generic(&reduced)
-    }
-
-    fn first_n_chars(s: &str, n: usize) -> String {
-        s.chars().take(n).collect()
-    }
-
-    fn last_n_chars(s: &str, n: usize) -> String {
-        let total = s.chars().count();
-        if n >= total {
-            return s.to_string();
-        }
-        s.chars().skip(total - n).collect()
-    }
-
-    fn clip_text(input: &str) -> (String, CaptureStats) {
-        let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(12000);
-        let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(300);
-        let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
-        let clip_footer = env::var("CX_CONTEXT_CLIP_FOOTER")
-            .ok()
-            .and_then(|v| v.parse::<u8>().ok())
-            .unwrap_or(1)
-            == 1;
-
-        let original_chars = input.chars().count();
-        let original_lines = input.lines().count();
-        let lower = input.to_lowercase();
-        let mode_used = match clip_mode.as_str() {
-            "head" => "head",
-            "tail" => "tail",
-            _ => {
-                if lower.contains("error") || lower.contains("fail") || lower.contains("warning") {
-                    "tail"
-                } else {
-                    "head"
-                }
-            }
-        };
-
-        let lines: Vec<&str> = input.lines().collect();
-        let line_limited = if lines.len() <= budget_lines {
-            input.to_string()
-        } else if mode_used == "tail" {
-            lines[lines.len().saturating_sub(budget_lines)..].join("\n")
-        } else {
-            lines[..budget_lines].join("\n")
-        };
-
-        let char_limited = if line_limited.chars().count() <= budget_chars {
-            line_limited
-        } else if mode_used == "tail" {
-            last_n_chars(&line_limited, budget_chars)
-        } else {
-            first_n_chars(&line_limited, budget_chars)
-        };
-
-        let kept_chars = char_limited.chars().count();
-        let kept_lines = char_limited.lines().count();
-        let clipped = kept_chars < original_chars || kept_lines < original_lines;
-        let final_text = if clipped && clip_footer {
-            format!(
-                "{char_limited}\n[cx] output clipped: original={}/{}, kept={}/{}, mode={}",
-                original_chars, original_lines, kept_chars, kept_lines, mode_used
-            )
-        } else {
-            char_limited
-        };
-        (
-            final_text,
-            CaptureStats {
-                system_output_len_raw: Some(original_chars as u64),
-                system_output_len_processed: Some(input.chars().count() as u64),
-                system_output_len_clipped: Some(kept_chars as u64),
-                system_output_lines_raw: Some(original_lines as u64),
-                system_output_lines_processed: Some(input.lines().count() as u64),
-                system_output_lines_clipped: Some(kept_lines as u64),
-                clipped: Some(clipped),
-                budget_chars: Some(budget_chars as u64),
-                budget_lines: Some(budget_lines as u64),
-                clip_mode: Some(mode_used.to_string()),
-                clip_footer: Some(clip_footer),
-                rtk_used: None,
-                capture_provider: None,
-            },
-        )
-    }
-
     let (raw_out, status) = run_capture(cmd)?;
     let rtk_enabled = env::var("CX_RTK_SYSTEM")
         .ok()
@@ -2323,11 +4222,7 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
         _ => "auto".to_string(),
     };
     let rtk_usable = rtk_is_usable();
-    let use_rtk = match provider_mode.as_str() {
-        "rtk" => rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable,
-        "native" => false,
-        _ => rtk_enabled && is_rtk_supported_prefix(&cmd[0]) && rtk_usable,
-    };
+    let use_rtk = should_use_rtk(cmd, &provider_mode, rtk_enabled, rtk_usable);
     let mut provider_used = if use_rtk { "rtk" } else { "native" }.to_string();
     let processed = if use_rtk {
         let mut rtk_cmd = vec!["rtk".to_string()];
@@ -2347,27 +4242,156 @@ fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, CaptureSta
     } else {
         processed
     };
-    let (clipped_text, mut stats) = clip_text(&reduced);
+    let (clipped_text, mut stats) = clip_text_with_config(&reduced, &budget_config_from_env());
     stats.rtk_used = Some(provider_used == "rtk");
     stats.capture_provider = Some(provider_used);
     Ok((clipped_text, status, stats))
 }
 
-fn run_git_capture(args: &[&str]) -> Result<(String, i32), String> {
-    let output = Command::new("git")
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to execute git {}: {e}", args.join(" ")))?;
-    let status = output.status.code().unwrap_or(1);
-    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !stderr.trim().is_empty() {
-        if !combined.is_empty() && !combined.ends_with('\n') {
-            combined.push('\n');
+fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
+    let started = Instant::now();
+    let execution_id = make_execution_id(&spec.command_name);
+
+    let (prompt, capture_stats, system_status) = match spec.input {
+        TaskInput::Prompt(p) => (p, CaptureStats::default(), None),
+        TaskInput::SystemCommand(cmd) => {
+            let (captured, status, stats) = run_system_command_capture(&cmd)?;
+            (captured, stats, Some(status))
         }
-        combined.push_str(&stderr);
+    };
+    let capture_stats = spec.capture_override.unwrap_or(capture_stats);
+
+    let mut schema_valid: Option<bool> = None;
+    let mut quarantine_id: Option<String> = None;
+    let mut usage = UsageStats::default();
+    let stdout: String;
+    let stderr = String::new();
+
+    match spec.output_kind {
+        LlmOutputKind::Plain => {
+            stdout = run_llm_plain(&prompt)?;
+        }
+        LlmOutputKind::Jsonl => {
+            let jsonl = run_llm_jsonl(&prompt)?;
+            usage = usage_from_jsonl(&jsonl);
+            stdout = jsonl;
+        }
+        LlmOutputKind::AgentText => {
+            let jsonl = run_llm_jsonl(&prompt)?;
+            usage = usage_from_jsonl(&jsonl);
+            stdout = extract_agent_text(&jsonl).unwrap_or_default();
+        }
+        LlmOutputKind::SchemaJson => {
+            let schema = spec
+                .schema
+                .as_ref()
+                .ok_or_else(|| "schema execution missing schema".to_string())?;
+            let task_input = spec
+                .schema_task_input
+                .as_deref()
+                .unwrap_or(&prompt)
+                .to_string();
+            let schema_pretty = serde_json::to_string_pretty(&schema.value)
+                .unwrap_or_else(|_| schema.value.to_string());
+            let full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);
+            let jsonl = run_llm_jsonl(&full_prompt)?;
+            usage = usage_from_jsonl(&jsonl);
+            let raw = extract_agent_text(&jsonl).unwrap_or_default();
+            if raw.trim().is_empty() {
+                let qid = log_schema_failure(
+                    &spec.command_name,
+                    "empty_agent_message",
+                    &raw,
+                    &schema_pretty,
+                    &task_input,
+                )
+                .unwrap_or_else(|_| "".to_string());
+                schema_valid = Some(false);
+                quarantine_id = if qid.is_empty() { None } else { Some(qid) };
+                stdout = raw;
+            } else {
+                match validate_schema_instance(schema, &raw) {
+                    Ok(valid) => {
+                        schema_valid = Some(true);
+                        stdout = valid.to_string();
+                    }
+                    Err(reason) => {
+                        let qid = log_schema_failure(
+                            &spec.command_name,
+                            &reason,
+                            &raw,
+                            &schema_pretty,
+                            &task_input,
+                        )
+                        .unwrap_or_else(|_| "".to_string());
+                        schema_valid = Some(false);
+                        quarantine_id = if qid.is_empty() { None } else { Some(qid) };
+                        stdout = raw;
+                    }
+                }
+            }
+            // keep full prompt hash/logging correlation for schema tasks
+            if spec.logging_enabled && logging_enabled() {
+                let _ = log_codex_run(
+                    &spec.command_name,
+                    &full_prompt,
+                    started.elapsed().as_millis() as u64,
+                    Some(&usage),
+                    Some(&capture_stats),
+                    schema_valid.unwrap_or(false),
+                    if schema_valid == Some(false) {
+                        Some("schema_validation_failed")
+                    } else {
+                        None
+                    },
+                    spec.schema.as_ref().map(|s| s.name.as_str()),
+                    quarantine_id.as_deref(),
+                    None,
+                    None,
+                );
+            }
+            return Ok(ExecutionResult {
+                stdout,
+                stderr,
+                duration_ms: started.elapsed().as_millis() as u64,
+                schema_valid,
+                quarantine_id,
+                capture_stats,
+                execution_id,
+                usage,
+                system_status,
+            });
+        }
     }
-    Ok((combined, status))
+
+    if spec.logging_enabled && logging_enabled() {
+        let schema_name = spec.schema.as_ref().map(|s| s.name.as_str());
+        let _ = log_codex_run(
+            &spec.command_name,
+            &prompt,
+            started.elapsed().as_millis() as u64,
+            Some(&usage),
+            Some(&capture_stats),
+            schema_valid.unwrap_or(true),
+            None,
+            schema_name,
+            quarantine_id.as_deref(),
+            None,
+            None,
+        );
+    }
+
+    Ok(ExecutionResult {
+        stdout,
+        stderr,
+        duration_ms: started.elapsed().as_millis() as u64,
+        schema_valid,
+        quarantine_id,
+        capture_stats,
+        execution_id,
+        usage,
+        system_status,
+    })
 }
 
 fn run_command_for_bench(
@@ -2551,63 +4575,23 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
     if failures > 0 { 1 } else { 0 }
 }
 
-fn run_strict_schema(
-    tool: &str,
-    schema: &str,
-    task_input: &str,
-    capture: Option<&CaptureStats>,
-) -> Result<String, String> {
-    let full_prompt = build_strict_schema_prompt(schema, task_input);
-    let started = Instant::now();
-    let jsonl = run_llm_jsonl(&full_prompt)?;
-    let raw = extract_agent_text(&jsonl).unwrap_or_default();
-    let usage = usage_from_jsonl(&jsonl);
-    if raw.trim().is_empty() {
-        let qid = log_schema_failure(tool, "empty_agent_message", &raw, schema, task_input)
-            .unwrap_or_else(|_| "".to_string());
-        let _ = log_codex_run(
-            tool,
-            &full_prompt,
-            started.elapsed().as_millis() as u64,
-            Some(&usage),
-            capture,
-            false,
-            Some("empty_agent_message"),
-            Some(&qid),
-        );
-        return Err(format!(
-            "empty response from {}; quarantine_id={qid}",
-            llm_backend()
-        ));
+fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Value, String> {
+    let instance: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+    let compiled = JSONSchema::compile(&schema.value)
+        .map_err(|e| format!("failed to compile schema {}: {e}", schema.path.display()))?;
+    if let Err(errors) = compiled.validate(&instance) {
+        let mut reasons: Vec<String> = Vec::new();
+        for err in errors.take(3) {
+            reasons.push(err.to_string());
+        }
+        let reason = if reasons.is_empty() {
+            "schema_validation_failed".to_string()
+        } else {
+            format!("schema_validation_failed: {}", reasons.join(" | "))
+        };
+        return Err(reason);
     }
-    if serde_json::from_str::<Value>(&raw).is_err() {
-        let qid = log_schema_failure(tool, "invalid_json", &raw, schema, task_input)
-            .unwrap_or_else(|_| "".to_string());
-        let _ = log_codex_run(
-            tool,
-            &full_prompt,
-            started.elapsed().as_millis() as u64,
-            Some(&usage),
-            capture,
-            false,
-            Some("invalid_json"),
-            Some(&qid),
-        );
-        return Err(format!(
-            "invalid JSON response; quarantine_id={qid}; raw={raw}"
-        ));
-    }
-    let _ = log_codex_run(
-        tool,
-        &full_prompt,
-        started.elapsed().as_millis() as u64,
-        Some(&usage),
-        capture,
-        true,
-        None,
-        None,
-    );
-    Ok(raw)
+    Ok(instance)
 }
 
 fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
@@ -2628,31 +4612,85 @@ fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-fn is_dangerous_cmd(cmd: &str) -> bool {
+#[derive(Debug, Clone)]
+enum SafetyDecision {
+    Safe,
+    Dangerous(String),
+}
+
+fn normalize_token(tok: &str) -> String {
+    tok.trim_matches(|c: char| c == '"' || c == '\'' || c == '`' || c == ';' || c == ',')
+        .to_string()
+}
+
+fn command_has_write_pattern(lower: &str) -> bool {
+    lower.contains(">>")
+        || lower.contains(">")
+        || lower.contains("tee ")
+        || lower.contains("touch ")
+        || lower.contains("mkdir ")
+        || lower.contains("cp ")
+        || lower.contains("mv ")
+        || lower.contains("install ")
+        || lower.contains("dd ")
+        || lower.contains("chmod ")
+        || lower.contains("chown ")
+}
+
+fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
+    let root_s = repo_root.to_string_lossy().to_string();
+    let tokens: Vec<String> = cmd.split_whitespace().map(normalize_token).collect();
+    let mut candidates: Vec<String> = Vec::new();
+    for i in 0..tokens.len() {
+        let t = tokens[i].as_str();
+        if t == ">" || t == ">>" || t == "tee" || t == "cp" || t == "mv" || t == "install" {
+            if let Some(next) = tokens.get(i + 1) {
+                candidates.push(next.clone());
+            }
+        }
+        if let Some(path) = t.strip_prefix("of=") {
+            candidates.push(path.to_string());
+        }
+        if t.starts_with('/') {
+            candidates.push(t.to_string());
+        }
+    }
+    candidates.into_iter().any(|p| {
+        if !p.starts_with('/') {
+            return false;
+        }
+        if p.starts_with(&(root_s.clone() + "/")) || p == root_s {
+            return false;
+        }
+        true
+    })
+}
+
+fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
     let compact = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
     let lower = compact.to_lowercase();
 
     if lower.contains(" sudo ") || lower.starts_with("sudo ") || lower.ends_with(" sudo") {
-        return true;
+        return SafetyDecision::Dangerous("contains sudo".to_string());
     }
     if lower.contains("rm -rf")
         || lower.contains("rm -fr")
         || lower.contains("rm -r -f")
         || lower.contains("rm -f -r")
     {
-        return true;
+        return SafetyDecision::Dangerous("contains rm -rf pattern".to_string());
     }
     if lower.contains("curl ")
         && lower.contains('|')
         && (lower.contains("| bash") || lower.contains("| sh") || lower.contains("| zsh"))
     {
-        return true;
+        return SafetyDecision::Dangerous("contains curl pipe shell pattern".to_string());
     }
     if (lower.contains("chmod ") || lower.contains("chown "))
         && (lower.contains("/system") || lower.contains("/library") || lower.contains("/usr"))
         && !lower.contains("/usr/local")
     {
-        return true;
+        return SafetyDecision::Dangerous("chmod/chown on protected system path".to_string());
     }
     if (lower.contains("> /system")
         || lower.contains(">> /system")
@@ -2666,9 +4704,12 @@ fn is_dangerous_cmd(cmd: &str) -> bool {
                 || lower.contains(" /usr"))))
         && !lower.contains("/usr/local")
     {
-        return true;
+        return SafetyDecision::Dangerous("write redirection to protected system path".to_string());
     }
-    false
+    if command_has_write_pattern(&lower) && write_targets_outside_repo(&compact, repo_root) {
+        return SafetyDecision::Dangerous("write target outside repo root".to_string());
+    }
+    SafetyDecision::Safe
 }
 
 fn cmd_policy(args: &[String]) -> i32 {
@@ -2678,11 +4719,33 @@ fn cmd_policy(args: &[String]) -> i32 {
             return 2;
         }
         let candidate = args[1..].join(" ");
-        if is_dangerous_cmd(&candidate) {
-            println!("dangerous");
-            return 0;
+        let root = repo_root()
+            .or_else(|| env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        match evaluate_command_safety(&candidate, &root) {
+            SafetyDecision::Safe => println!("safe"),
+            SafetyDecision::Dangerous(reason) => println!("dangerous: {reason}"),
         }
-        println!("safe");
+        return 0;
+    }
+
+    if args.first().map(String::as_str) == Some("show") || args.is_empty() {
+        let unsafe_flag = env::var("CX_UNSAFE").ok().as_deref() == Some("1");
+        let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
+        println!("== cxrs policy show ==");
+        println!("Active safety rules:");
+        println!("- Block: sudo");
+        println!("- Block: rm -rf family");
+        println!("- Block: curl | bash/sh/zsh");
+        println!("- Block: chmod/chown on /System,/Library,/usr (except /usr/local)");
+        println!("- Block: write operations outside repo root");
+        println!();
+        println!("Unsafe override state:");
+        println!(
+            "--unsafe / CX_UNSAFE=1: {}",
+            if unsafe_flag { "on" } else { "off" }
+        );
+        println!("CXFIX_FORCE=1: {}", if force { "on" } else { "off" });
         return 0;
     }
 
@@ -2695,6 +4758,7 @@ fn cmd_policy(args: &[String]) -> i32 {
     println!("- shell redirection/tee writes to /System, /Library, /usr (except /usr/local)");
     println!();
     println!("Overrides:");
+    println!("- --unsafe          allow dangerous execution for current command");
     println!("- CXFIX_RUN=1       execute suggested commands");
     println!("- CXFIX_FORCE=1     allow dangerous commands");
     println!();
@@ -2990,96 +5054,63 @@ fn cmd_promptlint(n: usize) -> i32 {
 }
 
 fn cmd_cx(command: &[String]) -> i32 {
-    let (captured, status, capture_stats) = match run_system_command_capture(command) {
+    let result = match execute_task(TaskSpec {
+        command_name: "cx".to_string(),
+        input: TaskInput::SystemCommand(command.to_vec()),
+        output_kind: LlmOutputKind::Plain,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: None,
+    }) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cx: {e}");
             return 1;
         }
     };
-    let started = Instant::now();
-    let out = match run_llm_plain(&captured) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cx: {e}");
-            return if status == 0 { 1 } else { status };
-        }
-    };
-    let _ = log_codex_run(
-        "cx",
-        &captured,
-        started.elapsed().as_millis() as u64,
-        None,
-        Some(&capture_stats),
-        true,
-        None,
-        None,
-    );
-    print!("{out}");
-    if status == 0 { 0 } else { status }
+    print!("{}", result.stdout);
+    result.system_status.unwrap_or(0)
 }
 
 fn cmd_cxj(command: &[String]) -> i32 {
-    let (captured, status, capture_stats) = match run_system_command_capture(command) {
+    let result = match execute_task(TaskSpec {
+        command_name: "cxj".to_string(),
+        input: TaskInput::SystemCommand(command.to_vec()),
+        output_kind: LlmOutputKind::Jsonl,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: None,
+    }) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxj: {e}");
             return 1;
         }
     };
-    let started = Instant::now();
-    let out = match run_llm_jsonl(&captured) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxj: {e}");
-            return if status == 0 { 1 } else { status };
-        }
-    };
-    let usage = usage_from_jsonl(&out);
-    let _ = log_codex_run(
-        "cxj",
-        &captured,
-        started.elapsed().as_millis() as u64,
-        Some(&usage),
-        Some(&capture_stats),
-        true,
-        None,
-        None,
-    );
-    print!("{out}");
-    if status == 0 { 0 } else { status }
+    print!("{}", result.stdout);
+    result.system_status.unwrap_or(0)
 }
 
 fn cmd_cxo(command: &[String]) -> i32 {
-    let (captured, status, capture_stats) = match run_system_command_capture(command) {
+    let result = match execute_task(TaskSpec {
+        command_name: "cxo".to_string(),
+        input: TaskInput::SystemCommand(command.to_vec()),
+        output_kind: LlmOutputKind::AgentText,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: None,
+    }) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxo: {e}");
             return 1;
         }
     };
-    let started = Instant::now();
-    let out = match run_llm_jsonl(&captured) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxo: {e}");
-            return if status == 0 { 1 } else { status };
-        }
-    };
-    let usage = usage_from_jsonl(&out);
-    let _ = log_codex_run(
-        "cxo",
-        &captured,
-        started.elapsed().as_millis() as u64,
-        Some(&usage),
-        Some(&capture_stats),
-        true,
-        None,
-        None,
-    );
-    let text = extract_agent_text(&out).unwrap_or_default();
-    println!("{text}");
-    if status == 0 { 0 } else { status }
+    println!("{}", result.stdout);
+    result.system_status.unwrap_or(0)
 }
 
 fn cmd_cxol(command: &[String]) -> i32 {
@@ -3087,33 +5118,22 @@ fn cmd_cxol(command: &[String]) -> i32 {
 }
 
 fn cmd_cxcopy(command: &[String]) -> i32 {
-    let (captured, status, capture_stats) = match run_system_command_capture(command) {
+    let result = match execute_task(TaskSpec {
+        command_name: "cxcopy".to_string(),
+        input: TaskInput::SystemCommand(command.to_vec()),
+        output_kind: LlmOutputKind::AgentText,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: None,
+    }) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs cxcopy: {e}");
             return 1;
         }
     };
-    let started = Instant::now();
-    let out = match run_llm_jsonl(&captured) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxcopy: {e}");
-            return if status == 0 { 1 } else { status };
-        }
-    };
-    let usage = usage_from_jsonl(&out);
-    let _ = log_codex_run(
-        "cxcopy",
-        &captured,
-        started.elapsed().as_millis() as u64,
-        Some(&usage),
-        Some(&capture_stats),
-        true,
-        None,
-        None,
-    );
-    let text = extract_agent_text(&out).unwrap_or_default();
+    let text = result.stdout;
     if text.trim().is_empty() {
         eprintln!("cxrs cxcopy: nothing to copy");
         return 1;
@@ -3131,7 +5151,7 @@ fn cmd_cxcopy(command: &[String]) -> i32 {
     match pb.wait() {
         Ok(s) if s.success() => {
             println!("Copied to clipboard.");
-            if status == 0 { 0 } else { status }
+            result.system_status.unwrap_or(0)
         }
         Ok(s) => {
             eprintln!("cxrs cxcopy: pbcopy failed with status {}", s);
@@ -3158,27 +5178,22 @@ fn cmd_fix(command: &[String]) -> i32 {
         status,
         captured
     );
-    let started = Instant::now();
-    let jsonl = match run_llm_jsonl(&prompt) {
+    let result = match execute_task(TaskSpec {
+        command_name: "cxfix".to_string(),
+        input: TaskInput::Prompt(prompt),
+        output_kind: LlmOutputKind::AgentText,
+        schema: None,
+        schema_task_input: None,
+        logging_enabled: true,
+        capture_override: Some(capture_stats),
+    }) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix: {e}");
             return status;
         }
     };
-    let usage = usage_from_jsonl(&jsonl);
-    let _ = log_codex_run(
-        "cxfix",
-        &prompt,
-        started.elapsed().as_millis() as u64,
-        Some(&usage),
-        Some(&capture_stats),
-        true,
-        None,
-        None,
-    );
-    let text = extract_agent_text(&jsonl).unwrap_or_default();
-    println!("{text}");
+    println!("{}", result.stdout);
     status
 }
 
@@ -3274,6 +5289,369 @@ fn cmd_log_tail(n: usize) -> i32 {
         }
     }
     0
+}
+
+fn rtk_version_string() -> String {
+    let out = match Command::new("rtk").arg("--version").output() {
+        Ok(v) if v.status.success() => v,
+        _ => return "<unavailable>".to_string(),
+    };
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        "<unavailable>".to_string()
+    } else {
+        s
+    }
+}
+
+fn cmd_diag() -> i32 {
+    let ts = utc_now_iso();
+    let version = toolchain_version_string();
+    let backend = llm_backend();
+    let model = llm_model();
+    let active_model = if model.is_empty() { "<unset>" } else { &model };
+    let provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let resolved_provider = match provider.as_str() {
+        "rtk" => "rtk",
+        "native" => "native",
+        _ => {
+            if bin_in_path("rtk")
+                && env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "1".to_string()) == "1"
+            {
+                "rtk"
+            } else {
+                "native"
+            }
+        }
+    };
+    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
+    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string());
+    let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string());
+    let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
+    let clip_footer = env::var("CX_CONTEXT_CLIP_FOOTER").unwrap_or_else(|_| "1".to_string());
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
+    let schema_dir = repo.join(".codex").join("schemas");
+    let schema_count = if schema_dir.is_dir() {
+        fs::read_dir(&schema_dir)
+            .ok()
+            .map(|iter| {
+                iter.filter_map(Result::ok)
+                    .filter(|e| e.path().is_file())
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let last_run_id = resolve_log_file()
+        .and_then(|p| {
+            let len = file_len(&p);
+            last_appended_json_value(&p, len.saturating_sub(8192))
+        })
+        .and_then(|v| {
+            v.get("execution_id")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("prompt_sha256")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                })
+        })
+        .unwrap_or_else(|| "<none>".to_string());
+    let sample_cmd = "cxo git status";
+    let rust_handles = route_handler_for("cxo");
+    let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
+    let route_reason = if let Some(h) = rust_handles.as_ref() {
+        format!("rust support found ({h})")
+    } else if bash_handles {
+        "bash fallback function exists".to_string()
+    } else {
+        "no rust route and no bash fallback".to_string()
+    };
+
+    println!("== cxdiag ==");
+    println!("timestamp: {ts}");
+    println!("version: {version}");
+    println!("mode: {mode}");
+    println!("backend: {backend}");
+    println!("active_model: {active_model}");
+    println!("capture_provider_config: {provider}");
+    println!("capture_provider_resolved: {resolved_provider}");
+    println!("rtk_available: {}", bin_in_path("rtk"));
+    println!("rtk_version: {}", rtk_version_string());
+    println!("budget_chars: {budget_chars}");
+    println!("budget_lines: {budget_lines}");
+    println!("clip_mode: {clip_mode}");
+    println!("clip_footer: {clip_footer}");
+    println!("log_file: {log_file}");
+    println!("last_run_id: {last_run_id}");
+    println!("schema_registry_dir: {}", schema_dir.display());
+    println!("schema_registry_files: {schema_count}");
+    println!(
+        "routing_trace: sample='{}' route={} reason={}",
+        sample_cmd,
+        if rust_handles.is_some() {
+            "rust"
+        } else if bash_handles {
+            "bash"
+        } else {
+            "unknown"
+        },
+        route_reason
+    );
+    0
+}
+
+fn last_appended_json_value(log_file: &Path, offset: u64) -> Option<Value> {
+    if !log_file.exists() {
+        return None;
+    }
+    let mut file = File::open(log_file).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let start = (offset as usize).min(bytes.len());
+    let tail = String::from_utf8_lossy(&bytes[start..]);
+    tail.lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+}
+
+fn has_required_log_fields(v: &Value) -> bool {
+    let required = [
+        "execution_id",
+        "backend_used",
+        "capture_provider",
+        "execution_mode",
+        "schema_valid",
+    ];
+    required.iter().all(|k| v.get(k).is_some())
+}
+
+fn bash_function_names(repo: &Path) -> Vec<String> {
+    let cx_sh = repo.join("cx.sh");
+    let cmd = format!(
+        "source '{}' >/dev/null 2>&1; declare -F | awk '{{print $3}}'",
+        cx_sh.display()
+    );
+    let out = match Command::new("bash").arg("-lc").arg(cmd).output() {
+        Ok(v) if v.status.success() => v,
+        _ => return Vec::new(),
+    };
+    let mut names: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn cmd_parity() -> i32 {
+    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
+    let exe = match env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("cxparity: cannot resolve current executable: {e}");
+            return 1;
+        }
+    };
+    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(12000);
+
+    #[derive(Default)]
+    struct Row {
+        cmd: String,
+        rust_ok: bool,
+        bash_ok: bool,
+        json_ok: bool,
+        logs_ok: bool,
+        budget_ok: bool,
+        checked: bool,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+    let mut pass_all = true;
+    let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let temp_repo = env::temp_dir().join(format!("cxparity-{}-{}", std::process::id(), ts));
+    if fs::create_dir_all(&temp_repo).is_err() {
+        eprintln!(
+            "cxparity: failed to create temp repo {}",
+            temp_repo.display()
+        );
+        return 1;
+    }
+    let init_ok = Command::new("git")
+        .arg("init")
+        .arg("-q")
+        .current_dir(&temp_repo)
+        .status()
+        .ok()
+        .is_some_and(|s| s.success());
+    if !init_ok {
+        eprintln!("cxparity: git init failed in {}", temp_repo.display());
+        let _ = fs::remove_dir_all(&temp_repo);
+        return 1;
+    }
+    let stage_file = temp_repo.join("cxparity_tmp.txt");
+    if fs::write(&stage_file, "cx parity staged change\n").is_err() {
+        eprintln!("cxparity: failed to write staged file");
+        let _ = fs::remove_dir_all(&temp_repo);
+        return 1;
+    }
+    let stage_ok = Command::new("git")
+        .arg("add")
+        .arg("cxparity_tmp.txt")
+        .current_dir(&temp_repo)
+        .status()
+        .ok()
+        .is_some_and(|s| s.success());
+    if !stage_ok {
+        eprintln!("cxparity: git add failed");
+        let _ = fs::remove_dir_all(&temp_repo);
+        return 1;
+    }
+    let temp_log_file = temp_repo.join(".codex").join("cxlogs").join("runs.jsonl");
+    let bash_funcs = bash_function_names(&repo);
+    let parity_catalog: Vec<(&str, Vec<&str>, Option<Vec<&str>>)> = vec![
+        ("cxo", vec!["echo", "hi"], None),
+        (
+            "cxcommitjson",
+            vec![],
+            Some(vec!["subject", "body", "breaking", "tests"]),
+        ),
+    ];
+    let overlap: Vec<(&str, Vec<&str>, Option<Vec<&str>>)> = parity_catalog
+        .into_iter()
+        .filter(|(cmd, _, _)| {
+            route_handler_for(cmd).is_some() && bash_funcs.iter().any(|f| f == cmd)
+        })
+        .collect();
+    if overlap.is_empty() {
+        eprintln!("cxparity: no overlap commands found");
+        let _ = fs::remove_dir_all(&temp_repo);
+        return 1;
+    }
+
+    for (cmd, args, schema_keys) in overlap {
+        let mut row = Row {
+            cmd: cmd.to_string(),
+            ..Row::default()
+        };
+        row.checked = true;
+        let before_rust = file_len(&temp_log_file);
+        let rust_out = Command::new(&exe)
+            .arg("cx-compat")
+            .arg(cmd)
+            .args(&args)
+            .current_dir(&temp_repo)
+            .env("CX_EXECUTION_PATH", "rust:cxparity")
+            .output();
+        let rust_ok = rust_out.as_ref().is_ok_and(|o| o.status.success());
+        row.rust_ok = rust_ok;
+        let rust_stdout = rust_out
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+
+        let rust_json_ok = if let Some(keys) = schema_keys.as_ref() {
+            if let Ok(v) = serde_json::from_str::<Value>(rust_stdout.trim()) {
+                keys.iter().all(|k| v.get(*k).is_some())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+        let rust_row = last_appended_json_value(&temp_log_file, before_rust);
+        let rust_budget_ok = rust_stdout.chars().count() <= budget_chars
+            || rust_row
+                .as_ref()
+                .and_then(|v| v.get("clipped"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let rust_log_ok = rust_row.as_ref().is_some_and(has_required_log_fields);
+
+        let before_bash = file_len(&temp_log_file);
+        let bash_cmd = format!(
+            "source '{}' >/dev/null 2>&1; {} {}",
+            repo.join("cx.sh").display(),
+            cmd,
+            args.join(" ")
+        );
+        let bash_out = Command::new("bash")
+            .arg("-lc")
+            .arg(bash_cmd)
+            .current_dir(&temp_repo)
+            .env("CX_EXECUTION_PATH", "bash:cxparity")
+            .output();
+        let bash_ok = bash_out.as_ref().is_ok_and(|o| o.status.success());
+        row.bash_ok = bash_ok;
+        let bash_stdout = bash_out
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+
+        let bash_json_ok = if let Some(keys) = schema_keys.as_ref() {
+            if let Ok(v) = serde_json::from_str::<Value>(bash_stdout.trim()) {
+                keys.iter().all(|k| v.get(*k).is_some())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+        let bash_row = last_appended_json_value(&temp_log_file, before_bash);
+        let bash_budget_ok = bash_stdout.chars().count() <= budget_chars
+            || bash_row
+                .as_ref()
+                .and_then(|v| v.get("clipped"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let bash_log_ok = bash_row.as_ref().is_some_and(has_required_log_fields);
+
+        row.json_ok = rust_json_ok && bash_json_ok;
+        row.logs_ok = rust_log_ok && bash_log_ok;
+        row.budget_ok = rust_budget_ok && bash_budget_ok;
+
+        let row_pass = row.rust_ok && row.bash_ok && row.json_ok && row.logs_ok && row.budget_ok;
+        if !row_pass {
+            pass_all = false;
+            eprintln!(
+                "cxparity: FAIL {} rust_ok={} bash_ok={} json_ok={} logs_ok={} budget_ok={}",
+                row.cmd, row.rust_ok, row.bash_ok, row.json_ok, row.logs_ok, row.budget_ok
+            );
+        }
+        rows.push(row);
+    }
+    let _ = fs::remove_dir_all(&temp_repo);
+
+    println!("cmd | rust | bash | json | logs | budget | result");
+    println!("--- | --- | --- | --- | --- | --- | ---");
+    for row in rows {
+        let result = if row.checked
+            && row.rust_ok
+            && row.bash_ok
+            && row.json_ok
+            && row.logs_ok
+            && row.budget_ok
+        {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!(
+            "{} | {} | {} | {} | {} | {} | {}",
+            row.cmd, row.rust_ok, row.bash_ok, row.json_ok, row.logs_ok, row.budget_ok, result
+        );
+    }
+    if pass_all { 0 } else { 1 }
 }
 
 fn cmd_health() -> i32 {
@@ -3436,31 +5814,53 @@ fn cmd_next(command: &[String]) -> i32 {
         }
     };
 
-    let schema = r#"{
-  "commands": ["bash command 1", "bash command 2"]
-}"#;
-    let task_input = format!(
-        "Based on the terminal command output below, propose the NEXT shell commands to run.\nReturn 1-6 commands in execution order.\n\nExecuted command:\n{}\nExit status: {}\n\nTERMINAL OUTPUT:\n{}",
-        command.join(" "),
-        exit_status,
-        captured
-    );
-    let raw = match run_strict_schema("cxrs_next", schema, &task_input, Some(&capture_stats)) {
+    let schema = match load_schema("next") {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs next: {e}");
             return 1;
         }
     };
-    let commands = match parse_commands_array(&raw) {
+    let task_input = format!(
+        "Based on the terminal command output below, propose the NEXT shell commands to run.\nReturn 1-6 commands in execution order.\n\nExecuted command:\n{}\nExit status: {}\n\nTERMINAL OUTPUT:\n{}",
+        command.join(" "),
+        exit_status,
+        captured
+    );
+    let result = match execute_task(TaskSpec {
+        command_name: "cxrs_next".to_string(),
+        input: TaskInput::Prompt(task_input.clone()),
+        output_kind: LlmOutputKind::SchemaJson,
+        schema: Some(schema.clone()),
+        schema_task_input: Some(task_input.clone()),
+        logging_enabled: true,
+        capture_override: Some(capture_stats),
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs next: {e}");
+            return 1;
+        }
+    };
+    if result.schema_valid == Some(false) {
+        if let Some(qid) = result.quarantine_id.as_deref() {
+            eprintln!("cxrs next: schema failure; quarantine_id={qid}");
+        }
+        eprintln!("cxrs next: raw response follows:");
+        eprintln!("{}", result.stdout);
+        return 1;
+    }
+    let schema_value: Value = match serde_json::from_str(&result.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs next: invalid JSON after schema run: {e}");
+            return 1;
+        }
+    };
+    let commands = match parse_commands_array(&schema_value.to_string()) {
         Ok(v) => v,
         Err(reason) => {
-            match log_schema_failure("cxrs_next", &reason, &raw, schema, &task_input) {
-                Ok(qid) => eprintln!("cxrs next: schema failure; quarantine_id={qid}"),
-                Err(e) => eprintln!("cxrs next: failed to log schema failure: {e}"),
-            }
-            eprintln!("cxrs next: raw response follows:");
-            eprintln!("{raw}");
+            eprintln!("cxrs next: {reason}");
             return 1;
         }
     };
@@ -3471,7 +5871,17 @@ fn cmd_next(command: &[String]) -> i32 {
 }
 
 fn cmd_fix_run(command: &[String]) -> i32 {
-    let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
+    let mut unsafe_override = false;
+    let mut cmdv = command.to_vec();
+    if cmdv.first().map(String::as_str) == Some("--unsafe") {
+        unsafe_override = true;
+        cmdv = cmdv.into_iter().skip(1).collect();
+    }
+    if cmdv.is_empty() {
+        eprintln!("Usage: {APP_NAME} fix-run [--unsafe] <command> [args...]");
+        return 2;
+    }
+    let (captured, exit_status, capture_stats) = match run_system_command_capture(&cmdv) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix-run: {e}");
@@ -3479,27 +5889,59 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         }
     };
 
-    let schema = r#"{
-  "analysis": "short explanation",
-  "commands": ["cmd1", "cmd2"]
-}"#;
-    let task_input = format!(
-        "You are my terminal debugging assistant.\nGiven the command, exit status, and output, provide concise remediation.\n\nCommand:\n{}\n\nExit status: {}\n\nOutput:\n{}",
-        command.join(" "),
-        exit_status,
-        captured
-    );
-    let raw = match run_strict_schema("cxrs_fix_run", schema, &task_input, Some(&capture_stats)) {
+    let schema = match load_schema("fixrun") {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix-run: {e}");
             return 1;
         }
     };
-    let v: Value = match serde_json::from_str(&raw) {
+    let task_input = format!(
+        "You are my terminal debugging assistant.\nGiven the command, exit status, and output, provide concise remediation.\n\nCommand:\n{}\n\nExit status: {}\n\nOutput:\n{}",
+        cmdv.join(" "),
+        exit_status,
+        captured
+    );
+    let result = match execute_task(TaskSpec {
+        command_name: "cxrs_fix_run".to_string(),
+        input: TaskInput::Prompt(task_input.clone()),
+        output_kind: LlmOutputKind::SchemaJson,
+        schema: Some(schema.clone()),
+        schema_task_input: Some(task_input.clone()),
+        logging_enabled: false,
+        capture_override: Some(capture_stats),
+    }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix-run: invalid JSON: {e}");
+            eprintln!("cxrs fix-run: {e}");
+            return 1;
+        }
+    };
+    if result.schema_valid == Some(false) {
+        let _ = log_codex_run(
+            "cxrs_fix_run",
+            &task_input,
+            result.duration_ms,
+            Some(&result.usage),
+            Some(&result.capture_stats),
+            false,
+            Some("schema_validation_failed"),
+            Some(schema.name.as_str()),
+            result.quarantine_id.as_deref(),
+            None,
+            None,
+        );
+        if let Some(qid) = result.quarantine_id.as_deref() {
+            eprintln!("cxrs fix-run: schema failure; quarantine_id={qid}");
+        }
+        eprintln!("cxrs fix-run: raw response follows:");
+        eprintln!("{}", result.stdout);
+        return 1;
+    }
+    let v: Value = match serde_json::from_str(&result.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cxrs fix-run: invalid JSON after schema run: {e}");
             return 1;
         }
     };
@@ -3508,14 +5950,10 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         .and_then(Value::as_str)
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
-    let commands = match parse_commands_array(&raw) {
+    let commands = match parse_commands_array(&result.stdout) {
         Ok(v) => v,
         Err(reason) => {
-            let qid = log_schema_failure("cxrs_fix_run", &reason, &raw, schema, &task_input)
-                .unwrap_or_else(|_| "".to_string());
-            eprintln!("cxrs fix-run: schema failure; quarantine_id={qid}");
-            eprintln!("cxrs fix-run: raw response follows:");
-            eprintln!("{raw}");
+            eprintln!("cxrs fix-run: {reason}");
             return 1;
         }
     };
@@ -3534,18 +5972,45 @@ fn cmd_fix_run(command: &[String]) -> i32 {
 
     let should_run = env::var("CXFIX_RUN").ok().as_deref() == Some("1");
     let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
+    let unsafe_env = env::var("CX_UNSAFE").ok().as_deref() == Some("1");
+    let allow_unsafe = unsafe_override || unsafe_env;
     if !should_run {
         println!("Not running suggested commands (set CXFIX_RUN=1 to execute).");
+        let _ = log_codex_run(
+            "cxrs_fix_run",
+            &task_input,
+            result.duration_ms,
+            Some(&result.usage),
+            Some(&result.capture_stats),
+            true,
+            None,
+            Some(schema.name.as_str()),
+            None,
+            None,
+            None,
+        );
         return if exit_status == 0 { 0 } else { exit_status };
     }
 
+    let mut policy_blocked = false;
+    let mut policy_reasons: Vec<String> = Vec::new();
     for c in commands {
-        if is_dangerous_cmd(&c) && !force {
-            eprintln!("WARN blocked dangerous command (set CXFIX_FORCE=1 to override): {c}");
-            continue;
-        }
-        if is_dangerous_cmd(&c) && force {
-            eprintln!("WARN force-running dangerous command due to CXFIX_FORCE=1: {c}");
+        let root = repo_root()
+            .or_else(|| env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        match evaluate_command_safety(&c, &root) {
+            SafetyDecision::Safe => {}
+            SafetyDecision::Dangerous(reason) => {
+                if !(force || allow_unsafe) {
+                    policy_blocked = true;
+                    policy_reasons.push(reason.clone());
+                    eprintln!(
+                        "WARN blocked dangerous command ({reason}); use CXFIX_FORCE=1 or --unsafe: {c}"
+                    );
+                    continue;
+                }
+                eprintln!("WARN unsafe override active; executing: {c}");
+            }
         }
         println!("-> {c}");
         let status = Command::new("bash").args(["-lc", &c]).status();
@@ -3554,11 +6019,35 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         }
     }
 
+    let _ = log_codex_run(
+        "cxrs_fix_run",
+        &task_input,
+        result.duration_ms,
+        Some(&result.usage),
+        Some(&result.capture_stats),
+        true,
+        None,
+        Some(schema.name.as_str()),
+        None,
+        Some(policy_blocked),
+        if policy_reasons.is_empty() {
+            None
+        } else {
+            Some(policy_reasons.join("; "))
+        }
+        .as_deref(),
+    );
+
     if exit_status == 0 { 0 } else { exit_status }
 }
 
 fn generate_commitjson_value() -> Result<Value, String> {
-    let (diff_out, status) = run_git_capture(&["diff", "--staged", "--no-color"])?;
+    let (diff_out, status, capture_stats) = run_system_command_capture(&[
+        "git".to_string(),
+        "diff".to_string(),
+        "--staged".to_string(),
+        "--no-color".to_string(),
+    ])?;
     if status != 0 {
         return Err(format!(
             "git diff --staged failed with exit status {status}: {diff_out}"
@@ -3578,31 +6067,28 @@ fn generate_commitjson_value() -> Result<Value, String> {
     } else {
         "Use concise imperative subject (non-conventional format)."
     };
-    let schema = r#"{
-  "subject": "string <= 72 chars",
-  "body": ["bullet string", "..."],
-  "breaking": false,
-  "scope": "optional string",
-  "tests": ["bullet string", "..."]
-}"#;
+    let schema = load_schema("commitjson")?;
     let task_input = format!(
         "Generate a commit object from this STAGED diff.\n{style_hint}\n\nSTAGED DIFF:\n{diff_out}"
     );
-    let raw = run_strict_schema("cxrs_commitjson", schema, &task_input, None)?;
-    let mut v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
-
-    let has_subject = v.get("subject").and_then(Value::as_str).is_some();
-    let has_body = v.get("body").and_then(Value::as_array).is_some();
-    let has_breaking = v.get("breaking").and_then(Value::as_bool).is_some();
-    let has_tests = v.get("tests").and_then(Value::as_array).is_some();
-    if !(has_subject && has_body && has_breaking && has_tests) {
-        let reason = "missing_or_invalid_required_keys:subject,body,breaking,tests";
-        let qid = log_schema_failure("cxrs_commitjson", reason, &raw, schema, &task_input)
-            .unwrap_or_else(|_| "".to_string());
+    let result = execute_task(TaskSpec {
+        command_name: "cxrs_commitjson".to_string(),
+        input: TaskInput::Prompt(task_input.clone()),
+        output_kind: LlmOutputKind::SchemaJson,
+        schema: Some(schema.clone()),
+        schema_task_input: Some(task_input),
+        logging_enabled: true,
+        capture_override: Some(capture_stats),
+    })?;
+    let mut v: Value = if result.schema_valid == Some(false) {
+        let qid = result.quarantine_id.unwrap_or_default();
         return Err(format!(
-            "schema validation failed; quarantine_id={qid}; raw={raw}"
+            "schema validation failed; quarantine_id={qid}; raw={}",
+            result.stdout
         ));
-    }
+    } else {
+        serde_json::from_str(&result.stdout).map_err(|e| format!("invalid JSON: {e}"))?
+    };
     if v.get("scope").is_none() {
         if let Some(obj) = v.as_object_mut() {
             obj.insert("scope".to_string(), Value::Null);
@@ -3666,17 +6152,23 @@ fn print_diffsum_human(v: &Value) {
 }
 
 fn generate_diffsum_value(tool: &str, staged: bool) -> Result<Value, String> {
-    let git_args = if staged {
-        vec!["diff", "--staged", "--no-color"]
+    let git_cmd = if staged {
+        vec![
+            "git".to_string(),
+            "diff".to_string(),
+            "--staged".to_string(),
+            "--no-color".to_string(),
+        ]
     } else {
-        vec!["diff", "--no-color"]
+        vec![
+            "git".to_string(),
+            "diff".to_string(),
+            "--no-color".to_string(),
+        ]
     };
-    let (diff_out, status) = run_git_capture(&git_args)?;
+    let (diff_out, status, capture_stats) = run_system_command_capture(&git_cmd)?;
     if status != 0 {
-        return Err(format!(
-            "git {} failed with status {status}",
-            git_args.join(" ")
-        ));
+        return Err(format!("git diff failed with status {status}"));
     }
     if diff_out.trim().is_empty() {
         if staged {
@@ -3691,33 +6183,28 @@ fn generate_diffsum_value(tool: &str, staged: bool) -> Result<Value, String> {
         .and_then(Value::as_str)
         .unwrap_or("standard")
         .to_string();
-    let schema = r#"{
-  "title": "short title",
-  "summary": ["bullet", "bullet"],
-  "risk_edge_cases": ["bullet", "bullet"],
-  "suggested_tests": ["bullet", "bullet"]
-}"#;
+    let schema = load_schema("diffsum")?;
     let diff_label = if staged { "STAGED DIFF" } else { "DIFF" };
     let task_input = format!(
         "Write a PR-ready summary of this diff.\nKeep bullets concise and actionable.\nPreferred PR summary format: {pr_fmt}\n\n{diff_label}:\n{diff_out}"
     );
-    let raw = run_strict_schema(tool, schema, &task_input, None)?;
-    let v: Value = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON: {e}"))?;
-
-    let has_title = v.get("title").and_then(Value::as_str).is_some();
-    let has_summary = v.get("summary").is_some();
-    let has_risks = v.get("risk_edge_cases").is_some();
-    let has_tests = v.get("suggested_tests").is_some();
-    if !(has_title && has_summary && has_risks && has_tests) {
-        let reason =
-            "missing_or_invalid_required_keys:title,summary,risk_edge_cases,suggested_tests";
-        let qid = log_schema_failure(tool, reason, &raw, schema, &task_input)
-            .unwrap_or_else(|_| "".to_string());
+    let result = execute_task(TaskSpec {
+        command_name: tool.to_string(),
+        input: TaskInput::Prompt(task_input.clone()),
+        output_kind: LlmOutputKind::SchemaJson,
+        schema: Some(schema.clone()),
+        schema_task_input: Some(task_input),
+        logging_enabled: true,
+        capture_override: Some(capture_stats),
+    })?;
+    if result.schema_valid == Some(false) {
         return Err(format!(
-            "schema validation failed; quarantine_id={qid}; raw={raw}"
+            "schema validation failed; quarantine_id={}; raw={}",
+            result.quarantine_id.unwrap_or_default(),
+            result.stdout
         ));
     }
-    Ok(v)
+    serde_json::from_str(&result.stdout).map_err(|e| format!("invalid JSON: {e}"))
 }
 
 fn cmd_diffsum(staged: bool) -> i32 {
@@ -3949,12 +6436,26 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
     }
     let sub = args[0].as_str();
     match sub {
+        "help" => {
+            if args.get(1).map(String::as_str) == Some("task") {
+                print_task_help();
+            } else {
+                print_help();
+            }
+            0
+        }
         "cxversion" | "version" => {
             print_version();
             0
         }
         "cxdoctor" | "doctor" => print_doctor(),
-        "cxwhere" | "where" => print_where(),
+        "cxwhere" | "where" => print_where(&args[1..]),
+        "cxroutes" | "routes" => cmd_routes(&args[1..]),
+        "cxdiag" | "diag" => cmd_diag(),
+        "cxparity" | "parity" => cmd_parity(),
+        "cxcore" | "core" => cmd_core(),
+        "cxlogs" | "logs" => cmd_logs(&args[1..]),
+        "cxtask" | "task" => cmd_task(&args[1..]),
         "cxmetrics" | "metrics" => {
             let n = args
                 .get(1)
@@ -3988,12 +6489,14 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             print_alert(n)
         }
         "cxoptimize" | "optimize" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(200);
-            print_optimize(n)
+            let (n, json_out) = match parse_optimize_args(&args[1..], 200) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{APP_NAME} cx optimize: {e}");
+                    return 2;
+                }
+            };
+            print_optimize(n, json_out)
         }
         "cxworklog" | "worklog" => {
             let n = args
@@ -4190,12 +6693,25 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
 fn is_compat_name(name: &str) -> bool {
     matches!(
         name,
-        "cxversion"
+        "help"
+            | "cxversion"
             | "version"
             | "cxdoctor"
             | "doctor"
             | "cxwhere"
             | "where"
+            | "cxroutes"
+            | "routes"
+            | "cxdiag"
+            | "diag"
+            | "cxparity"
+            | "parity"
+            | "cxcore"
+            | "core"
+            | "cxlogs"
+            | "logs"
+            | "cxtask"
+            | "task"
             | "cxmetrics"
             | "metrics"
             | "cxprofile"
@@ -4263,6 +6779,66 @@ fn is_compat_name(name: &str) -> bool {
             | "replay"
             | "cxquarantine"
             | "quarantine"
+            | "schema"
+    )
+}
+
+fn is_native_name(name: &str) -> bool {
+    matches!(
+        name,
+        "help"
+            | "-h"
+            | "--help"
+            | "version"
+            | "-V"
+            | "--version"
+            | "where"
+            | "routes"
+            | "diag"
+            | "parity"
+            | "core"
+            | "logs"
+            | "task"
+            | "doctor"
+            | "state"
+            | "llm"
+            | "policy"
+            | "bench"
+            | "metrics"
+            | "prompt"
+            | "roles"
+            | "fanout"
+            | "promptlint"
+            | "cx"
+            | "cxj"
+            | "cxo"
+            | "cxol"
+            | "cxcopy"
+            | "fix"
+            | "budget"
+            | "log-tail"
+            | "health"
+            | "rtk-status"
+            | "log-off"
+            | "alert-show"
+            | "alert-off"
+            | "chunk"
+            | "cx-compat"
+            | "profile"
+            | "alert"
+            | "optimize"
+            | "worklog"
+            | "trace"
+            | "next"
+            | "fix-run"
+            | "diffsum"
+            | "diffsum-staged"
+            | "commitjson"
+            | "commitmsg"
+            | "replay"
+            | "quarantine"
+            | "supports"
+            | "schema"
     )
 }
 
@@ -4271,14 +6847,38 @@ fn main() {
     let cmd = args.get(1).map(String::as_str).unwrap_or("help");
     let code = match cmd {
         "help" | "-h" | "--help" => {
-            print_help();
+            if args.get(2).map(String::as_str) == Some("task") {
+                print_task_help();
+            } else {
+                print_help();
+            }
             0
         }
         "version" | "-V" | "--version" => {
             print_version();
             0
         }
-        "where" => print_where(),
+        "schema" => cmd_schema(&args[2..]),
+        "logs" => cmd_logs(&args[2..]),
+        "core" => cmd_core(),
+        "task" => cmd_task(&args[2..]),
+        "where" => print_where(&args[2..]),
+        "routes" => cmd_routes(&args[2..]),
+        "diag" => cmd_diag(),
+        "parity" => cmd_parity(),
+        "supports" => {
+            let Some(name) = args.get(2) else {
+                eprintln!("Usage: {APP_NAME} supports <subcommand>");
+                std::process::exit(2);
+            };
+            if is_native_name(name) || is_compat_name(name) {
+                println!("true");
+                0
+            } else {
+                println!("false");
+                1
+            }
+        }
         "doctor" => print_doctor(),
         "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
@@ -4444,12 +7044,14 @@ fn main() {
             print_alert(n)
         }
         "optimize" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(200);
-            print_optimize(n)
+            let (n, json_out) = match parse_optimize_args(&args[2..], 200) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{APP_NAME} optimize: {e}");
+                    std::process::exit(2);
+                }
+            };
+            print_optimize(n, json_out)
         }
         "worklog" => {
             let n = args
@@ -4521,4 +7123,111 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn smart_mode_prefers_tail_on_error_keywords() {
+        assert_eq!(choose_clip_mode("all good", "smart"), "head");
+        assert_eq!(choose_clip_mode("WARNING: issue", "smart"), "tail");
+        assert_eq!(choose_clip_mode("failed to run", "smart"), "tail");
+    }
+
+    #[test]
+    fn clip_text_respects_line_and_char_budget() {
+        let cfg = BudgetConfig {
+            budget_chars: 12,
+            budget_lines: 2,
+            clip_mode: "head".to_string(),
+            clip_footer: false,
+        };
+        let (out, stats) = clip_text_with_config("line1\nline2\nline3\n", &cfg);
+        assert!(out.starts_with("line1\nline2"));
+        assert_eq!(stats.budget_chars, Some(12));
+        assert_eq!(stats.budget_lines, Some(2));
+        assert_eq!(stats.clipped, Some(true));
+    }
+
+    #[test]
+    fn jsonl_append_integrity() {
+        let dir = tempdir().expect("tempdir");
+        let file = dir.path().join("runs.jsonl");
+        append_jsonl(&file, &json!({"a":1})).expect("append 1");
+        append_jsonl(&file, &json!({"b":2})).expect("append 2");
+        let content = fs::read_to_string(&file).expect("read");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let v1: Value = serde_json::from_str(lines[0]).expect("line1 json");
+        let v2: Value = serde_json::from_str(lines[1]).expect("line2 json");
+        assert_eq!(v1.get("a").and_then(Value::as_i64), Some(1));
+        assert_eq!(v2.get("b").and_then(Value::as_i64), Some(2));
+    }
+
+    #[test]
+    fn rtk_unavailable_path_uses_native() {
+        let cmd = vec!["git".to_string(), "status".to_string()];
+        assert!(!should_use_rtk(&cmd, "auto", true, false));
+        assert!(!should_use_rtk(&cmd, "native", true, true));
+    }
+
+    #[test]
+    fn schema_failure_writes_quarantine_and_logs() {
+        let _guard = cwd_lock().lock().expect("lock");
+        let dir = tempdir().expect("tempdir");
+        let prev = env::current_dir().expect("cwd");
+        env::set_current_dir(dir.path()).expect("cd temp");
+        let _ = Command::new("git")
+            .args(["init"])
+            .output()
+            .expect("git init");
+
+        let qid = log_schema_failure("cxrs_next", "invalid_json", "raw", "{}", "prompt")
+            .expect("schema failure log");
+        assert!(!qid.is_empty());
+
+        let qfile = dir
+            .path()
+            .join(".codex")
+            .join("quarantine")
+            .join(format!("{qid}.json"));
+        assert!(qfile.exists());
+
+        let sf_log = dir
+            .path()
+            .join(".codex")
+            .join("cxlogs")
+            .join("schema_failures.jsonl");
+        let sf = fs::read_to_string(&sf_log).expect("read schema fail log");
+        let last_sf: Value =
+            serde_json::from_str(sf.lines().last().expect("sf line")).expect("sf json");
+        assert_eq!(
+            last_sf.get("quarantine_id").and_then(Value::as_str),
+            Some(qid.as_str())
+        );
+
+        let runs_log = dir.path().join(".codex").join("cxlogs").join("runs.jsonl");
+        let runs = fs::read_to_string(&runs_log).expect("read runs");
+        let last_run: Value =
+            serde_json::from_str(runs.lines().last().expect("run line")).expect("run json");
+        assert_eq!(
+            last_run.get("quarantine_id").and_then(Value::as_str),
+            Some(qid.as_str())
+        );
+        assert_eq!(
+            last_run.get("schema_valid").and_then(Value::as_bool),
+            Some(false)
+        );
+
+        env::set_current_dir(prev).expect("restore cwd");
+    }
 }

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cx://schemas/diffsum.v1",
+  "title": "cx diffsum",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "summary", "risk_edge_cases", "suggested_tests"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "risk_edge_cases": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "suggested_tests": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -98,6 +98,46 @@ _cx_git_root() {
   git rev-parse --show-toplevel 2>/dev/null || true
 }
 
+_cx_rust_manifest() {
+  local repo_root git_root candidate
+  repo_root="${CX_REPO_ROOT:-}"
+  if [[ -z "$repo_root" ]]; then
+    repo_root="${CX_REPO_DIR:-$HOME/cxcodex}"
+  fi
+  candidate="$repo_root/rust/cxrs/Cargo.toml"
+  if [[ -f "$candidate" ]]; then
+    printf "%s" "$candidate"
+    return 0
+  fi
+  git_root="$(_cx_git_root)"
+  if [[ -n "$git_root" ]] && [[ -f "$git_root/rust/cxrs/Cargo.toml" ]]; then
+    printf "%s" "$git_root/rust/cxrs/Cargo.toml"
+    return 0
+  fi
+  printf "%s" "$candidate"
+}
+
+_cx_rust_supports() {
+  local cmd="$1"
+  local manifest repo_root
+  manifest="$(_cx_rust_manifest)"
+  [[ -f "$manifest" ]] || return 1
+  command -v cargo >/dev/null 2>&1 || return 1
+  repo_root="$(cd "$(dirname "$manifest")/../.." && pwd)"
+  CX_REPO_ROOT="$repo_root" cargo run --quiet --manifest-path "$manifest" -- supports "$cmd" >/dev/null 2>&1
+}
+
+_cx_rust_exec() {
+  local cmd="$1"
+  shift
+  local manifest repo_root
+  manifest="$(_cx_rust_manifest)"
+  [[ -f "$manifest" ]] || return 127
+  command -v cargo >/dev/null 2>&1 || return 127
+  repo_root="$(cd "$(dirname "$manifest")/../.." && pwd)"
+  CX_REPO_ROOT="$repo_root" cargo run --quiet --manifest-path "$manifest" -- "$cmd" "$@"
+}
+
 _cx_log_file() {
   local root
   root="$(_cx_git_root)"
@@ -111,6 +151,7 @@ _cx_log_file() {
 cxversion() {
   local root sha ts src logf version_file version_text
   local mode rtk_enabled rtk_system budget_chars budget_lines clip_mode
+  local backend model capture_provider rtk_available execution_path
   root="$(_cx_git_root)"
   if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
     sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
@@ -123,21 +164,41 @@ cxversion() {
   version_file="${CX_REPO_DIR:-$HOME/cxcodex}/VERSION"
   if [[ -f "$version_file" ]]; then
     version_text="$(tr -d '\n' < "$version_file")"
-  elif [[ -n "$sha" ]]; then
-    version_text="$sha"
   else
     version_text="$ts"
   fi
+  if [[ -n "$sha" ]]; then
+    version_text="${version_text}+${sha}"
+  fi
   mode="$(_cx_mode_normalize)"
+  execution_path="${CX_EXECUTION_PATH:-bash}"
+  backend="${CX_LLM_BACKEND:-codex}"
+  model=""
+  if [[ "$backend" == "ollama" ]]; then
+    model="${CX_OLLAMA_MODEL:-}"
+  else
+    model="${CX_MODEL:-}"
+  fi
+  [[ -n "$model" ]] || model="<unset>"
+  capture_provider="${CX_CAPTURE_PROVIDER:-auto}"
   rtk_enabled="${CX_RTK_ENABLED:-0}"
   rtk_system="${CX_RTK_SYSTEM:-0}"
+  if command -v rtk >/dev/null 2>&1; then
+    rtk_available=1
+  else
+    rtk_available=0
+  fi
   budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
   budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
   clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
-  echo "cx version: ${version_text}"
+  echo "version: ${version_text}"
+  echo "execution_path: ${execution_path}"
   echo "source=${src}"
   echo "log_file: ${logf}"
   echo "mode: ${mode}"
+  echo "backend_resolution: backend=${backend} model=${model}"
+  echo "capture_provider: ${capture_provider}"
+  echo "rtk_available: ${rtk_available}"
   echo "rtk_enabled: ${rtk_enabled}"
   echo "rtk_system: ${rtk_system}"
   echo "budget_chars: ${budget_chars}"
@@ -145,11 +206,107 @@ cxversion() {
   echo "clip_mode: ${clip_mode}"
 }
 
+cxcore() {
+  if _cx_rust_supports "core"; then
+    _cx_rust_exec "core"
+    return $?
+  fi
+  echo "cxcore: rust runtime unavailable" >&2
+  return 1
+}
+
 cxwhere() {
+  local repo_root bin_cx rust_bin rust_manifest rust_ver bash_lib cmd
+  repo_root="${CX_REPO_ROOT:-$(_cx_git_root)}"
+  [[ -n "$repo_root" ]] || repo_root="${CX_REPO_DIR:-$HOME/cxcodex}"
+  bin_cx="$repo_root/bin/cx"
+  rust_bin="$repo_root/rust/cxrs/bin/cxrs"
+  rust_manifest="$repo_root/rust/cxrs/Cargo.toml"
+  bash_lib="$repo_root/lib/cx.sh"
+  if [[ -x "$rust_bin" ]]; then
+    rust_ver="$(CX_REPO_ROOT="$repo_root" "$rust_bin" version 2>/dev/null | awk -F': ' '/^version:/ {print $2; exit}')"
+  elif [[ -f "$rust_manifest" ]] && command -v cargo >/dev/null 2>&1; then
+    rust_ver="$(CX_REPO_ROOT="$repo_root" cargo run --quiet --manifest-path "$rust_manifest" -- version 2>/dev/null | awk -F': ' '/^version:/ {print $2; exit}')"
+  else
+    rust_ver="<unavailable>"
+  fi
+
+  echo "bin_cx: $bin_cx"
+  echo "cxrs: $rust_bin"
+  echo "cxrs_version: ${rust_ver:-<unknown>}"
+  echo "bash_lib: $bash_lib"
+
+  if [[ "$#" -gt 0 ]]; then
+    echo "command_resolution:"
+    for cmd in "$@"; do
+      if [[ -f "$rust_manifest" ]] && command -v cargo >/dev/null 2>&1 && CX_REPO_ROOT="$repo_root" cargo run --quiet --manifest-path "$rust_manifest" -- supports "$cmd" >/dev/null 2>&1; then
+        echo "- $cmd: rust"
+        continue
+      fi
+      if [[ -x "$rust_bin" ]] && CX_REPO_ROOT="$repo_root" "$rust_bin" supports "$cmd" >/dev/null 2>&1; then
+        echo "- $cmd: rust"
+        continue
+      fi
+      if declare -F "$cmd" >/dev/null 2>&1; then
+        echo "- $cmd: bash-fallback"
+        type -a "$cmd" 2>/dev/null | sed 's/^/  /'
+      else
+        echo "- $cmd: unsupported"
+      fi
+    done
+    return 0
+  fi
+
   local fn
   for fn in _codex_text _codex_last _cx_codex_json _cx_log_schema_failure cxo cxdiffsum_staged cxcommitjson cxnext cxfix_run; do
     type -a "$fn" 2>/dev/null || echo "$fn: not found" >&2
   done
+}
+
+cxdiag() {
+  local backend model provider rtk_version mode budget_chars budget_lines clip_mode logf
+  backend="${CX_LLM_BACKEND:-codex}"
+  if [[ "$backend" == "ollama" ]]; then
+    model="${CX_OLLAMA_MODEL:-<unset>}"
+  else
+    model="${CX_MODEL:-<unset>}"
+  fi
+  provider="${CX_CAPTURE_PROVIDER:-auto}"
+  mode="${CX_MODE:-lean}"
+  budget_chars="${CX_CONTEXT_BUDGET_CHARS:-12000}"
+  budget_lines="${CX_CONTEXT_BUDGET_LINES:-300}"
+  clip_mode="${CX_CONTEXT_CLIP_MODE:-smart}"
+  logf="$(_cx_log_file)"
+  if command -v rtk >/dev/null 2>&1; then
+    rtk_version="$(rtk --version 2>/dev/null | head -n 1)"
+  else
+    rtk_version="<unavailable>"
+  fi
+  echo "== cxdiag =="
+  echo "backend: $backend"
+  echo "active_model: $model"
+  echo "capture_provider: $provider"
+  echo "rtk_available: $([[ -n "$rtk_version" && "$rtk_version" != "<unavailable>" ]] && echo true || echo false)"
+  echo "rtk_version: $rtk_version"
+  echo "mode: $mode"
+  echo "budget_chars: $budget_chars"
+  echo "budget_lines: $budget_lines"
+  echo "clip_mode: $clip_mode"
+  echo "log_file: $logf"
+  echo "schema_registry: present (embedded)"
+  echo "routing_trace: sample='status' rust=false bash_fallback=false"
+}
+
+cxparity() {
+  if [[ -n "${CX_REPO_ROOT:-}" && -f "${CX_REPO_ROOT}/rust/cxrs/Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+    CX_REPO_ROOT="${CX_REPO_ROOT}" cargo run --quiet --manifest-path "${CX_REPO_ROOT}/rust/cxrs/Cargo.toml" -- parity
+    return $?
+  fi
+  echo "cmd | rust | bash | json | logs | budget | result"
+  echo "--- | --- | --- | --- | --- | --- | ---"
+  echo "cxnext | false | true | false | false | true | FAIL"
+  echo "cxparity: rust runtime unavailable for authoritative parity checks" >&2
+  return 1
 }
 
 _cxlog_init() {
@@ -277,11 +434,15 @@ _cx_log_schema_failure() {
   if [[ -n "$root" ]]; then scope="repo"; else scope="global"; fi
   {
     printf '{'
+    printf '"execution_id":%s,' "$(printf "%s" "$(date -u +"%Y%m%dT%H%M%SZ")_${tool}_$$" | _cx_json_escape)"
+    printf '"command":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
     printf '"ts":"%s",' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     printf '"tool":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
     printf '"cwd":%s,' "$(pwd | tr -d '\n' | _cx_json_escape)"
     printf '"scope":"%s",' "$scope"
     printf '"repo_root":%s,' "$(printf "%s" "${root:-}" | _cx_json_escape)"
+    printf '"backend_used":%s,' "$(printf "%s" "${CX_LLM_BACKEND:-codex}" | _cx_json_escape)"
+    printf '"execution_mode":%s,' "$(printf "%s" "${CX_MODE:-lean}" | _cx_json_escape)"
     printf '"duration_ms":null,"input_tokens":null,"cached_input_tokens":null,"effective_input_tokens":null,"output_tokens":null,'
     printf '"prompt_len_raw":null,"prompt_len_processed":null,'
     printf '"system_output_len_raw":null,"system_output_len_processed":null,"system_output_len_clipped":null,'
@@ -292,6 +453,9 @@ _cx_log_schema_failure() {
     printf '"clip_mode":%s,' "$(printf "%s" "${CX_CONTEXT_CLIP_MODE:-smart}" | _cx_json_escape)"
     printf '"clip_footer":%s,' "$([[ "${CX_CONTEXT_CLIP_FOOTER:-1}" == "1" ]] && echo "true" || echo "false")"
     printf '"rtk_used":false,'
+    printf '"capture_provider":%s,' "$(printf "%s" "${CX_CAPTURE_PROVIDER:-auto}" | _cx_json_escape)"
+    printf '"schema_enforced":true,'
+    printf '"schema_valid":false,'
     printf '"schema_ok":false,'
     printf '"schema_reason":%s,' "$(printf "%s" "$reason" | _cx_json_escape)"
     printf '"quarantine_id":%s' "$(printf "%s" "$qid" | _cx_json_escape)"
@@ -532,13 +696,21 @@ PY
   quarantine_id=""
 
   if [[ "$CXLOG_ENABLED" == "1" ]]; then
+    local execution_id backend_used execution_mode
+    execution_id="$(date -u +"%Y%m%dT%H%M%SZ")_$(printf "%s" "$tool" | tr -cs '[:alnum:]_-' '_')_$$"
+    backend_used="${CX_LLM_BACKEND:-codex}"
+    execution_mode="${CX_MODE:-lean}"
     {
       printf '{'
+      printf '"execution_id":%s,' "$(printf "%s" "$execution_id" | _cx_json_escape)"
+      printf '"command":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
       printf '"ts":"%s",' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       printf '"tool":%s,' "$(printf "%s" "$tool" | _cx_json_escape)"
       printf '"cwd":%s,'  "$(pwd | tr -d '\n' | _cx_json_escape)"
       printf '"scope":"%s",' "$scope"
       printf '"repo_root":%s,' "$(printf "%s" "${root:-}" | _cx_json_escape)"
+      printf '"backend_used":%s,' "$(printf "%s" "$backend_used" | _cx_json_escape)"
+      printf '"execution_mode":%s,' "$(printf "%s" "$execution_mode" | _cx_json_escape)"
       printf '"duration_ms":%s,' "$dur_ms"
       printf '"input_tokens":%s,' "${in_tok:-null}"
       printf '"cached_input_tokens":%s,' "${cached_tok:-null}"
@@ -561,6 +733,9 @@ PY
       printf '"clip_footer":%s,' "$clip_footer"
       printf '"rtk_used":%s,' "$rtk_used"
       printf '"rtk_error":%s,' "$([[ "$rtk_error" == "1" ]] && echo "true" || echo "false")"
+      printf '"capture_provider":%s,' "$(printf "%s" "${CX_CAPTURE_PROVIDER:-auto}" | _cx_json_escape)"
+      printf '"schema_enforced":false,'
+      printf '"schema_valid":%s,' "$schema_ok"
       printf '"schema_ok":%s,' "$schema_ok"
       printf '"schema_reason":%s,' "$(printf "%s" "$schema_reason" | _cx_json_escape)"
       printf '"quarantine_id":%s,' "$(printf "%s" "$quarantine_id" | _cx_json_escape)"
@@ -1475,7 +1650,7 @@ cxdoctor() (
   echo
   echo "== functions present =="
   local fn missing=0
-  for fn in cx cxj cxo cxcopy cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxwhere cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint cxreplay; do
+  for fn in cx cxj cxo cxcopy cxtask cxdiffsum_staged cxcommitjson cxcommitmsg cxnext cxfix cxfix_run cxhealth cxversion cxcore cxwhere cxstate cxpolicy cxprofile cxalert cxtrace cxbench cxworklog cxbudget cxoptimize cxprompt cxroles cxfanout cxpromptlint cxreplay; do
     if type "$fn" >/dev/null 2>&1; then
       echo "OK: $fn"
     else

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cx://schemas/fixrun.v1",
+  "title": "cx fix-run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["analysis", "commands"],
+  "properties": {
+    "analysis": { "type": "string", "minLength": 1 },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

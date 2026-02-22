@@ -3,31 +3,54 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Prefer Rust runtime when present; keep Bash function fallback for compatibility.
-CXRS_WRAPPER="$REPO_ROOT/rust/cxrs/bin/cxrs"
-CXRS_MANIFEST="$REPO_ROOT/rust/cxrs/Cargo.toml"
-if [[ -f "$CXRS_MANIFEST" ]] && command -v cargo >/dev/null 2>&1; then
-  exec cargo run --quiet --manifest-path "$CXRS_MANIFEST" -- cx-compat "$@"
-fi
-if [[ -x "$CXRS_WRAPPER" ]]; then
-  exec "$CXRS_WRAPPER" cx-compat "$@"
-fi
-
-# shellcheck disable=SC1091
-source "$REPO_ROOT/cx.sh"
-
 if [[ $# -lt 1 ]]; then
-  echo "Usage: cx <cx-function> [args...]" >&2
+  echo "Usage: cx <subcommand> [args...]" >&2
   echo "Example: cx cxversion" >&2
   exit 2
 fi
 
-fn="$1"
+subcommand="$1"
+
+# Prefer Rust runtime when present; fallback to Bash function layer.
+CXRS_WRAPPER="$REPO_ROOT/rust/cxrs/bin/cxrs"
+CXRS_MANIFEST="$REPO_ROOT/rust/cxrs/Cargo.toml"
+
+_cx_run_rust() {
+  if [[ -f "$CXRS_MANIFEST" ]] && command -v cargo >/dev/null 2>&1; then
+    CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
+      cargo run --quiet --manifest-path "$CXRS_MANIFEST" -- "$@"
+    return $?
+  fi
+  if [[ -x "$CXRS_WRAPPER" ]]; then
+    CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
+      "$CXRS_WRAPPER" "$@"
+    return $?
+  fi
+  return 127
+}
+
+if _cx_run_rust supports "$subcommand" >/dev/null 2>&1; then
+  if [[ "$subcommand" == cx* ]]; then
+    _cx_run_rust cx-compat "$@"
+  else
+    _cx_run_rust "$@"
+  fi
+  exit $?
+fi
+
+# shellcheck disable=SC1091
+source "$REPO_ROOT/cx.sh"
+fn="$subcommand"
 shift
 
 if ! declare -F "$fn" >/dev/null 2>&1; then
-  echo "cx: unknown function '$fn'" >&2
+  if [[ -f "$CXRS_MANIFEST" ]] || [[ -x "$CXRS_WRAPPER" ]]; then
+    echo "cx: unsupported command '$fn' (not supported by cxrs or bash compatibility layer)" >&2
+  else
+    echo "cx: unknown function '$fn' (rust runtime unavailable and bash function missing)" >&2
+  fi
   exit 2
 fi
 
+export CX_EXECUTION_PATH="${CX_EXECUTION_PATH:-bash:bin/cx-fallback}"
 "$fn" "$@"

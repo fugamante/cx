@@ -370,6 +370,26 @@ _cx_json_require_keys() {
   done
 }
 
+_cx_schema_delegate_rust() {
+  local rust_cmd="$1"
+  shift || true
+  if _cx_rust_supports "$rust_cmd"; then
+    _cx_rust_exec "$rust_cmd" "$@"
+    return $?
+  fi
+  return 2
+}
+
+_cx_delegate_rust_cmd() {
+  local rust_cmd="$1"
+  shift || true
+  if _cx_rust_supports "$rust_cmd"; then
+    _cx_rust_exec "$rust_cmd" "$@"
+    return $?
+  fi
+  return 2
+}
+
 _cx_is_dangerous_cmd() {
   local line="$1"
   local compact
@@ -733,19 +753,44 @@ cxpromptlint() {
   echo "log_file: $f"
 }
 
+cxtask() {
+  _cx_delegate_rust_cmd "task" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
+  echo "cxtask: rust runtime unavailable" >&2
+  return 1
+}
+
 cx() {
+  _cx_delegate_rust_cmd "cx" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local out
   _cx_system_capture --var out "$@" || return $?
   printf "%s\n" "$out" | codex exec -
 }
 
 cxj() {
+  _cx_delegate_rust_cmd "cxj" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local out
   _cx_system_capture --var out "$@" || return $?
   printf "%s\n" "$out" | _cx_codex_jsonl_with_log "cxj"
 }
 
 cxo() {
+  _cx_delegate_rust_cmd "cxo" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local out
   _cx_system_capture --var out "$@" || return $?
 
@@ -753,6 +798,11 @@ cxo() {
 }
 
 cxol() {
+  _cx_delegate_rust_cmd "cxol" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local out tmp
   _cx_system_capture --var out "$@" || return $?
   tmp="$(mktemp)"
@@ -762,6 +812,11 @@ cxol() {
 }
 
 cxcopy() {
+  _cx_delegate_rust_cmd "cxcopy" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local txt
   txt="$(cxo "$@")" || return $?
   if [[ -z "$txt" ]]; then
@@ -773,6 +828,11 @@ cxcopy() {
 }
 
 cxnext() {
+  _cx_schema_delegate_rust "next" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local out
   local schema prompt json
   _cx_system_capture --var out "$@" || return $?
@@ -797,6 +857,11 @@ cxnext() {
 }
 
 cxfix() {
+  _cx_delegate_rust_cmd "fix" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   if [[ $# -lt 1 ]]; then
     echo "Usage: cxfix <command> [args...]" >&2
     return 2
@@ -828,6 +893,11 @@ cxfix() {
 }
 
 cxfix_run() {
+  _cx_schema_delegate_rust "fix-run" "$@"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   if [[ $# -lt 1 ]]; then
     echo "Usage: cxfix_run <command> [args...]" >&2
     return 2
@@ -944,6 +1014,11 @@ _cxdiffsum_from_diff() {
 }
 
 cxdiffsum() {
+  _cx_schema_delegate_rust "diffsum"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local diff_out
   _cx_system_capture --var diff_out git diff --no-color || return $?
 
@@ -956,6 +1031,11 @@ cxdiffsum() {
 }
 
 cxdiffsum_staged() {
+  _cx_schema_delegate_rust "diffsum-staged"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local diff_out
   _cx_system_capture --var diff_out git diff --staged --no-color || return $?
 
@@ -968,6 +1048,11 @@ cxdiffsum_staged() {
 }
 
 cxcommitjson() {
+  _cx_schema_delegate_rust "commitjson"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   local diff_out
   local schema prompt json cc_pref style_hint
   _cx_system_capture --var diff_out git diff --staged --no-color || return $?
@@ -1007,6 +1092,11 @@ cxcommitjson() {
 }
 
 cxcommitmsg() {
+  _cx_schema_delegate_rust "commitmsg"
+  local rust_status=$?
+  if [[ "$rust_status" -ne 2 ]]; then
+    return "$rust_status"
+  fi
   cxcommitjson \
     | jq -r '
       .subject
