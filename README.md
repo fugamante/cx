@@ -2,37 +2,36 @@
 
 This branch, `codex/rust-spike`, is the Rust-first track for `cx`.
 
-It exists to port high-value `cx` behavior from Bash into a typed, testable, portable Rust binary (`cxrs`) while keeping the Bash implementation available as compatibility/reference.
+It exists to port high-value `cx` behavior from Bash into a typed, testable, portable Rust binary (`cxrs`) while keeping Bash available for compatibility reference.
 
 ## Branch identity
 
 - Primary focus: Rust implementation (`/rust/cxrs`)
 - Stability level: experimental / fast iteration
-- Compatibility target: parity with core Bash commands over time
-- Source of truth for production Bash usage: `main` branch
-
-If you want the stable Bash toolchain today, use `main`.
-If you want to test and evolve the Rust port, use this branch.
+- Compatibility target: parity with core Bash behavior over time
+- Production Bash source of truth: `main`
 
 ## What is implemented here
 
-Rust (`cxrs`) currently includes:
+Rust (`cxrs`) includes:
 - repo-aware logging + metrics/profile/trace/alert/worklog/optimize
 - schema-enforced structured commands (commit/diff/next/fix-run)
 - quarantine + replay for schema failures
 - context budgeting + clipping + chunking
 - RTK-aware system capture with native fallback reducers
-- compatibility entrypoints (`cx-compat`) for key Bash-style commands
+- compatibility entrypoints (`cx-compat`)
 - selectable LLM backend with Codex primary + Ollama alternative
 
-Bash files remain in-repo for parity checks and migration safety, but they are not the primary development target on this branch.
+## LLM backend routing (Codex primary)
 
-## Repo layout
+`cxrs` supports:
+- `CX_LLM_BACKEND=codex|ollama` (default `codex`)
+- `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
+- `cxrs llm set-backend <codex|ollama>`
+- `cxrs llm set-model <model>`
+- `cxrs llm clear-model`
 
-- `rust/cxrs/`: Rust implementation track (primary in this branch)
-- `lib/`, `bin/`, `cx.sh`: Bash implementation and bootstrap (reference/compat)
-- `VERSION`: toolchain stamp
-- `.github/workflows/cxrs-compat.yml`: parity/compat CI for Rust track
+If Ollama backend is selected and no model is configured, `cxrs` prompts once in interactive terminals and persists the selection in `.codex/state.json`.
 
 ## Quick start (Rust)
 
@@ -41,6 +40,7 @@ cd ~/cxcodex/rust/cxrs
 cargo build
 cargo run -- version
 cargo run -- doctor
+cargo run -- llm show
 ```
 
 Compatibility checks:
@@ -53,20 +53,16 @@ cd ~/cxcodex/rust/cxrs
 
 ## Quick start (Bash reference)
 
-If you still want to run Bash commands from this branch checkout:
-
 ```bash
 cd ~/cxcodex
 source ./cx.sh
 cxversion
 ```
 
-For stable Bash-focused docs and operational guidance, see `main` branch README.
+## Environment knobs
 
-## Environment knobs (shared concepts)
-
-- `CX_LLM_BACKEND=codex|ollama` (default `codex`)
-- `CX_OLLAMA_MODEL=<model>` (used when backend is `ollama`)
+- `CX_LLM_BACKEND=codex|ollama`
+- `CX_OLLAMA_MODEL=<model>`
 - `CX_MODE=lean|deterministic|verbose`
 - `CX_SCHEMA_RELAXED=0|1`
 - `CXLOG_ENABLED=0|1`
@@ -81,13 +77,8 @@ For stable Bash-focused docs and operational guidance, see `main` branch README.
 
 ## Requirements
 
-- Rust toolchain (`cargo`, `rustc`) for primary branch workflows
+- Rust toolchain (`cargo`, `rustc`)
 - `jq`, `git`
 - default backend: `codex`
-- optional alternative backend: `ollama` + a local pulled model
+- optional alternative backend: `ollama`
 - optional: `rtk`
-- Bash still required for compatibility scripts
-
-## Related docs
-
-- Rust detailed docs: `rust/cxrs/README.md`

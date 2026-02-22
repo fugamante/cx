@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -130,6 +130,9 @@ fn print_help() {
     println!("  version            Print tool version");
     println!("  where              Show binary/source/log resolution details");
     println!("  doctor             Run non-interactive environment checks");
+    println!(
+        "  llm <op> [...]     Manage LLM backend/model defaults (show|set-backend|set-model|clear-model)"
+    );
     println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
     println!("  policy [check ...] Show safety rules or classify a command");
     println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
@@ -277,22 +280,137 @@ fn effective_input_tokens(input: Option<u64>, cached: Option<u64>) -> Option<u64
 }
 
 fn llm_backend() -> String {
-    match env::var("CX_LLM_BACKEND")
-        .unwrap_or_else(|_| "codex".to_string())
-        .to_lowercase()
-        .as_str()
-    {
+    let raw = env::var("CX_LLM_BACKEND")
+        .ok()
+        .or_else(|| {
+            read_state_value().and_then(|v| {
+                value_at_path(&v, "preferences.llm_backend")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string())
+            })
+        })
+        .unwrap_or_else(|| "codex".to_string());
+    match raw.to_lowercase().as_str() {
         "ollama" => "ollama".to_string(),
         _ => "codex".to_string(),
     }
 }
 
 fn llm_model() -> String {
-    if llm_backend() == "ollama" {
-        env::var("CX_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1".to_string())
-    } else {
-        env::var("CX_MODEL").unwrap_or_default()
+    if llm_backend() != "ollama" {
+        return env::var("CX_MODEL").unwrap_or_default();
     }
+    if let Ok(v) = env::var("CX_OLLAMA_MODEL") {
+        let t = v.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    read_state_value()
+        .and_then(|v| {
+            value_at_path(&v, "preferences.ollama_model")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn ollama_model_preference() -> String {
+    if let Ok(v) = env::var("CX_OLLAMA_MODEL") {
+        let t = v.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    read_state_value()
+        .and_then(|v| {
+            value_at_path(&v, "preferences.ollama_model")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn set_state_path(path: &str, value: Value) -> Result<(), String> {
+    let (state_file, mut state) = ensure_state_value()?;
+    set_value_at_path(&mut state, path, value)?;
+    write_json_atomic(&state_file, &state)
+}
+
+fn is_interactive_tty() -> bool {
+    io::stdin().is_terminal() && io::stderr().is_terminal()
+}
+
+fn ollama_list_models() -> Vec<String> {
+    let output = match Command::new("ollama").arg("list").output() {
+        Ok(v) if v.status.success() => v,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut out: Vec<String> = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        if i == 0 && line.to_lowercase().contains("name") {
+            continue;
+        }
+        let name = line
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !name.is_empty() {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn resolve_ollama_model_for_run() -> Result<String, String> {
+    let model = llm_model();
+    if !model.trim().is_empty() {
+        return Ok(model);
+    }
+    if !is_interactive_tty() {
+        return Err(
+            "ollama model is unset; set CX_OLLAMA_MODEL or run 'cxrs llm set-model <model>'"
+                .to_string(),
+        );
+    }
+
+    let models = ollama_list_models();
+    eprintln!("cxrs: no default Ollama model configured.");
+    if models.is_empty() {
+        eprintln!("No local models found from 'ollama list'.");
+        eprintln!("Pull one first (example: ollama pull llama3.1) then set it.");
+        return Err("ollama model selection aborted".to_string());
+    }
+    eprintln!("Select a default model (persisted to .codex/state.json):");
+    for (idx, m) in models.iter().enumerate() {
+        eprintln!("  {}. {}", idx + 1, m);
+    }
+    eprint!("Enter number or model name: ");
+    let _ = io::stderr().flush();
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| format!("failed reading selection: {e}"))?;
+    let selected_raw = input.trim();
+    if selected_raw.is_empty() {
+        return Err("no model selected".to_string());
+    }
+    let selected = if let Ok(n) = selected_raw.parse::<usize>() {
+        models
+            .get(n.saturating_sub(1))
+            .cloned()
+            .ok_or_else(|| "invalid model index".to_string())?
+    } else {
+        selected_raw.to_string()
+    };
+    set_state_path("preferences.ollama_model", Value::String(selected.clone()))?;
+    eprintln!("cxrs: default Ollama model set to '{}'.", selected);
+    Ok(selected)
 }
 
 fn llm_bin_name() -> &'static str {
@@ -496,6 +614,8 @@ fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
 fn default_state_value() -> Value {
     json!({
         "preferences": {
+            "llm_backend": Value::Null,
+            "ollama_model": Value::Null,
             "conventional_commits": Value::Null,
             "pr_summary_format": Value::Null
         },
@@ -677,6 +797,84 @@ fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
     }
     println!("ok");
     0
+}
+
+fn cmd_llm(args: &[String]) -> i32 {
+    let sub = args.first().map(String::as_str).unwrap_or("show");
+    match sub {
+        "show" => {
+            let backend = llm_backend();
+            let model = llm_model();
+            let ollama_pref = ollama_model_preference();
+            println!("llm_backend: {backend}");
+            println!(
+                "active_model: {}",
+                if model.is_empty() { "<unset>" } else { &model }
+            );
+            println!(
+                "ollama_model: {}",
+                if ollama_pref.is_empty() {
+                    "<unset>"
+                } else {
+                    &ollama_pref
+                }
+            );
+            0
+        }
+        "set-backend" => {
+            let Some(v) = args.get(1).map(|s| s.to_lowercase()) else {
+                eprintln!("Usage: {APP_NAME} llm set-backend <codex|ollama>");
+                return 2;
+            };
+            if v != "codex" && v != "ollama" {
+                eprintln!("Usage: {APP_NAME} llm set-backend <codex|ollama>");
+                return 2;
+            }
+            if let Err(e) = set_state_path("preferences.llm_backend", Value::String(v.clone())) {
+                eprintln!("cxrs llm set-backend: {e}");
+                return 1;
+            }
+            println!("ok");
+            println!("llm_backend: {v}");
+            0
+        }
+        "set-model" => {
+            let Some(model) = args.get(1) else {
+                eprintln!("Usage: {APP_NAME} llm set-model <ollama_model>");
+                return 2;
+            };
+            if model.trim().is_empty() {
+                eprintln!("Usage: {APP_NAME} llm set-model <ollama_model>");
+                return 2;
+            }
+            if let Err(e) = set_state_path(
+                "preferences.ollama_model",
+                Value::String(model.trim().to_string()),
+            ) {
+                eprintln!("cxrs llm set-model: {e}");
+                return 1;
+            }
+            println!("ok");
+            println!("ollama_model: {}", model.trim());
+            0
+        }
+        "clear-model" => {
+            if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
+                eprintln!("cxrs llm clear-model: {e}");
+                return 1;
+            }
+            println!("ok");
+            println!("ollama_model: <unset>");
+            0
+        }
+        other => {
+            eprintln!("{APP_NAME} llm: unknown subcommand '{other}'");
+            eprintln!(
+                "Usage: {APP_NAME} llm <show|set-backend <codex|ollama>|set-model <model>|clear-model>"
+            );
+            2
+        }
+    }
 }
 
 fn print_version() {
@@ -1753,7 +1951,7 @@ fn run_codex_plain(prompt: &str) -> Result<String, String> {
 }
 
 fn run_ollama_plain(prompt: &str) -> Result<String, String> {
-    let model = env::var("CX_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
+    let model = resolve_ollama_model_for_run()?;
     let mut child = Command::new("ollama")
         .args(["run", &model])
         .stdin(Stdio::piped())
@@ -3781,6 +3979,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
                 2
             }
         },
+        "cxllm" | "llm" => cmd_llm(&args[1..]),
         "cxbench" | "bench" => {
             let Some(runs) = args
                 .get(1)
@@ -3933,6 +4132,8 @@ fn is_compat_name(name: &str) -> bool {
             | "policy"
             | "cxstate"
             | "state"
+            | "cxllm"
+            | "llm"
             | "cxbench"
             | "bench"
             | "cxprompt"
@@ -4020,6 +4221,7 @@ fn main() {
                 2
             }
         },
+        "llm" => cmd_llm(&args[2..]),
         "policy" => cmd_policy(&args[2..]),
         "bench" => {
             if args.len() < 5 {

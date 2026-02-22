@@ -111,6 +111,7 @@ RTK version guard:
 Current implementation:
 - `codex` remains the primary/default backend (`CX_LLM_BACKEND=codex`).
 - `ollama` can be used as a local alternative (`CX_LLM_BACKEND=ollama` + `CX_OLLAMA_MODEL`).
+- If `CX_LLM_BACKEND=ollama` and no model is set, `cxrs` asks once (interactive TTY) and persists selection in `.codex/state.json` (`preferences.ollama_model`).
 - No explicit "session mode" handshake exists yet before command execution.
 
 Planned implementation:
@@ -128,6 +129,10 @@ cargo run -- version
 cargo run -- where
 cargo run -- doctor
 cargo run -- where
+cargo run -- llm show
+cargo run -- llm set-backend ollama
+cargo run -- llm set-model llama3.1
+cargo run -- llm set-backend codex
 CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
 CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
 cargo run -- state show
