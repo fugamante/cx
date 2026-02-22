@@ -47,6 +47,21 @@ CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
 CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
 ```
 
+Repo wrapper (Rust-first, Bash fallback):
+
+```bash
+cd ~/cxcodex
+./bin/cx cxversion
+```
+
+Compatibility checks:
+
+```bash
+cd ~/cxcodex/rust/cxrs
+./scripts/parity_check.sh
+./scripts/compat_check.sh 50
+```
+
 ## Key paths
 
 - Bash entrypoint: `cx.sh`
