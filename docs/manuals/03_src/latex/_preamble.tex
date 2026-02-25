@@ -1,0 +1,58 @@
+% Shared preamble for cx manuals (Apple-clean, print-friendly).
+% XeLaTeX recommended.
+\usepackage[margin=1in]{geometry}
+\usepackage{fontspec}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{setspace}
+
+% Use macOS-bundled fonts for portability on this machine.
+\setmainfont{Times New Roman}
+\setsansfont{Helvetica}
+\setmonofont{Menlo}
+
+\definecolor{Ink}{RGB}{18,18,18}
+\definecolor{Subtle}{RGB}{85,85,85}
+\definecolor{Rule}{RGB}{220,220,220}
+\definecolor{CodeBg}{RGB}{248,248,248}
+\color{Ink}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!45!black,
+  urlcolor=blue!45!black
+}
+
+\lstdefinestyle{cx}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{CodeBg},
+  frame=single,
+  framerule=0.2pt,
+  rulecolor=\color{Rule},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=0.6em,
+  xrightmargin=0.6em
+}
+
+\setlist[itemize]{topsep=2pt,itemsep=1pt,parsep=0pt,leftmargin=1.2em}
+\setlist[enumerate]{topsep=2pt,itemsep=1pt,parsep=0pt,leftmargin=1.6em}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection}{0.6em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\textcolor{Subtle}{cxcodex manual}}
+\rhead{\textcolor{Subtle}{\thepage}}
+\cfoot{}
+\setlength{\headheight}{14pt}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}

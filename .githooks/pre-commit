@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+# Only snapshot when manuals content is being committed.
+if ! git diff --cached --name-only | rg -q '^docs/manuals/' ; then
+  exit 0
+fi
+
+# Ignore build artifacts if they are staged for some reason.
+if ! git diff --cached --name-only | rg -v '^docs/manuals/99_build/' | rg -q '^docs/manuals/' ; then
+  exit 0
+fi
+
+if [[ ! -x "./bin/cx-manual-snapshot" ]]; then
+  echo "pre-commit: missing executable ./bin/cx-manual-snapshot; refusing commit" >&2
+  exit 1
+fi
+
+out="$(./bin/cx-manual-snapshot 2>/dev/null || true)"
+if [[ -z "$out" ]]; then
+  echo "pre-commit: manual snapshot failed; refusing commit" >&2
+  exit 1
+fi
+
+echo "pre-commit: manuals snapshot -> $out" >&2
+

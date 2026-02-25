@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>cxcodex Manual (Master)</title>
+    <link rel="stylesheet" href="./apple.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="k">cxcodex</div>
+        <h1>Manual (Master)</h1>
+        <div class="meta">Last updated: 2026-02-22 · Focus: deterministic, observable, safe runtime</div>
+      </header>
+
+      <section class="callout">
+        <p><strong>Intent.</strong> cx is built for predictable LLM-assisted work under load: bounded context, schema-validated structured outputs, strict telemetry, and safe automation boundaries.</p>
+      </section>
+
+      <section class="grid" aria-label="Quickstart">
+        <div class="card">
+          <div class="k">Quickstart</div>
+          <p>Run these three commands to confirm routing, budgets, and log location.</p>
+          <pre><code>cd ~/cxcodex
+./bin/cx version
+./bin/cx budget
+./bin/cx diffsum-staged | jq .</code></pre>
+          <p><strong>What to verify</strong></p>
+          <ul>
+            <li><code>execution_path</code> is Rust when available.</li>
+            <li><code>log_file</code> points to <code>.codex/cxlogs/runs.jsonl</code>.</li>
+            <li><code>budget_chars</code>/<code>budget_lines</code> are explicit.</li>
+            <li><code>diffsum-staged</code> returns JSON that parses with <code>jq</code>.</li>
+            <li>Clipping is visible via <code>./bin/cx trace</code> when it occurs.</li>
+          </ul>
+          <p><span class="pill">Rust-first</span><span class="pill">Schema-enforced</span><span class="pill">Budgeted capture</span></p>
+        </div>
+        <div class="card">
+          <div class="k">Installation / Prereqs</div>
+          <ul>
+            <li><strong>Required:</strong> <code>bash</code></li>
+            <li><strong>Required:</strong> <code>git</code></li>
+            <li><strong>Required:</strong> <code>jq</code></li>
+            <li><strong>Required:</strong> <code>codex</code> CLI (default backend)</li>
+            <li><strong>Dev:</strong> <code>cargo</code>/<code>rustc</code> (build/run <code>cxrs</code>)</li>
+          </ul>
+          <pre><code>./bin/cx doctor
+./bin/cx rtk-status</code></pre>
+          <p class="meta">Optional: <code>rtk</code> (system output only), <code>ollama</code> (local backend).</p>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Common workflows and troubleshooting">
+        <div class="card">
+          <div class="k">Common workflows</div>
+          <ul>
+            <li><strong>Summarize staged diff (JSON):</strong> <code>./bin/cx diffsum-staged | jq .</code></li>
+            <li><strong>Generate commit object (JSON):</strong> <code>./bin/cx commitjson | jq .</code></li>
+            <li><strong>Fan out an objective:</strong> <code>./bin/cx task fanout "..." --from staged-diff</code></li>
+            <li><strong>Run pending tasks:</strong> <code>./bin/cx task run-all --status pending</code></li>
+            <li><strong>Optimize from history:</strong> <code>./bin/cx optimize 200</code></li>
+          </ul>
+          <p class="meta">More workflows are covered in the sections below.</p>
+        </div>
+        <div class="card">
+          <div class="k">Troubleshooting</div>
+          <ul>
+            <li><strong>Unexpected fallback:</strong> run <code>./bin/cx where &lt;cmd&gt;</code> and confirm <code>execution_path</code> via <code>./bin/cx version</code>.</li>
+            <li><strong>Schema command fails:</strong> inspect <code>./bin/cx quarantine list</code>, then <code>./bin/cx replay &lt;id&gt;</code>.</li>
+            <li><strong>Budget clipping surprises:</strong> run <code>./bin/cx budget</code> and <code>./bin/cx trace</code>; reduce capture scope or raise budgets intentionally.</li>
+            <li><strong>Strict log validation fails:</strong> legacy rows may predate the current telemetry contract; new runs should conform.</li>
+            <li><strong>Backend confusion:</strong> run <code>./bin/cx llm show</code> and verify the selected model when using Ollama.</li>
+          </ul>
+          <pre><code>./bin/cx logs validate --fix=false
+./bin/cx trace</code></pre>
+        </div>
+      </section>
+
+      <nav class="toc">
+        <div class="k">Contents</div>
+        <ul>
+          <li><a href="#start">Start Here: Verify What You’re Running</a></li>
+          <li><a href="#pipeline">The Pipeline (Capture → Budget → Embed)</a></li>
+          <li><a href="#schemas">Structured Outputs (Schemas/Quarantine/Replay)</a></li>
+          <li><a href="#policy">Safety Sandbox (Policy Engine)</a></li>
+          <li><a href="#tasks">Task Graph (Fan-out/Run/Run-all)</a></li>
+          <li><a href="#telemetry">Telemetry (Contract/Validation/Heuristics)</a></li>
+          <li><a href="#optimize">Self-Optimization</a></li>
+          <li><a href="#procedures">Operator Procedures</a></li>
+        </ul>
+      </nav>
+
+      <section id="start">
+        <h2>Start Here: Verify What You’re Running</h2>
+        <p>Prefer Rust execution. If you are on Bash fallback, expect reduced guarantees.</p>
+        <pre><code>cd ~/cxcodex
+./bin/cx version
+./bin/cx diag
+./bin/cx where version diffsum-staged task optimize</code></pre>
+      </section>
+
+      <section id="pipeline">
+        <h2>The Pipeline (Capture → Budget → Embed)</h2>
+        <p>System output is constrained before it becomes prompt text.</p>
+        <pre><code>raw system output
+  -&gt; optional RTK routing (system output only)
+  -&gt; optional native reduction
+  -&gt; mandatory budgeting (clip/chunk)
+  -&gt; embed into prompt</code></pre>
+        <p class="callout"><strong>Budgets.</strong> Use <code>CX_CONTEXT_BUDGET_CHARS</code>, <code>CX_CONTEXT_BUDGET_LINES</code>, <code>CX_CONTEXT_CLIP_MODE</code>, <code>CX_CONTEXT_CLIP_FOOTER</code>.</p>
+        <pre><code>./bin/cx budget
+./bin/cx trace</code></pre>
+      </section>
+
+      <section id="schemas">
+        <h2>Structured Outputs (Schemas/Quarantine/Replay)</h2>
+        <p>Schema commands request JSON-only output, parse JSON, validate it, and quarantine failures.</p>
+        <pre><code>./bin/cx schema list
+./bin/cx commitjson | jq .
+./bin/cx diffsum-staged | jq .
+./bin/cx next git status | jq .</code></pre>
+        <pre><code>./bin/cx quarantine list
+./bin/cx replay &lt;id&gt;</code></pre>
+      </section>
+
+      <section id="policy">
+        <h2>Safety Sandbox (Policy Engine)</h2>
+        <p>Blocks destructive patterns and out-of-repo writes by default.</p>
+        <pre><code>./bin/cx policy show
+./bin/cx policy check "rm -rf ."</code></pre>
+      </section>
+
+      <section id="tasks">
+        <h2>Task Graph (Fan-out/Run/Run-all)</h2>
+        <p>Tasks are the unit of migration to parallel work: small, role-tagged, log-linked.</p>
+        <pre><code>./bin/cx task fanout "Ship release notes improvements" --from staged-diff
+./bin/cx task list --status pending
+./bin/cx task run-all --status pending</code></pre>
+      </section>
+
+      <section id="telemetry">
+        <h2>Telemetry (Contract/Validation/Heuristics)</h2>
+        <pre><code>./bin/cx logs validate --fix=false
+./bin/cx metrics 50
+./bin/cx trace</code></pre>
+        <div class="callout">
+          <p><strong>Heuristics.</strong></p>
+          <ul>
+            <li><code>effective_input_tokens</code> high: prompts too large or too variable.</li>
+            <li>cache trend down: stabilize prompt templates and capture scope.</li>
+            <li>clipping frequent: reduce capture scope or raise budgets intentionally.</li>
+            <li>schema failures spike: enforce deterministic mode and reduce ambiguity.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="optimize">
+        <h2>Self-Optimization</h2>
+        <pre><code>./bin/cx optimize 200
+./bin/cx optimize 200 --json | jq .</code></pre>
+      </section>
+
+      <section id="procedures">
+        <h2>Operator Procedures</h2>
+        <h3>Budget stress test</h3>
+        <pre><code>CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
+./bin/cx budget
+./bin/cx trace</code></pre>
+        <h3>Schema integrity check</h3>
+        <pre><code>./bin/cx commitjson | jq .
+./bin/cx diffsum-staged | jq .</code></pre>
+        <h3>Task loop</h3>
+        <pre><code>./bin/cx task fanout "Objective: tighten schema errors" --from log
+./bin/cx task run-all --status pending
+./bin/cx optimize 200</code></pre>
+      </section>
+
+      <hr />
+      <footer>
+        <div>Target: fast scanning + reliable execution.</div>
+      </footer>
+    </div>
+  </body>
+</html>

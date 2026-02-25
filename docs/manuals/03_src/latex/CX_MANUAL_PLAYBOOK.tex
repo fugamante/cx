@@ -1,0 +1,89 @@
+\documentclass[11pt]{article}
+\input{docs/manuals/03_src/latex/_preamble.tex}
+
+\title{cxcodex Manual (Operator Playbook)}
+\author{}
+\date{Last updated: 2026-02-22}
+
+\begin{document}
+\maketitle
+\vspace{-0.6em}
+
+\section*{Purpose}
+This playbook is a set of reproducible procedures. It is intentionally low-prose and high-signal.
+
+\section{P0: Confirm Runtime Path}
+\begin{lstlisting}[style=cx]
+./bin/cx version
+./bin/cx where version
+\end{lstlisting}
+
+\section{P1: Confirm Schemas Exist}
+\begin{lstlisting}[style=cx]
+./bin/cx schema list
+ls .codex/schemas
+\end{lstlisting}
+
+\section{P2: Validate Structured Output (Schema Commands)}
+\subsection*{Commit JSON}
+\begin{lstlisting}[style=cx]
+./bin/cx commitjson | jq .
+\end{lstlisting}
+
+\subsection*{Diff Summary}
+\begin{lstlisting}[style=cx]
+./bin/cx diffsum-staged | jq .
+\end{lstlisting}
+
+\subsection*{Next Commands}
+\begin{lstlisting}[style=cx]
+./bin/cx next git status | jq .
+\end{lstlisting}
+
+\section{P3: Budget Stress Test}
+\begin{lstlisting}[style=cx]
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
+./bin/cx budget
+./bin/cx trace
+\end{lstlisting}
+
+\section{P4: Quarantine and Replay (Failure Procedure)}
+\begin{lstlisting}[style=cx]
+./bin/cx quarantine list
+./bin/cx quarantine show <id>
+./bin/cx replay <id>
+\end{lstlisting}
+
+\section{P5: Safety Gate (Before Any Execution)}
+\begin{lstlisting}[style=cx]
+./bin/cx policy show
+./bin/cx policy check "<candidate command>"
+\end{lstlisting}
+
+\section{P6: Task Graph (Orchestration)}
+\subsection*{Create and Execute}
+\begin{lstlisting}[style=cx]
+./bin/cx task add "Objective: harden capture clipping" --role implementer
+./bin/cx task list --status pending
+./bin/cx task run-all --status pending
+\end{lstlisting}
+
+\subsection*{Fan-out}
+\begin{lstlisting}[style=cx]
+./bin/cx task fanout "Objective: refactor logging" --from staged-diff
+./bin/cx task list --status pending
+\end{lstlisting}
+
+\section{P7: Telemetry Contract Validation}
+\begin{lstlisting}[style=cx]
+./bin/cx logs validate --fix=false
+tail -n 1 .codex/cxlogs/runs.jsonl | jq .
+\end{lstlisting}
+
+\section{P8: Self-Optimization}
+\begin{lstlisting}[style=cx]
+./bin/cx optimize 200
+./bin/cx optimize 200 --json | jq .
+\end{lstlisting}
+
+\end{document}

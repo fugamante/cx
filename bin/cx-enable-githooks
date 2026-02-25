@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [[ ! -d ".git" ]]; then
+  echo "cx-enable-githooks: not a git repository: $REPO_ROOT" >&2
+  exit 1
+fi
+
+if [[ ! -d ".githooks" ]]; then
+  echo "cx-enable-githooks: missing .githooks directory" >&2
+  exit 1
+fi
+
+git config --local core.hooksPath ".githooks"
+echo "core.hooksPath=$(git config --local core.hooksPath)"
+

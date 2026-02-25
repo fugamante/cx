@@ -1,0 +1,239 @@
+\documentclass[11pt]{article}
+\input{docs/manuals/03_src/latex/_preamble.tex}
+
+\title{cxcodex Manual (Master)}
+\author{}
+\date{Last updated: 2026-02-22}
+
+\begin{document}
+\maketitle
+\vspace{-0.6em}
+
+\section*{Intent}
+cx is built for one outcome: \textbf{predictable LLM-assisted work under load}.
+That means bounded context, schema-validated structured outputs, strict telemetry, and safe
+automation boundaries.
+
+This master manual synthesizes three viewpoints:
+\begin{itemize}
+  \item a story-first walkthrough (to build the mental model),
+  \item a field guide (to debug and tune quickly),
+  \item an operator playbook (to validate and execute safely).
+\end{itemize}
+
+\section*{Architecture Overview}
+\begin{itemize}
+  \item Canonical engine: \texttt{cxrs} (Rust). Bash is fallback only.
+  \item Authoritative entrypoint: \texttt{bin/cx} routes Rust-first with explicit fallback.
+  \item Capture pipeline applies to \emph{system output} only (optional RTK, then budgets).
+  \item Structured commands are schema-enforced (JSON-only, validated, replayable).
+  \item Schema failures are quarantined (\texttt{.codex/quarantine/}) and logged with \texttt{quarantine\_id}.
+  \item Run telemetry is append-only JSONL (\texttt{.codex/cxlogs/runs.jsonl}).
+  \item Policy engine blocks destructive/out-of-repo writes by default.
+\end{itemize}
+
+\section*{Quickstart (3 Commands)}
+\begin{lstlisting}[style=cx]
+cd ~/cxcodex
+./bin/cx version
+./bin/cx budget
+./bin/cx diffsum-staged | jq .
+\end{lstlisting}
+
+\section*{Common Workflows (Copy/Paste)}
+\begin{lstlisting}[style=cx]
+# Structured outputs:
+./bin/cx diffsum-staged | jq .
+./bin/cx commitjson | jq .
+
+# Task graph:
+./bin/cx task fanout "Objective..." --from staged-diff
+./bin/cx task run-all --status pending
+
+# Optimization:
+./bin/cx optimize 200
+\end{lstlisting}
+
+\section*{Installation / Prereqs}
+\begin{itemize}
+  \item Required: \texttt{bash}
+  \item Required: \texttt{git}
+  \item Required: \texttt{jq}
+  \item Required: \texttt{codex} CLI (default backend)
+  \item Development: Rust toolchain (\texttt{cargo}, \texttt{rustc})
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+./bin/cx doctor
+./bin/cx rtk-status
+\end{lstlisting}
+Optional: \texttt{rtk} (system output only), \texttt{ollama} (local backend).
+
+\section*{Troubleshooting (Fast)}
+\begin{itemize}
+  \item Unexpected fallback: \texttt{./bin/cx where <cmd>} and confirm \texttt{execution\_path} via \texttt{./bin/cx version}.
+  \item Schema command fails: inspect \texttt{./bin/cx quarantine list}, then \texttt{./bin/cx replay <id>}.
+  \item Budget clipping surprises: check \texttt{./bin/cx budget} and \texttt{./bin/cx trace}; reduce capture scope or adjust budgets intentionally.
+  \item Strict log validation fails: legacy rows may predate the current telemetry contract; new runs should conform.
+  \item Backend confusion: run \texttt{./bin/cx llm show} and verify the selected model when using ollama.
+\end{itemize}
+
+\tableofcontents
+\newpage
+
+\section{Start Here: Verify What You’re Running}
+\subsection*{Fast path (30 seconds)}
+\begin{lstlisting}[style=cx]
+cd ~/cxcodex
+./bin/cx version
+./bin/cx diag
+./bin/cx where version diffsum-staged task optimize
+\end{lstlisting}
+
+If \texttt{execution\_path} is not Rust, you are on fallback. Expect reduced guarantees.
+
+\section{The Pipeline (What cx Does With Your Reality)}
+\subsection{Capture and Budgeting}
+The core reliability move is this: \textbf{system output is constrained before it becomes prompt text}.
+
+\begin{lstlisting}[style=cx]
+raw system output
+  -> optional RTK routing (system output only)
+  -> optional native reduction
+  -> mandatory budgeting (clip/chunk)
+  -> embed into prompt
+\end{lstlisting}
+
+Budgets (defaults):
+\begin{itemize}
+  \item \texttt{CX\_CONTEXT\_BUDGET\_CHARS=12000}
+  \item \texttt{CX\_CONTEXT\_BUDGET\_LINES=300}
+  \item \texttt{CX\_CONTEXT\_CLIP\_MODE=smart|head|tail} (default \texttt{smart})
+  \item \texttt{CX\_CONTEXT\_CLIP\_FOOTER=1}
+\end{itemize}
+
+Inspect current budgets + last-run clip stats:
+\begin{lstlisting}[style=cx]
+./bin/cx budget
+./bin/cx trace
+\end{lstlisting}
+
+\subsection{Modes}
+\begin{itemize}
+  \item \texttt{lean}: minimal prompts/output
+  \item \texttt{deterministic}: strict schema-only behavior where applicable
+  \item \texttt{verbose}: additional human detail (where supported)
+\end{itemize}
+
+Schema commands always force deterministic mode by default. Override with \texttt{CX\_SCHEMA\_RELAXED=1}.
+
+\section{Structured Outputs (Schemas, Quarantine, Replay)}
+\subsection{Schema Registry}
+Schemas live under \texttt{.codex/schemas/}:
+\begin{itemize}
+  \item \texttt{commitjson.schema.json}
+  \item \texttt{diffsum.schema.json}
+  \item \texttt{next.schema.json}
+  \item \texttt{fixrun.schema.json}
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+./bin/cx schema list
+./bin/cx schema list --json | jq .
+\end{lstlisting}
+
+\subsection{Schema Commands}
+\begin{lstlisting}[style=cx]
+./bin/cx commitjson | jq .
+./bin/cx diffsum-staged | jq .
+./bin/cx next git status | jq .
+\end{lstlisting}
+
+\subsection{Failure Procedure}
+If validation fails, cx writes the raw response + metadata to quarantine and returns non-zero.
+
+\begin{lstlisting}[style=cx]
+./bin/cx quarantine list
+./bin/cx quarantine show <id>
+./bin/cx replay <id>
+\end{lstlisting}
+
+\section{Safety Sandbox (Policy Engine)}
+The policy engine is the boundary between ``suggest'' and ``execute''.
+
+Blocked by default (minimum):
+\begin{itemize}
+  \item \texttt{sudo}, \texttt{rm -rf}, \texttt{curl | bash/sh/zsh}
+  \item \texttt{chmod/chown} on system paths
+  \item writes outside repo root
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+./bin/cx policy show
+./bin/cx policy check "rm -rf ."
+\end{lstlisting}
+
+\section{Task Graph (Fan-out, Run, Run-all)}
+\subsection{Why tasks}
+Tasks are the unit of migration to parallel work: small, role-tagged, log-linked, and replayable.
+
+\begin{lstlisting}[style=cx]
+./bin/cx task fanout "Ship release notes improvements" --from staged-diff
+./bin/cx task list --status pending
+\end{lstlisting}
+
+\subsection{Run tasks}
+\begin{lstlisting}[style=cx]
+./bin/cx task run task_001 --mode deterministic --backend codex
+./bin/cx task run-all --status pending
+\end{lstlisting}
+
+\section{Telemetry (Contract, Validation, Interpretation)}
+\subsection{Log locations}
+\begin{itemize}
+  \item runs: \texttt{.codex/cxlogs/runs.jsonl}
+  \item schema failures: \texttt{.codex/cxlogs/schema\_failures.jsonl}
+\end{itemize}
+
+\subsection{Validate}
+\begin{lstlisting}[style=cx]
+./bin/cx logs validate --fix=false
+\end{lstlisting}
+Note: strict validation will flag older historical rows that predate the current contract.
+
+\subsection{Interpretation (fast heuristics)}
+\begin{itemize}
+  \item \texttt{effective\_input\_tokens} high: prompts too large or too variable.
+  \item cache trend down: stabilize prompt templates and capture scope.
+  \item frequent clipping: reduce capture scope or raise budgets intentionally.
+  \item schema failures spike: enforce deterministic mode and reduce context ambiguity.
+\end{itemize}
+
+\section{Self-Optimization (Pure Analysis)}
+\begin{lstlisting}[style=cx]
+./bin/cx optimize 200
+./bin/cx optimize 200 --json | jq .
+\end{lstlisting}
+
+\section{Operator Procedures (Copy/Paste)}
+\subsection*{Budget stress test}
+\begin{lstlisting}[style=cx]
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
+./bin/cx budget
+./bin/cx trace
+\end{lstlisting}
+
+\subsection*{Schema integrity check}
+\begin{lstlisting}[style=cx]
+./bin/cx commitjson | jq .
+./bin/cx diffsum-staged | jq .
+\end{lstlisting}
+
+\subsection*{Task loop}
+\begin{lstlisting}[style=cx]
+./bin/cx task fanout "Objective: tighten schema errors" --from log
+./bin/cx task run-all --status pending
+./bin/cx optimize 200
+\end{lstlisting}
+
+\end{document}

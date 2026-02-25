@@ -1,0 +1,108 @@
+\documentclass[11pt]{article}
+\input{docs/manuals/03_src/latex/_preamble.tex}
+
+\title{cxcodex Manual (Field Guide)}
+\author{}
+\date{Last updated: 2026-02-22}
+
+\begin{document}
+\maketitle
+\vspace{-0.6em}
+
+\section*{How to Read This}
+This is a practical field guide: short rules, common failure modes, and ``do this next'' recipes.
+It’s written for the moment you’re stuck, skeptical, or trying to keep costs under control.
+
+\section{First Checks (30 Seconds)}
+\begin{lstlisting}[style=cx]
+./bin/cx version
+./bin/cx diag
+./bin/cx where version diffsum-staged task optimize
+\end{lstlisting}
+
+If \texttt{execution\_path} is not Rust, you are on fallback and should expect reduced guarantees.
+
+\section{Capture and Context (The Budget Is the Product)}
+\subsection*{Symptoms}
+\begin{itemize}
+  \item Runs become slow and expensive.
+  \item Responses get vague (model is buried in noise).
+  \item Cache hit rate degrades (prompts drift).
+\end{itemize}
+
+\subsection*{Fixes}
+\begin{itemize}
+  \item Reduce system output: prefer targeted \texttt{git diff -- <paths>} over whole-repo dumps.
+  \item Enforce budgets: set \texttt{CX\_CONTEXT\_BUDGET\_CHARS} / \texttt{LINES} temporarily smaller to test clipping.
+  \item Use chunking for fan-out: chunk output and turn it into parallelizable tasks.
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
+./bin/cx chunk < some_big_output.txt
+\end{lstlisting}
+
+\section{Schemas (Determinism You Can Audit)}
+\subsection*{What ``Schema-Enforced'' Means}
+\begin{itemize}
+  \item Prompt requests JSON-only output.
+  \item Output parses as JSON.
+  \item Output validates against \texttt{.codex/schemas/<name>.schema.json}.
+  \item Failure triggers quarantine + non-zero exit.
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+./bin/cx schema list
+./bin/cx commitjson | jq .
+./bin/cx diffsum-staged | jq .
+\end{lstlisting}
+
+\subsection*{If It Fails}
+\begin{lstlisting}[style=cx]
+./bin/cx quarantine list
+./bin/cx replay <quarantine_id>
+\end{lstlisting}
+
+\section{Safety (You Are Not Your Shell History)}
+\subsection*{Block List (Minimum)}
+\begin{itemize}
+  \item \texttt{sudo}, \texttt{rm -rf}, \texttt{curl | bash}
+  \item chmod/chown on system paths
+  \item writes outside repo root
+\end{itemize}
+
+\begin{lstlisting}[style=cx]
+./bin/cx policy show
+./bin/cx policy check "sudo rm -rf /"
+\end{lstlisting}
+
+\section{Tasks (Parallel-Ready, Single-Worker Today)}
+Use tasks when the objective is bigger than one bounded prompt.
+
+\begin{lstlisting}[style=cx]
+./bin/cx task add "Tighten schema errors" --role implementer
+./bin/cx task fanout "Ship release note improvements" --from staged-diff
+./bin/cx task run-all --status pending
+\end{lstlisting}
+
+\section{Telemetry and Logs (Trust, but Verify)}
+\begin{lstlisting}[style=cx]
+./bin/cx logs validate --fix=false
+./bin/cx metrics 50
+./bin/cx trace
+\end{lstlisting}
+
+\subsection*{Interpretation Cheatsheet}
+\begin{itemize}
+  \item \texttt{effective\_input\_tokens} high: prompts too large or too variable.
+  \item \texttt{clipped=true} often: reduce capture scope or raise budgets intentionally.
+  \item cache trend down: stabilize prompt templates and system capture.
+\end{itemize}
+
+\section{Optimize (Make It Cheaper, Faster, Safer)}
+\begin{lstlisting}[style=cx]
+./bin/cx optimize 200
+./bin/cx optimize 200 --json | jq .
+\end{lstlisting}
+
+\end{document}

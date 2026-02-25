@@ -1,0 +1,94 @@
+:root{
+  --bg: #ffffff;
+  --ink: #111111;
+  --sub: #555555;
+  --rule: #e6e6e6;
+  --code-bg: #f7f7f8;
+  --link: #0a66c2;
+  --shadow: 0 8px 30px rgba(0,0,0,.06);
+}
+html,body{background:var(--bg); color:var(--ink); margin:0; padding:0;}
+body{
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.58;
+  letter-spacing: -0.011em;
+}
+.wrap{max-width: 980px; margin: 0 auto; padding: 56px 20px 72px;}
+header{margin-bottom: 28px;}
+h1{
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+}
+.meta{color:var(--sub); font-size: 14px;}
+nav.toc{
+  border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);
+  padding: 16px 0;
+  margin: 28px 0 36px;
+}
+nav.toc a{color:var(--ink); text-decoration:none;}
+nav.toc a:hover{color:var(--link);}
+section{margin: 28px 0;}
+h2{font-size: 26px; margin: 22px 0 8px; letter-spacing: -0.02em;}
+h3{font-size: 18px; margin: 18px 0 6px;}
+p{margin: 10px 0;}
+ul,ol{margin: 10px 0 10px 22px;}
+code, pre{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+code{font-size: .95em;}
+pre{
+  background:var(--code-bg);
+  border:1px solid var(--rule);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow:auto;
+  box-shadow: none;
+}
+pre code{
+  white-space: pre;
+  word-break: normal;
+}
+.callout{
+  border-left: 3px solid var(--rule);
+  padding: 8px 14px;
+  background: #fbfbfc;
+  border-radius: 8px;
+}
+.k{color:var(--sub); font-weight:600; font-size: 13px; text-transform: uppercase; letter-spacing: .08em;}
+hr{border:0; border-top:1px solid var(--rule); margin: 28px 0;}
+footer{color:var(--sub); font-size: 13px; margin-top: 40px;}
+
+.grid{display:grid; grid-template-columns: 1fr; gap: 14px;}
+@media (min-width: 880px){
+  .grid{grid-template-columns: 1.2fr .8fr;}
+}
+.card{
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+.card h3{margin-top: 0;}
+.pill{
+  display:inline-block;
+  padding: 2px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--sub);
+  font-size: 12px;
+  margin-right: 6px;
+}
+
+@media print{
+  :root{--link:#000000;}
+  body{background:#ffffff;}
+  .wrap{padding: 0;}
+  nav.toc{break-after: page;}
+  pre{page-break-inside: avoid;}
+  a{color:#000000; text-decoration:none;}
+  .card{box-shadow:none;}
+}

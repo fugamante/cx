@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MANUAL_DIR="$REPO_ROOT/docs/manuals"
+
+if [[ ! -d "$MANUAL_DIR" ]]; then
+  echo "cx-manual-snapshot: missing $MANUAL_DIR" >&2
+  exit 1
+fi
+
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+out_dir="$REPO_ROOT/.codex/manual_backups/$ts"
+mkdir -p "$out_dir"
+
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --delete-excluded \
+    --exclude '99_build/' \
+    --exclude '.DS_Store' \
+    "$MANUAL_DIR/" "$out_dir/manuals/"
+else
+  # Fallback: copy publishable/source files while preserving relative paths.
+  (cd "$MANUAL_DIR" && find . -type f ! -path './99_build/*' ! -name '.DS_Store') | while read -r rel; do
+    mkdir -p "$out_dir/manuals/$(dirname "$rel")"
+    cp -f "$MANUAL_DIR/$rel" "$out_dir/manuals/$rel"
+  done
+fi
+
+printf "%s\n" "$out_dir/manuals"
