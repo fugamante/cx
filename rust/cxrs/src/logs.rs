@@ -158,14 +158,27 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
 }
 
 pub fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String> {
-    let file = File::open(log_file).map_err(|e| format!("cannot open {}: {e}", log_file.display()))?;
+    load_runs_cx(log_file, limit).map_err(|e| e.to_string())
+}
+
+fn load_runs_cx(log_file: &Path, limit: usize) -> CxResult<Vec<RunEntry>> {
+    let file = File::open(log_file)
+        .map_err(|e| CxError::io(format!("cannot open {}", log_file.display()), e))?;
     let reader = BufReader::new(file);
     let mut out: Vec<RunEntry> = Vec::new();
     let mut invalid = 0usize;
     let mut sample: Option<String> = None;
-    for line_res in reader.lines() {
-        let Ok(line) = line_res else {
-            continue;
+    for (idx, line_res) in reader.lines().enumerate() {
+        let line_no = idx + 1;
+        let line = match line_res {
+            Ok(v) => v,
+            Err(e) => {
+                invalid += 1;
+                if sample.is_none() {
+                    sample = Some(format!("read error at line {line_no}: {e}"));
+                }
+                continue;
+            }
         };
         if line.trim().is_empty() {
             continue;
@@ -176,7 +189,15 @@ pub fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String>
                 invalid += 1;
                 if sample.is_none() {
                     let preview: String = line.chars().take(160).collect();
-                    sample = Some(format!("{} (preview='{}')", e, preview));
+                    sample = Some(
+                        CxError::JsonLineParse {
+                            file: log_file.to_path_buf(),
+                            line: line_no,
+                            content_preview: preview,
+                            source: e,
+                        }
+                        .to_string(),
+                    );
                 }
             }
         }
@@ -200,16 +221,31 @@ pub fn file_len(path: &Path) -> u64 {
 }
 
 pub fn load_runs_appended(log_file: &Path, offset: u64) -> Result<Vec<RunEntry>, String> {
-    let file = File::open(log_file).map_err(|e| format!("cannot open {}: {e}", log_file.display()))?;
+    load_runs_appended_cx(log_file, offset).map_err(|e| e.to_string())
+}
+
+fn load_runs_appended_cx(log_file: &Path, offset: u64) -> CxResult<Vec<RunEntry>> {
+    let file = File::open(log_file)
+        .map_err(|e| CxError::io(format!("cannot open {}", log_file.display()), e))?;
     let mut reader = BufReader::new(file);
     if offset > 0 {
-        let _ = reader.seek(SeekFrom::Start(offset));
+        reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| CxError::io(format!("seek failed on {}", log_file.display()), e))?;
     }
     let mut out: Vec<RunEntry> = Vec::new();
     let mut invalid = 0usize;
     let mut sample: Option<String> = None;
     let mut line = String::new();
-    while reader.read_line(&mut line).unwrap_or(0) > 0 {
+    let mut line_no = 0usize;
+    loop {
+        let read_n = reader
+            .read_line(&mut line)
+            .map_err(|e| CxError::io(format!("read failed on {}", log_file.display()), e))?;
+        if read_n == 0 {
+            break;
+        }
+        line_no += 1;
         let s = line.trim_end().to_string();
         line.clear();
         if s.trim().is_empty() {
@@ -221,7 +257,15 @@ pub fn load_runs_appended(log_file: &Path, offset: u64) -> Result<Vec<RunEntry>,
                 invalid += 1;
                 if sample.is_none() {
                     let preview: String = s.chars().take(160).collect();
-                    sample = Some(format!("{} (preview='{}')", e, preview));
+                    sample = Some(
+                        CxError::JsonLineParse {
+                            file: log_file.to_path_buf(),
+                            line: line_no,
+                            content_preview: preview,
+                            source: e,
+                        }
+                        .to_string(),
+                    );
                 }
             }
         }
@@ -246,9 +290,9 @@ pub struct MigrateSummary {
     pub modern_normalized: usize,
 }
 
-fn normalize_run_log_row(v: &Value) -> Result<(String, bool), String> {
+fn normalize_run_log_row_cx(v: &Value) -> CxResult<(String, bool)> {
     let Some(obj) = v.as_object() else {
-        return Err("row is not an object".to_string());
+        return Err(CxError::invalid("run log row is not an object"));
     };
     let mut has_modern = false;
     let ts = obj
@@ -346,25 +390,41 @@ fn normalize_run_log_row(v: &Value) -> Result<(String, bool), String> {
         policy_reason: obj.get("policy_reason").and_then(Value::as_str).map(|s| s.to_string()),
     };
 
-    let line = serde_json::to_string(&row).map_err(|e| format!("failed to serialize normalized row: {e}"))?;
+    let line = serde_json::to_string(&row).map_err(|e| CxError::json("serialize normalized row", e))?;
     Ok((line, has_modern))
 }
 
 pub fn migrate_runs_jsonl(in_path: &Path, out_path: &Path) -> Result<MigrateSummary, String> {
-    let file = File::open(in_path).map_err(|e| format!("cannot open {}: {e}", in_path.display()))?;
+    migrate_runs_jsonl_cx(in_path, out_path).map_err(|e| e.to_string())
+}
+
+fn migrate_runs_jsonl_cx(in_path: &Path, out_path: &Path) -> CxResult<MigrateSummary> {
+    let file = File::open(in_path).map_err(|e| CxError::io(format!("cannot open {}", in_path.display()), e))?;
     let reader = BufReader::new(file);
-    ensure_parent_dir(out_path)?;
+    ensure_parent_dir(out_path).map_err(CxError::invalid)?;
+    let tmp = out_path.with_extension("jsonl.tmp");
     let mut out_f = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(out_path)
-        .map_err(|e| format!("cannot open {}: {e}", out_path.display()))?;
+        .open(&tmp)
+        .map_err(|e| CxError::io(format!("cannot open {}", tmp.display()), e))?;
 
     let mut summary = MigrateSummary::default();
-    for line_res in reader.lines() {
-        let Ok(line) = line_res else { continue };
-        if line.trim().is_empty() { continue; }
+    for (idx, line_res) in reader.lines().enumerate() {
+        let line_no = idx + 1;
+        let line = match line_res {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(CxError::io(
+                    format!("read error at line {line_no} in {}", in_path.display()),
+                    e,
+                ));
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
         summary.entries_in += 1;
         let parsed: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
@@ -373,7 +433,7 @@ pub fn migrate_runs_jsonl(in_path: &Path, out_path: &Path) -> Result<MigrateSumm
                 continue;
             }
         };
-        let (normalized, is_modern) = normalize_run_log_row(&parsed)?;
+        let (normalized, is_modern) = normalize_run_log_row_cx(&parsed)?;
         if is_modern {
             summary.modern_normalized += 1;
         } else {
@@ -382,9 +442,19 @@ pub fn migrate_runs_jsonl(in_path: &Path, out_path: &Path) -> Result<MigrateSumm
         out_f
             .write_all(normalized.as_bytes())
             .and_then(|_| out_f.write_all(b"\n"))
-            .map_err(|e| format!("failed to write {}: {e}", out_path.display()))?;
+            .map_err(|e| CxError::io(format!("failed to write {}", tmp.display()), e))?;
         summary.entries_out += 1;
     }
+    out_f
+        .flush()
+        .map_err(|e| CxError::io(format!("flush failed for {}", tmp.display()), e))?;
+    drop(out_f);
+    fs::rename(&tmp, out_path).map_err(|e| {
+        CxError::io(
+            format!("failed to move {} -> {}", tmp.display(), out_path.display()),
+            e,
+        )
+    })?;
     Ok(summary)
 }
 
