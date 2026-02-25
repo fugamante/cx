@@ -1,5 +1,6 @@
 mod app;
 mod error;
+mod logs;
 mod paths;
 mod state;
 mod types;
