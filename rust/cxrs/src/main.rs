@@ -4,6 +4,7 @@ mod logs;
 mod paths;
 mod state;
 mod types;
+mod util;
 
 fn main() {
     std::process::exit(app::run());
