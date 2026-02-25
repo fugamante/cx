@@ -1,6 +1,6 @@
 # cxcodex
 
-`cx` is a deterministic, Rust-first runtime for LLM-assisted software execution in local repositories.
+`cx` is a deterministic, Rust-first LLM dev runtime for local repositories.
 
 - Canonical execution engine: `rust/cxrs`
 - Single authoritative entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
