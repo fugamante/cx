@@ -253,7 +253,8 @@ fn print_help() {
     println!("  diag               Non-interactive diagnostic report");
     println!("  parity             Run Rust/Bash parity invariants");
     println!("  schema list [--json]  List registered schemas");
-    println!("  logs validate [--fix=false]  Validate execution log JSONL contract");
+    println!("  logs validate [--fix=false] [--legacy-ok]  Validate execution log JSONL contract");
+    println!("  logs migrate [--out PATH] [--in-place]  Normalize legacy run logs to current contract");
     println!("  core               Show execution-core pipeline config");
     println!(
         "  task <op> [...]    Task graph management (add/list/claim/complete/fail/show/fanout)"
@@ -276,8 +277,10 @@ fn print_help() {
     println!("  log-tail [N]       Pretty-print last N log entries");
     println!("  health             Run end-to-end selected-LLM/cx smoke checks");
     println!("  rtk-status         Show RTK version/range decision and fallback mode");
+    println!("  log-on             Enable cx logging (process-local)");
     println!("  log-off            Disable cx logging in this process");
     println!("  alert-show         Show active alert thresholds/toggles");
+    println!("  alert-on           Enable alerts (process-local)");
     println!("  alert-off          Disable alerts in this process");
     println!("  chunk              Chunk stdin text by context budget chars");
     println!("  metrics [N]        Token and duration aggregates from last N runs");
@@ -2468,8 +2471,10 @@ fn rust_route_names() -> Vec<String> {
         "log-tail",
         "health",
         "rtk-status",
+        "log-on",
         "log-off",
         "alert-show",
+        "alert-on",
         "alert-off",
         "chunk",
         "cx-compat",
@@ -2517,8 +2522,10 @@ fn rust_route_names() -> Vec<String> {
         "cxlog_tail",
         "cxhealth",
         "cxrtk",
+        "cxlog_on",
         "cxlog_off",
         "cxalert_show",
+        "cxalert_on",
         "cxalert_off",
         "cxchunk",
         "cxfix_run",
@@ -2630,11 +2637,19 @@ fn cmd_schema(args: &[String]) -> i32 {
 fn cmd_logs(args: &[String]) -> i32 {
     match args.first().map(String::as_str).unwrap_or("validate") {
         "validate" => {
+            let mut legacy_ok = false;
+            let mut warn_only = false;
             for a in &args[1..] {
                 if a == "--fix=false" || a == "--fix=true" {
                     continue;
                 }
-                eprintln!("Usage: {APP_NAME} logs validate [--fix=false]");
+                if a == "--legacy-ok" {
+                    legacy_ok = true;
+                    // When accepting legacy rows, do not hard-fail on missing modern fields.
+                    warn_only = true;
+                    continue;
+                }
+                eprintln!("Usage: {APP_NAME} logs validate [--fix=false] [--legacy-ok]");
                 return 2;
             }
             let Some(log_file) = resolve_log_file() else {
@@ -2656,7 +2671,7 @@ fn cmd_logs(args: &[String]) -> i32 {
                 }
             };
             let reader = BufReader::new(file);
-            let required = [
+            let required_strict = [
                 "execution_id",
                 "timestamp",
                 "command",
@@ -2681,9 +2696,17 @@ fn cmd_logs(args: &[String]) -> i32 {
                 "policy_blocked",
                 "policy_reason",
             ];
+            // Minimal legacy key set (older bash-era rows) accepted when --legacy-ok is set.
+            let required_legacy_any_of = [
+                ("ts", "timestamp"),
+                ("tool", "command"),
+                ("repo_root", "repo_root"),
+            ];
             let mut total = 0usize;
             let mut corrupted_lines: BTreeSet<usize> = BTreeSet::new();
             let mut issues: Vec<String> = Vec::new();
+            let mut legacy_lines = 0usize;
+            let mut invalid_json_lines = 0usize;
             for (idx, line_res) in reader.lines().enumerate() {
                 let line_no = idx + 1;
                 let line = match line_res {
@@ -2702,6 +2725,7 @@ fn cmd_logs(args: &[String]) -> i32 {
                     Ok(v) => v,
                     Err(e) => {
                         corrupted_lines.insert(line_no);
+                        invalid_json_lines += 1;
                         issues.push(format!("line {line_no}: invalid json: {e}"));
                         continue;
                     }
@@ -2711,18 +2735,54 @@ fn cmd_logs(args: &[String]) -> i32 {
                     issues.push(format!("line {line_no}: json is not an object"));
                     continue;
                 };
-                for k in required {
-                    if !obj.contains_key(k) {
-                        corrupted_lines.insert(line_no);
-                        issues.push(format!("line {line_no}: missing required field '{k}'"));
+                if legacy_ok {
+                    // If this looks like a modern row, enforce strict required keys.
+                    // Otherwise accept legacy rows if they contain minimal legacy identifiers.
+                    // Treat as "modern" only if it has both core modern identifiers.
+                    let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
+                    if is_modern {
+                        for k in required_strict {
+                            if !obj.contains_key(k) {
+                                corrupted_lines.insert(line_no);
+                                issues.push(format!("line {line_no}: missing required field '{k}'"));
+                            }
+                        }
+                    } else {
+                        let mut ok = true;
+                        for (legacy_k, modern_k) in required_legacy_any_of {
+                            if !(obj.contains_key(legacy_k) || obj.contains_key(modern_k)) {
+                                ok = false;
+                                corrupted_lines.insert(line_no);
+                                issues.push(format!(
+                                    "line {line_no}: missing legacy field '{legacy_k}' (or '{modern_k}')"
+                                ));
+                            }
+                        }
+                        if ok {
+                            legacy_lines += 1;
+                        }
+                    }
+                } else {
+                    for k in required_strict {
+                        if !obj.contains_key(k) {
+                            corrupted_lines.insert(line_no);
+                            issues.push(format!("line {line_no}: missing required field '{k}'"));
+                        }
                     }
                 }
             }
             println!("== cxrs logs validate ==");
             println!("log_file: {}", log_file.display());
             println!("entries_scanned: {total}");
+            if legacy_ok {
+                println!("legacy_ok: true");
+                println!("legacy_entries: {legacy_lines}");
+            } else {
+                println!("legacy_ok: false");
+            }
             println!("corrupted_entries: {}", corrupted_lines.len());
             println!("issue_count: {}", issues.len());
+            println!("invalid_json_entries: {invalid_json_lines}");
             if !issues.is_empty() {
                 for issue in issues.iter().take(20) {
                     println!("- {issue}");
@@ -2730,15 +2790,321 @@ fn cmd_logs(args: &[String]) -> i32 {
                 if issues.len() > 20 {
                     println!("- ... and {} more", issues.len() - 20);
                 }
+                // In legacy-ok mode we keep this non-blocking unless JSON is corrupt.
+                if warn_only && invalid_json_lines == 0 {
+                    println!("status: ok_with_warnings");
+                    return 0;
+                }
                 return 1;
             }
             println!("status: ok");
             0
         }
+        "migrate" => {
+            let mut out_path: Option<PathBuf> = None;
+            let mut in_place = false;
+            let mut i = 1usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--out" => {
+                        i += 1;
+                        if i >= args.len() {
+                            eprintln!("Usage: {APP_NAME} logs migrate [--out PATH] [--in-place]");
+                            return 2;
+                        }
+                        out_path = Some(PathBuf::from(&args[i]));
+                    }
+                    "--in-place" => {
+                        in_place = true;
+                    }
+                    other => {
+                        eprintln!("cxrs logs migrate: unknown flag '{other}'");
+                        eprintln!("Usage: {APP_NAME} logs migrate [--out PATH] [--in-place]");
+                        return 2;
+                    }
+                }
+                i += 1;
+            }
+
+            let Some(log_file) = resolve_log_file() else {
+                eprintln!("cxrs logs migrate: unable to resolve log file");
+                return 1;
+            };
+            if !log_file.exists() {
+                eprintln!("cxrs logs migrate: no log file at {}", log_file.display());
+                return 1;
+            }
+
+            let default_out = log_file
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("runs.migrated.jsonl");
+            let target = out_path.unwrap_or(default_out);
+
+            match migrate_runs_jsonl(&log_file, &target) {
+                Ok(summary) => {
+                    println!("== cxrs logs migrate ==");
+                    println!("in: {}", log_file.display());
+                    println!("out: {}", target.display());
+                    println!("entries_in: {}", summary.entries_in);
+                    println!("entries_out: {}", summary.entries_out);
+                    println!("invalid_json_skipped: {}", summary.invalid_json_skipped);
+                    println!("legacy_normalized: {}", summary.legacy_normalized);
+                    println!("modern_normalized: {}", summary.modern_normalized);
+
+                    if in_place {
+                        // Always back up the original before replacing.
+                        let bak = log_file.with_extension(format!(
+                            "jsonl.bak.{}",
+                            Utc::now().format("%Y%m%dT%H%M%SZ")
+                        ));
+                        if let Err(e) = fs::copy(&log_file, &bak) {
+                            eprintln!(
+                                "cxrs logs migrate: failed to backup {} -> {}: {e}",
+                                log_file.display(),
+                                bak.display()
+                            );
+                            return 1;
+                        }
+                        if let Err(e) = fs::rename(&target, &log_file) {
+                            eprintln!(
+                                "cxrs logs migrate: failed to replace {} with {}: {e}",
+                                log_file.display(),
+                                target.display()
+                            );
+                            eprintln!("backup: {}", bak.display());
+                            return 1;
+                        }
+                        println!("backup: {}", bak.display());
+                        println!("status: replaced");
+                    } else {
+                        println!("status: wrote");
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("cxrs logs migrate: {e}");
+                    1
+                }
+            }
+        }
         other => {
-            eprintln!("Usage: {APP_NAME} logs validate (unknown subcommand: {other})");
+            eprintln!("Usage: {APP_NAME} logs <validate|migrate> (unknown subcommand: {other})");
             2
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct MigrateSummary {
+    entries_in: usize,
+    entries_out: usize,
+    invalid_json_skipped: usize,
+    legacy_normalized: usize,
+    modern_normalized: usize,
+}
+
+fn migrate_runs_jsonl(in_path: &Path, out_path: &Path) -> Result<MigrateSummary, String> {
+    let file = File::open(in_path)
+        .map_err(|e| format!("cannot open {}: {e}", in_path.display()))?;
+    let reader = BufReader::new(file);
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+
+    let tmp = out_path.with_extension("jsonl.tmp");
+    let mut out = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&tmp)
+        .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+
+    let mut summary = MigrateSummary::default();
+    for line_res in reader.lines() {
+        let line = line_res.map_err(|e| format!("read error: {e}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        summary.entries_in += 1;
+        let parsed: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => {
+                summary.invalid_json_skipped += 1;
+                continue;
+            }
+        };
+        let (normalized, is_modern) = normalize_run_log_row(&parsed)?;
+        if is_modern {
+            summary.modern_normalized += 1;
+        } else {
+            summary.legacy_normalized += 1;
+        }
+        out.write_all(normalized.as_bytes())
+            .map_err(|e| format!("write failed: {e}"))?;
+        out.write_all(b"\n")
+            .map_err(|e| format!("write failed: {e}"))?;
+        summary.entries_out += 1;
+    }
+    out.flush().map_err(|e| format!("flush failed: {e}"))?;
+    drop(out);
+    fs::rename(&tmp, out_path)
+        .map_err(|e| format!("failed to move {} -> {}: {e}", tmp.display(), out_path.display()))?;
+
+    Ok(summary)
+}
+
+fn normalize_run_log_row(v: &Value) -> Result<(String, bool), String> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| "run log row is not an object".to_string())?;
+
+    let has_modern = obj.contains_key("execution_id") || obj.contains_key("timestamp");
+    let ts = obj
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("ts").and_then(Value::as_str))
+        .unwrap_or("1970-01-01T00:00:00Z")
+        .to_string();
+
+    let command = obj
+        .get("command")
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("tool").and_then(Value::as_str))
+        .unwrap_or("unknown")
+        .to_string();
+
+    let repo_root_val = obj.get("repo_root").and_then(Value::as_str).unwrap_or("");
+    let cwd_val = obj.get("cwd").and_then(Value::as_str).unwrap_or("");
+    let scope_val = obj.get("scope").and_then(Value::as_str).unwrap_or("repo");
+
+    let backend_used = obj
+        .get("backend_used")
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("llm_backend").and_then(Value::as_str))
+        .unwrap_or("unknown")
+        .to_string();
+
+    let capture_provider = obj
+        .get("capture_provider")
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("capture_provider").and_then(Value::as_str))
+        .map(|s| s.to_string());
+
+    let execution_mode = obj
+        .get("execution_mode")
+        .and_then(Value::as_str)
+        .unwrap_or(if has_modern { "lean" } else { "legacy" })
+        .to_string();
+
+    // Build a full ExecutionLog row; Option fields will serialize as null if missing.
+    let row = ExecutionLog {
+        execution_id: obj
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| {
+                // Stable-ish ID for legacy rows: hash of command+ts+cwd.
+                // Not cryptographically meaningful; just needs uniqueness.
+                // (We can't rely on prompts existing in legacy logs.)
+                ""
+            })
+            .to_string()
+            .if_empty_else(|| format!("legacy_{}", sha256_hex(&format!("{command}|{ts}|{cwd_val}")))),
+        timestamp: ts.clone(),
+        ts,
+        command: command.clone(),
+        tool: command,
+        cwd: cwd_val.to_string(),
+        scope: scope_val.to_string(),
+        repo_root: repo_root_val.to_string(),
+        backend_used: backend_used.clone(),
+        llm_backend: backend_used,
+        llm_model: obj
+            .get("llm_model")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        capture_provider,
+        execution_mode,
+        duration_ms: obj.get("duration_ms").and_then(Value::as_u64),
+        schema_enforced: obj
+            .get("schema_enforced")
+            .and_then(Value::as_bool)
+            .or_else(|| obj.get("schema_ok").and_then(Value::as_bool).map(|_| false))
+            .unwrap_or(false),
+        schema_name: obj
+            .get("schema_name")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        schema_valid: obj
+            .get("schema_valid")
+            .and_then(Value::as_bool)
+            .or_else(|| obj.get("schema_ok").and_then(Value::as_bool))
+            .unwrap_or(true),
+        schema_ok: obj
+            .get("schema_ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        schema_reason: obj
+            .get("schema_reason")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        quarantine_id: obj
+            .get("quarantine_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        task_id: obj
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        task_parent_id: obj
+            .get("task_parent_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        input_tokens: obj.get("input_tokens").and_then(Value::as_u64),
+        cached_input_tokens: obj.get("cached_input_tokens").and_then(Value::as_u64),
+        effective_input_tokens: obj.get("effective_input_tokens").and_then(Value::as_u64),
+        output_tokens: obj.get("output_tokens").and_then(Value::as_u64),
+        system_output_len_raw: obj.get("system_output_len_raw").and_then(Value::as_u64),
+        system_output_len_processed: obj.get("system_output_len_processed").and_then(Value::as_u64),
+        system_output_len_clipped: obj.get("system_output_len_clipped").and_then(Value::as_u64),
+        system_output_lines_raw: obj.get("system_output_lines_raw").and_then(Value::as_u64),
+        system_output_lines_processed: obj.get("system_output_lines_processed").and_then(Value::as_u64),
+        system_output_lines_clipped: obj.get("system_output_lines_clipped").and_then(Value::as_u64),
+        clipped: obj.get("clipped").and_then(Value::as_bool),
+        budget_chars: obj.get("budget_chars").and_then(Value::as_u64),
+        budget_lines: obj.get("budget_lines").and_then(Value::as_u64),
+        clip_mode: obj.get("clip_mode").and_then(Value::as_str).map(|s| s.to_string()),
+        clip_footer: obj.get("clip_footer").and_then(Value::as_bool),
+        rtk_used: obj.get("rtk_used").and_then(Value::as_bool),
+        prompt_sha256: obj
+            .get("prompt_sha256")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        prompt_preview: obj
+            .get("prompt_preview")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        policy_blocked: obj.get("policy_blocked").and_then(Value::as_bool),
+        policy_reason: obj
+            .get("policy_reason")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+    };
+
+    let line =
+        serde_json::to_string(&row).map_err(|e| format!("failed to serialize normalized row: {e}"))?;
+    Ok((line, has_modern))
+}
+
+trait IfEmpty {
+    fn if_empty_else(self, f: impl FnOnce() -> String) -> String;
+}
+
+impl IfEmpty for String {
+    fn if_empty_else(self, f: impl FnOnce() -> String) -> String {
+        if self.is_empty() { f() } else { self }
     }
 }
 
@@ -5707,6 +6073,11 @@ fn cmd_log_off() -> i32 {
     0
 }
 
+fn cmd_log_on() -> i32 {
+    println!("cx logging: ON (process-local)");
+    0
+}
+
 fn cmd_alert_show() -> i32 {
     let enabled = env::var("CXALERT_ENABLED").unwrap_or_else(|_| "1".to_string());
     let max_ms = env::var("CXALERT_MAX_MS").unwrap_or_else(|_| "8000".to_string());
@@ -5722,6 +6093,11 @@ fn cmd_alert_show() -> i32 {
 
 fn cmd_alert_off() -> i32 {
     println!("cx alerts: OFF (process-local)");
+    0
+}
+
+fn cmd_alert_on() -> i32 {
+    println!("cx alerts: ON (process-local)");
     0
 }
 
@@ -6644,8 +7020,10 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
         }
         "cxhealth" | "health" => cmd_health(),
         "cxrtk" | "rtk-status" => cmd_rtk_status(),
+        "cxlog_on" | "log-on" => cmd_log_on(),
         "cxlog_off" | "log-off" => cmd_log_off(),
         "cxalert_show" | "alert-show" => cmd_alert_show(),
+        "cxalert_on" | "alert-on" => cmd_alert_on(),
         "cxalert_off" | "alert-off" => cmd_alert_off(),
         "cxchunk" | "chunk" => cmd_chunk(),
         "cxfix_run" | "fix-run" => {
@@ -6765,10 +7143,14 @@ fn is_compat_name(name: &str) -> bool {
             | "health"
             | "cxrtk"
             | "rtk-status"
+            | "cxlog_on"
+            | "log-on"
             | "cxlog_off"
             | "log-off"
             | "cxalert_show"
             | "alert-show"
+            | "cxalert_on"
+            | "alert-on"
             | "cxalert_off"
             | "alert-off"
             | "cxchunk"
@@ -6819,8 +7201,10 @@ fn is_native_name(name: &str) -> bool {
             | "log-tail"
             | "health"
             | "rtk-status"
+            | "log-on"
             | "log-off"
             | "alert-show"
+            | "alert-on"
             | "alert-off"
             | "chunk"
             | "cx-compat"
@@ -7022,8 +7406,10 @@ fn main() {
         }
         "health" => cmd_health(),
         "rtk-status" => cmd_rtk_status(),
+        "log-on" => cmd_log_on(),
         "log-off" => cmd_log_off(),
         "alert-show" => cmd_alert_show(),
+        "alert-on" => cmd_alert_on(),
         "alert-off" => cmd_alert_off(),
         "chunk" => cmd_chunk(),
         "cx-compat" => cmd_cx_compat(&args[2..]),

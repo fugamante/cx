@@ -3,3 +3,4 @@
 !.codex/schemas/*.json
 *.swp
 .DS_Store
+docs/CX_MANUAL*
