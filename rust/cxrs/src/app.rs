@@ -7,13 +7,12 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use crate::types::{
-    CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, LoadedSchema, QuarantineAttempt,
-    QuarantineRecord, RunEntry, TaskInput, TaskRecord, TaskSpec, UsageStats, SCHEMA_COMPILED_CACHE,
+    CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, QuarantineAttempt, QuarantineRecord,
+    RunEntry, TaskInput, TaskRecord, TaskSpec, UsageStats,
 };
 use crate::paths::{
     repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
@@ -21,6 +20,9 @@ use crate::paths::{
 };
 use crate::logs::{
     append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file,
+};
+use crate::schema::{
+    build_strict_schema_prompt, list_schemas, load_schema, schema_name_for_tool, validate_schema_instance,
 };
 use crate::state::{ensure_state_value, read_state_value, state_cache_clear, write_json_atomic};
 use crate::util::sha256_hex;
@@ -126,89 +128,7 @@ fn print_task_help() {
 }
 
 // path resolution moved to `paths.rs`
-
-fn normalize_schema_name(name: &str) -> String {
-    if name.ends_with(".schema.json") {
-        name.to_string()
-    } else {
-        format!("{name}.schema.json")
-    }
-}
-
-fn load_schema(schema_name: &str) -> Result<LoadedSchema, String> {
-    let dir = resolve_schema_dir().ok_or_else(|| "unable to resolve schema dir".to_string())?;
-    let name = normalize_schema_name(schema_name);
-    let path = dir.join(&name);
-    let raw =
-        fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
-    let id = value
-        .get("$id")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    Ok(LoadedSchema {
-        name,
-        path,
-        value,
-        id,
-    })
-}
-
-fn list_schemas() -> Result<Vec<LoadedSchema>, String> {
-    let dir = resolve_schema_dir().ok_or_else(|| "unable to resolve schema dir".to_string())?;
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut out: Vec<LoadedSchema> = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| format!("failed to list {}: {e}", dir.display()))? {
-        let entry = entry.map_err(|e| format!("failed reading schema dir entry: {e}"))?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(fname) = path.file_name().and_then(|v| v.to_str()) else {
-            continue;
-        };
-        if !fname.ends_with(".schema.json") {
-            continue;
-        }
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        let value: Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
-        let id = value
-            .get("$id")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        out.push(LoadedSchema {
-            name: fname.to_string(),
-            path,
-            value,
-            id,
-        });
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
-}
-
-fn schema_name_for_tool(tool: &str) -> Option<&'static str> {
-    match tool {
-        "cxrs_commitjson" | "cxcommitjson" | "commitjson" | "cxrs_commitmsg" | "cxcommitmsg"
-        | "commitmsg" => Some("commitjson"),
-        "cxrs_diffsum"
-        | "cxdiffsum"
-        | "diffsum"
-        | "cxrs_diffsum_staged"
-        | "cxdiffsum_staged"
-        | "diffsum-staged" => Some("diffsum"),
-        "cxrs_next" | "cxnext" | "next" => Some("next"),
-        "cxrs_fix_run" | "cxfix_run" | "fix-run" => Some("fixrun"),
-        _ => None,
-    }
-}
-
+// schema helpers moved to `schema.rs`
 // ensure_parent_dir moved to `paths.rs`
 
 fn validate_execution_log_row(row: &ExecutionLog) -> Result<(), String> {
@@ -3629,17 +3549,6 @@ fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
         .map_err(|e| format!("failed to serialize ollama JSONL wrapper: {e}"))
 }
 
-fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
-    if env::var("CX_SCHEMA_RELAXED").ok().as_deref() == Some("1") {
-        return format!(
-            "You are a structured output generator.\nReturn JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
-        );
-    }
-    format!(
-        "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema-strict mode: deterministic JSON only; reject ambiguity.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
-    )
-}
-
 #[derive(Debug, Clone)]
 struct BudgetConfig {
     budget_chars: usize,
@@ -4313,38 +4222,6 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
     }
 
     if failures > 0 { 1 } else { 0 }
-}
-
-fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Value, String> {
-    let instance: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
-    let compiled = {
-        let mut lock = SCHEMA_COMPILED_CACHE
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .map_err(|_| "schema cache poisoned".to_string())?;
-        if let Some(existing) = lock.get(&schema.name) {
-            existing.clone()
-        } else {
-            let compiled = JSONSchema::compile(&schema.value)
-                .map_err(|e| format!("failed to compile schema {}: {e}", schema.path.display()))?;
-            let compiled = Arc::new(compiled);
-            lock.insert(schema.name.clone(), compiled.clone());
-            compiled
-        }
-    };
-    if let Err(errors) = compiled.validate(&instance) {
-        let mut reasons: Vec<String> = Vec::new();
-        for err in errors.take(3) {
-            reasons.push(err.to_string());
-        }
-        let reason = if reasons.is_empty() {
-            "schema_validation_failed".to_string()
-        } else {
-            format!("schema_validation_failed: {}", reasons.join(" | "))
-        };
-        return Err(reason);
-    }
-    Ok(instance)
 }
 
 fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
