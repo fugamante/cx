@@ -10,6 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
@@ -17,6 +18,8 @@ const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 static RTK_WARNED_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
+static STATE_CACHE: OnceLock<Mutex<Option<Value>>> = OnceLock::new();
+static SCHEMA_COMPILED_CACHE: OnceLock<Mutex<HashMap<String, Arc<JSONSchema>>>> = OnceLock::new();
 
 #[derive(Debug, Deserialize, Default, Clone)]
 #[allow(dead_code)]
@@ -101,6 +104,24 @@ struct QuarantineRecord {
     reason: String,
     #[serde(default)]
     schema: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    prompt_sha256: String,
+    #[serde(default)]
+    raw_response: String,
+    #[serde(default)]
+    raw_sha256: String,
+    // Optional multi-attempt capture (schema retry). When present, `raw_response` reflects the
+    // final attempt, and `attempts` preserves all attempts in order.
+    #[serde(default)]
+    attempts: Vec<QuarantineAttempt>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+struct QuarantineAttempt {
+    #[serde(default)]
+    reason: String,
     #[serde(default)]
     prompt: String,
     #[serde(default)]
@@ -240,6 +261,19 @@ struct TaskRecord {
     updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+enum TaskRunError {
+    Critical(String),
+}
+
+impl std::fmt::Display for TaskRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskRunError::Critical(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
     println!();
@@ -255,6 +289,7 @@ fn print_help() {
     println!("  schema list [--json]  List registered schemas");
     println!("  logs validate [--fix=false] [--legacy-ok]  Validate execution log JSONL contract");
     println!("  logs migrate [--out PATH] [--in-place]  Normalize legacy run logs to current contract");
+    println!("  ci validate [--strict] [--legacy-ok] [--json]  CI-friendly validation gate (no network)");
     println!("  core               Show execution-core pipeline config");
     println!(
         "  task <op> [...]    Task graph management (add/list/claim/complete/fail/show/fanout)"
@@ -322,6 +357,17 @@ fn print_task_help() {
 }
 
 fn repo_root() -> Option<PathBuf> {
+    static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    if env::var("CX_NO_CACHE").ok().as_deref() == Some("1") {
+        return repo_root_uncached();
+    }
+    CACHED
+        .get_or_init(|| repo_root_uncached())
+        .as_ref()
+        .cloned()
+}
+
+fn repo_root_uncached() -> Option<PathBuf> {
     let out = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
@@ -496,6 +542,38 @@ fn append_jsonl(path: &Path, value: &Value) -> Result<(), String> {
         return Err(format!("failed writing {}: {e}", path.display()));
     }
     unlock_res.map_err(|e| format!("failed unlocking {}: {e}", path.display()))
+}
+
+fn validate_execution_log_row(row: &ExecutionLog) -> Result<(), String> {
+    if row.execution_id.trim().is_empty() {
+        return Err("execution log missing execution_id".to_string());
+    }
+    if row.timestamp.trim().is_empty() {
+        return Err("execution log missing timestamp".to_string());
+    }
+    if row.command.trim().is_empty() {
+        return Err("execution log missing command".to_string());
+    }
+    if row.backend_used.trim().is_empty() {
+        return Err("execution log missing backend_used".to_string());
+    }
+    if row.execution_mode.trim().is_empty() {
+        return Err("execution log missing execution_mode".to_string());
+    }
+    if row.schema_enforced && !row.schema_ok {
+        if row.schema_reason.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+            return Err("schema failure missing schema_reason".to_string());
+        }
+        if row
+            .quarantine_id
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err("schema failure missing quarantine_id".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn prompt_preview(s: &str, max: usize) -> String {
@@ -838,6 +916,7 @@ fn log_codex_run(
         policy_blocked,
         policy_reason: policy_reason.map(|s| s.to_string()),
     };
+    validate_execution_log_row(&row)?;
     let value = serde_json::to_value(row).map_err(|e| format!("failed serialize run log: {e}"))?;
     append_jsonl(&run_log, &value)
 }
@@ -872,12 +951,13 @@ fn make_quarantine_id(tool: &str) -> String {
     )
 }
 
-fn quarantine_store(
+fn quarantine_store_with_attempts(
     tool: &str,
     reason: &str,
     raw: &str,
     schema: &str,
     prompt: &str,
+    attempts: Vec<QuarantineAttempt>,
 ) -> Result<String, String> {
     let Some(qdir) = resolve_quarantine_dir() else {
         return Err("unable to resolve quarantine directory".to_string());
@@ -895,6 +975,7 @@ fn quarantine_store(
         prompt_sha256: sha256_hex(prompt),
         raw_response: raw.to_string(),
         raw_sha256: sha256_hex(raw),
+        attempts,
     };
     let file = qdir.join(format!("{id}.json"));
     let serialized = serde_json::to_string_pretty(&rec)
@@ -903,14 +984,26 @@ fn quarantine_store(
     Ok(id)
 }
 
-fn log_schema_failure(
+#[allow(dead_code)]
+fn quarantine_store(
     tool: &str,
     reason: &str,
     raw: &str,
     schema: &str,
     prompt: &str,
 ) -> Result<String, String> {
-    let qid = quarantine_store(tool, reason, raw, schema, prompt)?;
+    quarantine_store_with_attempts(tool, reason, raw, schema, prompt, Vec::new())
+}
+
+fn log_schema_failure(
+    tool: &str,
+    reason: &str,
+    raw: &str,
+    schema: &str,
+    prompt: &str,
+    attempts: Vec<QuarantineAttempt>,
+) -> Result<String, String> {
+    let qid = quarantine_store_with_attempts(tool, reason, raw, schema, prompt, attempts)?;
 
     let schema_fail_log = resolve_schema_fail_log_file()
         .ok_or_else(|| "unable to resolve schema_failures log file".to_string())?;
@@ -984,6 +1077,8 @@ fn log_schema_failure(
         policy_blocked: None,
         policy_reason: None,
     };
+    validate_execution_log_row(&run_failure)
+        .map_err(|e| format!("schema failure log invalid: {e}"))?;
     let failure_value =
         serde_json::to_value(run_failure).map_err(|e| format!("failed serialize run log: {e}"))?;
     append_jsonl(&run_log, &failure_value)?;
@@ -1025,13 +1120,36 @@ fn default_state_value() -> Value {
 }
 
 fn read_state_value() -> Option<Value> {
+    if env::var("CX_NO_CACHE").ok().as_deref() != Some("1") {
+        if let Some(v) = STATE_CACHE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+        {
+            return Some(v);
+        }
+    }
     let state_file = resolve_state_file()?;
     if !state_file.exists() {
         return None;
     }
     let mut s = String::new();
     File::open(state_file).ok()?.read_to_string(&mut s).ok()?;
-    serde_json::from_str::<Value>(&s).ok()
+    let parsed = serde_json::from_str::<Value>(&s).ok()?;
+    if env::var("CX_NO_CACHE").ok().as_deref() != Some("1") {
+        if let Ok(mut g) = STATE_CACHE.get_or_init(|| Mutex::new(None)).lock() {
+            *g = Some(parsed.clone());
+        }
+    }
+    Some(parsed)
+}
+
+fn state_cache_clear() {
+    // Best-effort: drop cached state if present.
+    if let Ok(mut g) = STATE_CACHE.get_or_init(|| Mutex::new(None)).lock() {
+        *g = None;
+    }
 }
 
 fn ensure_state_value() -> Result<(PathBuf, Value), String> {
@@ -1045,6 +1163,7 @@ fn ensure_state_value() -> Result<(PathBuf, Value), String> {
         serialized.push('\n');
         fs::write(&state_file, serialized)
             .map_err(|e| format!("failed to write {}: {e}", state_file.display()))?;
+        state_cache_clear();
         return Ok((state_file, initial));
     }
     let mut s = String::new();
@@ -1070,7 +1189,11 @@ fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
             tmp.display(),
             path.display()
         )
-    })
+    })?;
+    if path.file_name().and_then(|s| s.to_str()) == Some("state.json") {
+        state_cache_clear();
+    }
+    Ok(())
 }
 
 fn parse_cli_value(raw: &str) -> Value {
@@ -1462,18 +1585,18 @@ fn run_task_by_id(
     id: &str,
     mode_override: Option<&str>,
     backend_override: Option<&str>,
-) -> Result<(i32, Option<String>), String> {
-    let mut tasks = read_tasks()?;
+) -> Result<(i32, Option<String>), TaskRunError> {
+    let mut tasks = read_tasks().map_err(TaskRunError::Critical)?;
     let idx = tasks
         .iter()
         .position(|t| t.id == id)
-        .ok_or_else(|| format!("cxrs task run: task not found: {id}"))?;
+        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task not found: {id}")))?;
     if matches!(tasks[idx].status.as_str(), "complete" | "failed") {
         return Ok((0, None));
     }
     tasks[idx].status = "in_progress".to_string();
     tasks[idx].updated_at = utc_now_iso();
-    write_tasks(&tasks)?;
+    write_tasks(&tasks).map_err(TaskRunError::Critical)?;
     let prev_task_id = current_task_id();
     let prev_parent_id = current_task_parent_id();
     let _ = set_state_path("runtime.current_task_id", Value::String(id.to_string()));
@@ -1533,22 +1656,28 @@ fn run_task_by_id(
         },
     );
 
-    let (status_code, execution_id) = exec?;
+    let (status_code, execution_id, objective_err) = match exec {
+        Ok((c, eid)) => (c, eid, None),
+        Err(e) => (1, None, Some(e)),
+    };
 
-    let mut tasks = read_tasks()?;
+    let mut tasks = read_tasks().map_err(TaskRunError::Critical)?;
     let idx = tasks
         .iter()
         .position(|t| t.id == id)
-        .ok_or_else(|| format!("cxrs task run: task disappeared: {id}"))?;
+        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task disappeared: {id}")))?;
     tasks[idx].status = if status_code == 0 {
         "complete".to_string()
     } else {
         "failed".to_string()
     };
     tasks[idx].updated_at = utc_now_iso();
-    write_tasks(&tasks)?;
+    write_tasks(&tasks).map_err(TaskRunError::Critical)?;
     if current_task_id().as_deref() == Some(id) {
         let _ = set_state_path("runtime.current_task_id", Value::Null);
+    }
+    if let Some(e) = objective_err {
+        eprintln!("cxrs task run: objective failed for {id}: {e}");
     }
     Ok((status_code, execution_id))
 }
@@ -2002,6 +2131,7 @@ fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
         eprintln!("cxrs state set: {e}");
         return 1;
     }
+    state_cache_clear();
     println!("ok");
     0
 }
@@ -2448,6 +2578,7 @@ fn rust_route_names() -> Vec<String> {
         "where",
         "routes",
         "logs",
+        "ci",
         "task",
         "diag",
         "parity",
@@ -2634,19 +2765,125 @@ fn cmd_schema(args: &[String]) -> i32 {
     0
 }
 
+#[derive(Debug, Default, Clone)]
+struct LogValidateOutcome {
+    total: usize,
+    legacy_ok: bool,
+    legacy_lines: usize,
+    corrupted_lines: BTreeSet<usize>,
+    invalid_json_lines: usize,
+    issues: Vec<String>,
+}
+
+fn validate_runs_jsonl_file(log_file: &Path, legacy_ok: bool) -> Result<LogValidateOutcome, String> {
+    let file = File::open(log_file)
+        .map_err(|e| format!("cannot open {}: {e}", log_file.display()))?;
+    let reader = BufReader::new(file);
+    let required_strict = [
+        "execution_id",
+        "timestamp",
+        "command",
+        "backend_used",
+        "capture_provider",
+        "execution_mode",
+        "duration_ms",
+        "schema_enforced",
+        "schema_valid",
+        "quarantine_id",
+        "task_id",
+        "system_output_len_raw",
+        "system_output_len_processed",
+        "system_output_len_clipped",
+        "system_output_lines_raw",
+        "system_output_lines_processed",
+        "system_output_lines_clipped",
+        "input_tokens",
+        "cached_input_tokens",
+        "effective_input_tokens",
+        "output_tokens",
+        "policy_blocked",
+        "policy_reason",
+    ];
+    let required_legacy_any_of = [("ts", "timestamp"), ("tool", "command"), ("repo_root", "repo_root")];
+
+    let mut out = LogValidateOutcome {
+        legacy_ok,
+        ..Default::default()
+    };
+    for (idx, line_res) in reader.lines().enumerate() {
+        let line_no = idx + 1;
+        let line = match line_res {
+            Ok(v) => v,
+            Err(e) => {
+                out.corrupted_lines.insert(line_no);
+                out.issues.push(format!("line {line_no}: read error: {e}"));
+                continue;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        out.total += 1;
+        let parsed: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(e) => {
+                out.corrupted_lines.insert(line_no);
+                out.invalid_json_lines += 1;
+                out.issues.push(format!("line {line_no}: invalid json: {e}"));
+                continue;
+            }
+        };
+        let Some(obj) = parsed.as_object() else {
+            out.corrupted_lines.insert(line_no);
+            out.issues.push(format!("line {line_no}: json is not an object"));
+            continue;
+        };
+        if legacy_ok {
+            let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
+            if is_modern {
+                for k in required_strict {
+                    if !obj.contains_key(k) {
+                        out.corrupted_lines.insert(line_no);
+                        out.issues.push(format!("line {line_no}: missing required field '{k}'"));
+                    }
+                }
+            } else {
+                let mut ok = true;
+                for (legacy_k, modern_k) in required_legacy_any_of {
+                    if !(obj.contains_key(legacy_k) || obj.contains_key(modern_k)) {
+                        ok = false;
+                        out.corrupted_lines.insert(line_no);
+                        out.issues.push(format!(
+                            "line {line_no}: missing legacy field '{legacy_k}' (or '{modern_k}')"
+                        ));
+                    }
+                }
+                if ok {
+                    out.legacy_lines += 1;
+                }
+            }
+        } else {
+            for k in required_strict {
+                if !obj.contains_key(k) {
+                    out.corrupted_lines.insert(line_no);
+                    out.issues.push(format!("line {line_no}: missing required field '{k}'"));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn cmd_logs(args: &[String]) -> i32 {
     match args.first().map(String::as_str).unwrap_or("validate") {
         "validate" => {
             let mut legacy_ok = false;
-            let mut warn_only = false;
             for a in &args[1..] {
                 if a == "--fix=false" || a == "--fix=true" {
                     continue;
                 }
                 if a == "--legacy-ok" {
                     legacy_ok = true;
-                    // When accepting legacy rows, do not hard-fail on missing modern fields.
-                    warn_only = true;
                     continue;
                 }
                 eprintln!("Usage: {APP_NAME} logs validate [--fix=false] [--legacy-ok]");
@@ -2660,138 +2897,34 @@ fn cmd_logs(args: &[String]) -> i32 {
                 println!("cxrs logs validate: no log file at {}", log_file.display());
                 return 0;
             }
-            let file = match File::open(&log_file) {
-                Ok(f) => f,
+            let outcome = match validate_runs_jsonl_file(&log_file, legacy_ok) {
+                Ok(v) => v,
                 Err(e) => {
-                    eprintln!(
-                        "cxrs logs validate: cannot open {}: {e}",
-                        log_file.display()
-                    );
+                    eprintln!("cxrs logs validate: {e}");
                     return 1;
                 }
             };
-            let reader = BufReader::new(file);
-            let required_strict = [
-                "execution_id",
-                "timestamp",
-                "command",
-                "backend_used",
-                "capture_provider",
-                "execution_mode",
-                "duration_ms",
-                "schema_enforced",
-                "schema_valid",
-                "quarantine_id",
-                "task_id",
-                "system_output_len_raw",
-                "system_output_len_processed",
-                "system_output_len_clipped",
-                "system_output_lines_raw",
-                "system_output_lines_processed",
-                "system_output_lines_clipped",
-                "input_tokens",
-                "cached_input_tokens",
-                "effective_input_tokens",
-                "output_tokens",
-                "policy_blocked",
-                "policy_reason",
-            ];
-            // Minimal legacy key set (older bash-era rows) accepted when --legacy-ok is set.
-            let required_legacy_any_of = [
-                ("ts", "timestamp"),
-                ("tool", "command"),
-                ("repo_root", "repo_root"),
-            ];
-            let mut total = 0usize;
-            let mut corrupted_lines: BTreeSet<usize> = BTreeSet::new();
-            let mut issues: Vec<String> = Vec::new();
-            let mut legacy_lines = 0usize;
-            let mut invalid_json_lines = 0usize;
-            for (idx, line_res) in reader.lines().enumerate() {
-                let line_no = idx + 1;
-                let line = match line_res {
-                    Ok(v) => v,
-                    Err(e) => {
-                        corrupted_lines.insert(line_no);
-                        issues.push(format!("line {line_no}: read error: {e}"));
-                        continue;
-                    }
-                };
-                if line.trim().is_empty() {
-                    continue;
-                }
-                total += 1;
-                let parsed: Value = match serde_json::from_str(&line) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        corrupted_lines.insert(line_no);
-                        invalid_json_lines += 1;
-                        issues.push(format!("line {line_no}: invalid json: {e}"));
-                        continue;
-                    }
-                };
-                let Some(obj) = parsed.as_object() else {
-                    corrupted_lines.insert(line_no);
-                    issues.push(format!("line {line_no}: json is not an object"));
-                    continue;
-                };
-                if legacy_ok {
-                    // If this looks like a modern row, enforce strict required keys.
-                    // Otherwise accept legacy rows if they contain minimal legacy identifiers.
-                    // Treat as "modern" only if it has both core modern identifiers.
-                    let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
-                    if is_modern {
-                        for k in required_strict {
-                            if !obj.contains_key(k) {
-                                corrupted_lines.insert(line_no);
-                                issues.push(format!("line {line_no}: missing required field '{k}'"));
-                            }
-                        }
-                    } else {
-                        let mut ok = true;
-                        for (legacy_k, modern_k) in required_legacy_any_of {
-                            if !(obj.contains_key(legacy_k) || obj.contains_key(modern_k)) {
-                                ok = false;
-                                corrupted_lines.insert(line_no);
-                                issues.push(format!(
-                                    "line {line_no}: missing legacy field '{legacy_k}' (or '{modern_k}')"
-                                ));
-                            }
-                        }
-                        if ok {
-                            legacy_lines += 1;
-                        }
-                    }
-                } else {
-                    for k in required_strict {
-                        if !obj.contains_key(k) {
-                            corrupted_lines.insert(line_no);
-                            issues.push(format!("line {line_no}: missing required field '{k}'"));
-                        }
-                    }
-                }
-            }
             println!("== cxrs logs validate ==");
             println!("log_file: {}", log_file.display());
-            println!("entries_scanned: {total}");
-            if legacy_ok {
+            println!("entries_scanned: {}", outcome.total);
+            if outcome.legacy_ok {
                 println!("legacy_ok: true");
-                println!("legacy_entries: {legacy_lines}");
+                println!("legacy_entries: {}", outcome.legacy_lines);
             } else {
                 println!("legacy_ok: false");
             }
-            println!("corrupted_entries: {}", corrupted_lines.len());
-            println!("issue_count: {}", issues.len());
-            println!("invalid_json_entries: {invalid_json_lines}");
-            if !issues.is_empty() {
-                for issue in issues.iter().take(20) {
+            println!("corrupted_entries: {}", outcome.corrupted_lines.len());
+            println!("issue_count: {}", outcome.issues.len());
+            println!("invalid_json_entries: {}", outcome.invalid_json_lines);
+            if !outcome.issues.is_empty() {
+                for issue in outcome.issues.iter().take(20) {
                     println!("- {issue}");
                 }
-                if issues.len() > 20 {
-                    println!("- ... and {} more", issues.len() - 20);
+                if outcome.issues.len() > 20 {
+                    println!("- ... and {} more", outcome.issues.len() - 20);
                 }
                 // In legacy-ok mode we keep this non-blocking unless JSON is corrupt.
-                if warn_only && invalid_json_lines == 0 {
+                if outcome.legacy_ok && outcome.invalid_json_lines == 0 {
                     println!("status: ok_with_warnings");
                     return 0;
                 }
@@ -2893,6 +3026,155 @@ fn cmd_logs(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn cmd_ci(args: &[String]) -> i32 {
+    let sub = args.first().map(String::as_str).unwrap_or("validate");
+    if sub != "validate" {
+        eprintln!("Usage: {APP_NAME} ci validate [--strict] [--legacy-ok] [--json]");
+        return 2;
+    }
+    let strict = args.iter().any(|a| a == "--strict");
+    let legacy_ok = args.iter().any(|a| a == "--legacy-ok");
+    let json_out = args.iter().any(|a| a == "--json");
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    let Some(root) = repo_root() else {
+        eprintln!("cxrs ci validate: not inside a git repository");
+        return 2;
+    };
+    let schema_dir = root.join(".codex").join("schemas");
+    if !schema_dir.is_dir() {
+        errors.push(format!("missing schema registry dir: {}", schema_dir.display()));
+    } else {
+        let required = [
+            "commitjson.schema.json",
+            "diffsum.schema.json",
+            "next.schema.json",
+            "fixrun.schema.json",
+        ];
+        for name in required {
+            let p = schema_dir.join(name);
+            if !p.is_file() {
+                errors.push(format!("missing schema: {}", p.display()));
+            } else {
+                // Compile to ensure the schema is valid JSON Schema.
+                match fs::read_to_string(&p)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                {
+                    Some(v) => {
+                        if let Err(e) = JSONSchema::compile(&v) {
+                            errors.push(format!("schema failed to compile ({}): {e}", p.display()));
+                        }
+                    }
+                    None => errors.push(format!("schema unreadable/invalid json: {}", p.display())),
+                }
+            }
+        }
+    }
+
+    let log_file = resolve_log_file();
+    if log_file.is_none() {
+        errors.push("unable to resolve log file".to_string());
+    }
+    if let Some(log_file) = log_file {
+        if log_file.exists() {
+            match validate_runs_jsonl_file(&log_file, legacy_ok) {
+                Ok(outcome) => {
+                    if !outcome.issues.is_empty() {
+                        if outcome.legacy_ok && outcome.invalid_json_lines == 0 {
+                            warnings.extend(outcome.issues);
+                        } else {
+                            errors.extend(outcome.issues);
+                        }
+                    }
+                }
+                Err(e) => errors.push(e),
+            }
+        } else {
+            warnings.push(format!("no log file at {}", log_file.display()));
+        }
+    }
+
+    let budget = budget_config_from_env();
+    if budget.budget_chars == 0 {
+        errors.push("budget_chars must be > 0".to_string());
+    }
+    if budget.budget_lines == 0 {
+        errors.push("budget_lines must be > 0".to_string());
+    }
+    if !matches!(budget.clip_mode.as_str(), "smart" | "head" | "tail") {
+        warnings.push(format!(
+            "clip_mode '{}' not recognized; expected smart|head|tail",
+            budget.clip_mode
+        ));
+    }
+
+    if strict {
+        // Strict mode adds a cheap local integrity check over quarantine directory naming.
+        let qdir = root.join(".codex").join("quarantine");
+        if qdir.exists() && !qdir.is_dir() {
+            errors.push(format!("quarantine path exists but is not a dir: {}", qdir.display()));
+        }
+    }
+
+    let ok = errors.is_empty();
+    if json_out {
+        let v = json!({
+            "ok": ok,
+            "strict": strict,
+            "legacy_ok": legacy_ok,
+            "repo_root": root.display().to_string(),
+            "schema_dir": schema_dir.display().to_string(),
+            "log_file": resolve_log_file().map(|p| p.display().to_string()),
+            "budget_chars": budget.budget_chars,
+            "budget_lines": budget.budget_lines,
+            "clip_mode": budget.clip_mode,
+            "warnings": warnings,
+            "errors": errors
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()));
+        return if ok { 0 } else { 1 };
+    }
+
+    println!("== cxrs ci validate ==");
+    println!("repo_root: {}", root.display());
+    println!("schema_dir: {}", schema_dir.display());
+    if let Some(p) = resolve_log_file() {
+        println!("log_file: {}", p.display());
+    } else {
+        println!("log_file: <unresolved>");
+    }
+    println!("budget: chars={} lines={} mode={}", budget.budget_chars, budget.budget_lines, budget.clip_mode);
+
+    if !warnings.is_empty() {
+        println!("warnings: {}", warnings.len());
+        for w in warnings.iter().take(10) {
+            println!("- {w}");
+        }
+        if warnings.len() > 10 {
+            println!("- ... and {} more", warnings.len() - 10);
+        }
+    } else {
+        println!("warnings: 0");
+    }
+
+    if !errors.is_empty() {
+        println!("errors: {}", errors.len());
+        for e in errors.iter().take(20) {
+            println!("- {e}");
+        }
+        if errors.len() > 20 {
+            println!("- ... and {} more", errors.len() - 20);
+        }
+        println!("status: fail");
+        return 1;
+    }
+    println!("status: ok");
+    0
 }
 
 #[derive(Debug, Default)]
@@ -4659,40 +4941,96 @@ fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 .to_string();
             let schema_pretty = serde_json::to_string_pretty(&schema.value)
                 .unwrap_or_else(|_| schema.value.to_string());
-            let full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);
-            let jsonl = run_llm_jsonl(&full_prompt)?;
-            usage = usage_from_jsonl(&jsonl);
-            let raw = extract_agent_text(&jsonl).unwrap_or_default();
-            if raw.trim().is_empty() {
-                let qid = log_schema_failure(
-                    &spec.command_name,
-                    "empty_agent_message",
-                    &raw,
-                    &schema_pretty,
-                    &task_input,
-                )
-                .unwrap_or_else(|_| "".to_string());
-                schema_valid = Some(false);
-                quarantine_id = if qid.is_empty() { None } else { Some(qid) };
-                stdout = raw;
-            } else {
-                match validate_schema_instance(schema, &raw) {
-                    Ok(valid) => {
-                        schema_valid = Some(true);
-                        stdout = valid.to_string();
-                    }
-                    Err(reason) => {
+            let retry_allowed = env::var("CX_SCHEMA_RELAXED").ok().as_deref() != Some("1");
+            let mut attempts: Vec<QuarantineAttempt> = Vec::new();
+            let mut final_reason: Option<String> = None;
+            let mut last_full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);
+
+            let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), String> {
+                let jsonl = run_llm_jsonl(full_prompt)?;
+                let usage = usage_from_jsonl(&jsonl);
+                let raw = extract_agent_text(&jsonl).unwrap_or_default();
+                Ok((raw, usage))
+            };
+
+            let validate_raw = |raw: &str| -> Result<Value, String> {
+                if raw.trim().is_empty() {
+                    return Err("empty_agent_message".to_string());
+                }
+                validate_schema_instance(schema, raw)
+            };
+
+            // Attempt 1
+            let full_prompt1 = last_full_prompt.clone();
+            let (raw1, usage1) = run_attempt(&full_prompt1)?;
+            usage = usage1.clone();
+            match validate_raw(&raw1) {
+                Ok(valid) => {
+                    schema_valid = Some(true);
+                    stdout = valid.to_string();
+                }
+                Err(reason1) => {
+                    final_reason = Some(reason1.clone());
+                    attempts.push(QuarantineAttempt {
+                        reason: reason1.clone(),
+                        prompt: full_prompt1.clone(),
+                        prompt_sha256: sha256_hex(&full_prompt1),
+                        raw_response: raw1.clone(),
+                        raw_sha256: sha256_hex(&raw1),
+                    });
+
+                    // Attempt 2 (bounded retry) before quarantine
+                    if retry_allowed {
+                        let full_prompt2 = format!(
+                            "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\n\nPrevious attempt failed validation: {reason1}\n\nSchema:\n{schema_pretty}\n\nTask input:\n{task_input}\n"
+                        );
+                        last_full_prompt = full_prompt2.clone();
+                        let (raw2, usage2) = run_attempt(&full_prompt2)?;
+                        usage = usage2;
+                        match validate_raw(&raw2) {
+                            Ok(valid) => {
+                                schema_valid = Some(true);
+                                stdout = valid.to_string();
+                                final_reason = None;
+                                // No quarantine when retry succeeds.
+                            }
+                            Err(reason2) => {
+                                final_reason = Some(reason2.clone());
+                                attempts.push(QuarantineAttempt {
+                                    reason: reason2.clone(),
+                                    prompt: full_prompt2.clone(),
+                                    prompt_sha256: sha256_hex(&full_prompt2),
+                                    raw_response: raw2.clone(),
+                                    raw_sha256: sha256_hex(&raw2),
+                                });
+
+                                let qid = log_schema_failure(
+                                    &spec.command_name,
+                                    &reason2,
+                                    &raw2,
+                                    &schema_pretty,
+                                    &task_input,
+                                    attempts.clone(),
+                                )
+                                .unwrap_or_else(|_| "".to_string());
+                                schema_valid = Some(false);
+                                quarantine_id = if qid.is_empty() { None } else { Some(qid) };
+                                stdout = raw2;
+                            }
+                        }
+                    } else {
                         let qid = log_schema_failure(
                             &spec.command_name,
-                            &reason,
-                            &raw,
+                            &reason1,
+                            &raw1,
                             &schema_pretty,
                             &task_input,
+                            attempts.clone(),
                         )
                         .unwrap_or_else(|_| "".to_string());
                         schema_valid = Some(false);
                         quarantine_id = if qid.is_empty() { None } else { Some(qid) };
-                        stdout = raw;
+                        stdout = raw1;
                     }
                 }
             }
@@ -4700,13 +5038,13 @@ fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             if spec.logging_enabled && logging_enabled() {
                 let _ = log_codex_run(
                     &spec.command_name,
-                    &full_prompt,
+                    &last_full_prompt,
                     started.elapsed().as_millis() as u64,
                     Some(&usage),
                     Some(&capture_stats),
                     schema_valid.unwrap_or(false),
                     if schema_valid == Some(false) {
-                        Some("schema_validation_failed")
+                        final_reason.as_deref().or(Some("schema_validation_failed"))
                     } else {
                         None
                     },
@@ -4943,8 +5281,21 @@ fn cmd_bench(runs: usize, command: &[String]) -> i32 {
 
 fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Value, String> {
     let instance: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
-    let compiled = JSONSchema::compile(&schema.value)
-        .map_err(|e| format!("failed to compile schema {}: {e}", schema.path.display()))?;
+    let compiled = {
+        let mut lock = SCHEMA_COMPILED_CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| "schema cache poisoned".to_string())?;
+        if let Some(existing) = lock.get(&schema.name) {
+            existing.clone()
+        } else {
+            let compiled = JSONSchema::compile(&schema.value)
+                .map_err(|e| format!("failed to compile schema {}: {e}", schema.path.display()))?;
+            let compiled = Arc::new(compiled);
+            lock.insert(schema.name.clone(), compiled.clone());
+            compiled
+        }
+    };
     if let Err(errors) = compiled.validate(&instance) {
         let mut reasons: Vec<String> = Vec::new();
         for err in errors.take(3) {
@@ -5007,9 +5358,15 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
     let root_s = repo_root.to_string_lossy().to_string();
     let tokens: Vec<String> = cmd.split_whitespace().map(normalize_token).collect();
     let mut candidates: Vec<String> = Vec::new();
+    let last = tokens.last().cloned().unwrap_or_default();
     for i in 0..tokens.len() {
         let t = tokens[i].as_str();
-        if t == ">" || t == ">>" || t == "tee" || t == "cp" || t == "mv" || t == "install" {
+        if t == ">" || t == ">>" || t == "tee" {
+            if let Some(next) = tokens.get(i + 1) {
+                candidates.push(next.clone());
+            }
+        }
+        if t == "touch" || t == "mkdir" || t == "chmod" || t == "chown" {
             if let Some(next) = tokens.get(i + 1) {
                 candidates.push(next.clone());
             }
@@ -5020,8 +5377,26 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
         if t.starts_with('/') {
             candidates.push(t.to_string());
         }
+        if t.starts_with("~/") || t == "~" || t.starts_with("$HOME") || t.starts_with("${HOME}") {
+            candidates.push(t.to_string());
+        }
+    }
+    // For cp/mv/install, treat the last argument as destination.
+    if tokens.iter().any(|t| t == "cp" || t == "mv" || t == "install") && !last.is_empty() {
+        candidates.push(last);
     }
     candidates.into_iter().any(|p| {
+        let p = p.trim().to_string();
+        if p.is_empty() {
+            return false;
+        }
+        // Any parent traversal in a write target is treated as unsafe (can escape repo root).
+        if p.contains("..") {
+            return true;
+        }
+        if p.starts_with("~/") || p == "~" || p.starts_with("$HOME") || p.starts_with("${HOME}") {
+            return true;
+        }
         if !p.starts_with('/') {
             return false;
         }
@@ -5057,6 +5432,12 @@ fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
         && !lower.contains("/usr/local")
     {
         return SafetyDecision::Dangerous("chmod/chown on protected system path".to_string());
+    }
+    if (lower.contains("chmod ") || lower.contains("chown "))
+        && command_has_write_pattern(&lower)
+        && write_targets_outside_repo(&compact, repo_root)
+    {
+        return SafetyDecision::Dangerous("chmod/chown target outside repo root".to_string());
     }
     if (lower.contains("> /system")
         || lower.contains(">> /system")
@@ -6704,6 +7085,7 @@ fn cmd_replay(id: &str) -> i32 {
             &raw,
             &rec.schema,
             &rec.prompt,
+            Vec::new(),
         ) {
             Ok(qid) => eprintln!("cxrs replay: empty response; quarantine_id={qid}"),
             Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
@@ -6718,6 +7100,7 @@ fn cmd_replay(id: &str) -> i32 {
             &raw,
             &rec.schema,
             &rec.prompt,
+            Vec::new(),
         ) {
             Ok(qid) => eprintln!("cxrs replay: invalid JSON; quarantine_id={qid}"),
             Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
@@ -7180,6 +7563,7 @@ fn is_native_name(name: &str) -> bool {
             | "parity"
             | "core"
             | "logs"
+            | "ci"
             | "task"
             | "doctor"
             | "state"
@@ -7244,6 +7628,7 @@ fn main() {
         }
         "schema" => cmd_schema(&args[2..]),
         "logs" => cmd_logs(&args[2..]),
+        "ci" => cmd_ci(&args[2..]),
         "core" => cmd_core(),
         "task" => cmd_task(&args[2..]),
         "where" => print_where(&args[2..]),
@@ -7577,7 +7962,7 @@ mod tests {
             .output()
             .expect("git init");
 
-        let qid = log_schema_failure("cxrs_next", "invalid_json", "raw", "{}", "prompt")
+        let qid = log_schema_failure("cxrs_next", "invalid_json", "raw", "{}", "prompt", Vec::new())
             .expect("schema failure log");
         assert!(!qid.is_empty());
 

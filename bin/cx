@@ -14,19 +14,45 @@ subcommand="$1"
 # Prefer Rust runtime when present; fallback to Bash function layer.
 CXRS_WRAPPER="$REPO_ROOT/rust/cxrs/bin/cxrs"
 CXRS_MANIFEST="$REPO_ROOT/rust/cxrs/Cargo.toml"
+CXRS_BIN_RELEASE="$REPO_ROOT/rust/cxrs/target/release/cxrs"
+CXRS_BIN_DEBUG="$REPO_ROOT/rust/cxrs/target/debug/cxrs"
+
+_cx_needs_build() {
+  local bin="$1"
+  [[ ! -x "$bin" ]] && return 0
+  [[ "$CXRS_MANIFEST" -nt "$bin" ]] && return 0
+  [[ "$REPO_ROOT/rust/cxrs/Cargo.lock" -nt "$bin" ]] && return 0
+  [[ "$REPO_ROOT/rust/cxrs/src/main.rs" -nt "$bin" ]] && return 0
+  return 1
+}
 
 _cx_run_rust() {
-  if [[ -f "$CXRS_MANIFEST" ]] && command -v cargo >/dev/null 2>&1; then
-    CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
-      cargo run --quiet --manifest-path "$CXRS_MANIFEST" -- "$@"
-    return $?
+  local cxrs_bin=""
+
+  if [[ -x "$CXRS_BIN_RELEASE" ]]; then
+    if _cx_needs_build "$CXRS_BIN_RELEASE" && command -v cargo >/dev/null 2>&1; then
+      cargo build --quiet --manifest-path "$CXRS_MANIFEST" --release 1>&2
+    fi
+    cxrs_bin="$CXRS_BIN_RELEASE"
+  elif [[ -x "$CXRS_BIN_DEBUG" ]]; then
+    cxrs_bin="$CXRS_BIN_DEBUG"
+  elif [[ -f "$CXRS_MANIFEST" ]] && command -v cargo >/dev/null 2>&1; then
+    # Build once, then execute the compiled binary. Avoid `cargo run` to prevent compile warnings
+    # and build logs from polluting normal CLI output.
+    cargo build --quiet --manifest-path "$CXRS_MANIFEST" --release 1>&2
+    if [[ -x "$CXRS_BIN_RELEASE" ]]; then
+      cxrs_bin="$CXRS_BIN_RELEASE"
+    fi
+  elif [[ -x "$CXRS_WRAPPER" ]]; then
+    cxrs_bin="$CXRS_WRAPPER"
   fi
-  if [[ -x "$CXRS_WRAPPER" ]]; then
-    CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
-      "$CXRS_WRAPPER" "$@"
-    return $?
+
+  if [[ -z "$cxrs_bin" ]]; then
+    return 127
   fi
-  return 127
+
+  CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
+    "$cxrs_bin" "$@"
 }
 
 if _cx_run_rust supports "$subcommand" >/dev/null 2>&1; then
