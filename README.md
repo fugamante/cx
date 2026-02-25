@@ -1,12 +1,15 @@
 # cxcodex
 
-`cx` is a Rust-first CLI/toolchain for deterministic LLM-assisted development workflows.
+`cx` is a deterministic, Rust-first runtime for LLM-assisted software execution in local repositories.
 
-- Canonical runtime: `rust/cxrs`
-- Authoritative entrypoint: `bin/cx` (Rust-first routing)
-- Bash layer: compatibility/bootstrap fallback only
-- Default backend: Codex
-- Optional backend: Ollama
+- Canonical execution engine: `rust/cxrs`
+- Single authoritative entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
+- Deterministic structured commands: schema-enforced JSON + quarantine/replay on failure
+- Unified execution pipeline: capture -> optional RTK/native reduction -> mandatory budgeting -> LLM -> validation -> logging
+- Repo-local state and telemetry under `.codex/` (logs, schemas, tasks, quarantine, state)
+- Built-in task graph and run orchestration (`task add/fanout/run/run-all`)
+- Safety layer for command execution boundaries and policy visibility (`policy show`)
+- Backend model: Codex by default, Ollama optional/user-selectable
 
 ## Architecture
 
