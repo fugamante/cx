@@ -4,6 +4,7 @@ mod error;
 mod llm;
 mod logs;
 mod paths;
+mod quarantine;
 mod schema;
 mod state;
 mod tasks;

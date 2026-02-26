@@ -18,8 +18,8 @@ use crate::llm::{
     usage_from_jsonl, wrap_agent_text_as_jsonl,
 };
 use crate::types::{
-    CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, QuarantineAttempt, QuarantineRecord,
-    RunEntry, TaskInput, TaskSpec, UsageStats,
+    CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, QuarantineAttempt, RunEntry,
+    TaskInput, TaskSpec, UsageStats,
 };
 use crate::paths::{
     repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
@@ -27,6 +27,9 @@ use crate::paths::{
 };
 use crate::logs::{
     append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file,
+};
+use crate::quarantine::{
+    cmd_quarantine_list, cmd_quarantine_show, quarantine_store_with_attempts, read_quarantine_record,
 };
 use crate::schema::{
     build_strict_schema_prompt, list_schemas, load_schema, schema_name_for_tool, validate_schema_instance,
@@ -476,69 +479,6 @@ fn utc_now_iso() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-fn make_quarantine_id(tool: &str) -> String {
-    let safe_tool: String = tool
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    format!(
-        "{}_{}_{}",
-        Utc::now().format("%Y%m%dT%H%M%SZ"),
-        safe_tool,
-        std::process::id()
-    )
-}
-
-fn quarantine_store_with_attempts(
-    tool: &str,
-    reason: &str,
-    raw: &str,
-    schema: &str,
-    prompt: &str,
-    attempts: Vec<QuarantineAttempt>,
-) -> Result<String, String> {
-    let Some(qdir) = resolve_quarantine_dir() else {
-        return Err("unable to resolve quarantine directory".to_string());
-    };
-    fs::create_dir_all(&qdir).map_err(|e| format!("failed to create {}: {e}", qdir.display()))?;
-
-    let id = make_quarantine_id(tool);
-    let rec = QuarantineRecord {
-        id: id.clone(),
-        ts: utc_now_iso(),
-        tool: tool.to_string(),
-        reason: reason.to_string(),
-        schema: schema.to_string(),
-        prompt: prompt.to_string(),
-        prompt_sha256: sha256_hex(prompt),
-        raw_response: raw.to_string(),
-        raw_sha256: sha256_hex(raw),
-        attempts,
-    };
-    let file = qdir.join(format!("{id}.json"));
-    let serialized = serde_json::to_string_pretty(&rec)
-        .map_err(|e| format!("failed to serialize quarantine record: {e}"))?;
-    fs::write(&file, serialized).map_err(|e| format!("failed to write {}: {e}", file.display()))?;
-    Ok(id)
-}
-
-#[allow(dead_code)]
-fn quarantine_store(
-    tool: &str,
-    reason: &str,
-    raw: &str,
-    schema: &str,
-    prompt: &str,
-) -> Result<String, String> {
-    quarantine_store_with_attempts(tool, reason, raw, schema, prompt, Vec::new())
-}
-
 fn log_schema_failure(
     tool: &str,
     reason: &str,
@@ -628,22 +568,6 @@ fn log_schema_failure(
     append_jsonl(&run_log, &failure_value)?;
 
     Ok(qid)
-}
-
-fn quarantine_file_by_id(id: &str) -> Option<PathBuf> {
-    let qdir = resolve_quarantine_dir()?;
-    let path = qdir.join(format!("{id}.json"));
-    if path.exists() { Some(path) } else { None }
-}
-
-fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
-    let path = quarantine_file_by_id(id).ok_or_else(|| format!("quarantine id not found: {id}"))?;
-    let mut s = String::new();
-    File::open(&path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .read_to_string(&mut s)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    serde_json::from_str(&s).map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))
 }
 
 // state read/write moved to `state.rs`
@@ -4965,80 +4889,6 @@ fn cmd_replay(id: &str) -> i32 {
 
     println!("{raw}");
     0
-}
-
-fn cmd_quarantine_list(n: usize) -> i32 {
-    let Some(qdir) = resolve_quarantine_dir() else {
-        eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
-        return 1;
-    };
-    if !qdir.exists() {
-        println!("== cxrs quarantine list ==");
-        println!("entries: 0");
-        println!("quarantine_dir: {}", qdir.display());
-        return 0;
-    }
-
-    let mut rows: Vec<QuarantineRecord> = Vec::new();
-    let rd = match fs::read_dir(&qdir) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs quarantine list: cannot read {}: {e}", qdir.display());
-            return 1;
-        }
-    };
-
-    for ent in rd.flatten() {
-        let path = ent.path();
-        if path.extension().and_then(|v| v.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(mut s) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if s.trim().is_empty() {
-            continue;
-        }
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        if let Ok(rec) = serde_json::from_str::<QuarantineRecord>(&s) {
-            rows.push(rec);
-        }
-    }
-
-    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
-    if rows.len() > n {
-        rows.truncate(n);
-    }
-
-    println!("== cxrs quarantine list ==");
-    println!("entries: {}", rows.len());
-    for rec in rows {
-        println!("- {} | {} | {} | {}", rec.id, rec.ts, rec.tool, rec.reason);
-    }
-    println!("quarantine_dir: {}", qdir.display());
-    0
-}
-
-fn cmd_quarantine_show(id: &str) -> i32 {
-    let rec = match read_quarantine_record(id) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs quarantine show: {e}");
-            return 1;
-        }
-    };
-    match serde_json::to_string_pretty(&rec) {
-        Ok(v) => {
-            println!("{v}");
-            0
-        }
-        Err(e) => {
-            eprintln!("cxrs quarantine show: failed to render JSON: {e}");
-            1
-        }
-    }
 }
 
 fn cmd_cx_compat(args: &[String]) -> i32 {
