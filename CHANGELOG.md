@@ -70,6 +70,11 @@ All notable changes to this project are documented in this file.
   - observability telemetry command surface:
     - `cx logs stats [N] [--json]` for field-population health and contract drift detection
     - `cx telemetry [N] [--json]` alias (native + compat routing)
+  - CI telemetry contract smoke assertions in `.github/workflows/cxrs-compat.yml`:
+    - validates `logs stats --json` shape (`window_runs`, `fields[]`, `contract_drift.*`) on Linux/macOS matrix
+  - integration coverage for telemetry JSON shape + macOS output stability:
+    - strengthened `logs_stats_and_telemetry_alias_report_population_and_drift`
+    - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
 - Expanded policy-path safety coverage and enforcement:

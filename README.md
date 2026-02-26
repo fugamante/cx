@@ -195,6 +195,14 @@ Useful commands:
 ./bin/cx replay <quarantine_id>
 ```
 
+Telemetry health:
+
+```bash
+./bin/cx logs stats 200
+./bin/cx logs stats 200 --json | jq .
+./bin/cx telemetry 50 --json | jq .
+```
+
 ## Task Graph + Safety + Optimization
 
 Stage II runtime commands:

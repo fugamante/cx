@@ -50,6 +50,22 @@ jobs:
           cd rust/cxrs
           cargo test --test reliability_integration -- --test-threads=1
 
+      - name: Telemetry Schema Smoke
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          trap 'rm -rf "$repo"' EXIT
+          git -C "$repo" init -q
+          mkdir -p "$repo/.codex/cxlogs"
+          cat > "$repo/.codex/cxlogs/runs.jsonl" <<'JSONL'
+          {"execution_id":"e1","timestamp":"2026-01-01T00:00:00Z","command":"cx","backend_used":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":10,"schema_enforced":false,"schema_valid":true}
+          {"execution_id":"e2","timestamp":"2026-01-01T00:00:01Z","command":"next","backend_used":"codex","capture_provider":"native","execution_mode":"deterministic","duration_ms":20,"schema_enforced":true,"schema_valid":true,"task_id":"task_1"}
+          JSONL
+          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- logs stats 2 --json)"
+          echo "$out" | jq -e '.window_runs == 2' >/dev/null
+          echo "$out" | jq -e '.fields | type == "array"' >/dev/null
+          echo "$out" | jq -e '.contract_drift.new_keys_second_half | type == "array"' >/dev/null
+
       - name: Quality gate
         run: |
           cd rust/cxrs

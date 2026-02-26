@@ -327,5 +327,56 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     );
     let v: Value = serde_json::from_str(&stdout_str(&out_json)).expect("json output");
     assert_eq!(v.get("window_runs").and_then(Value::as_u64), Some(2));
-    assert!(v.get("fields").and_then(Value::as_array).is_some());
+    let fields = v
+        .get("fields")
+        .and_then(Value::as_array)
+        .expect("fields array");
+    assert!(
+        fields
+            .iter()
+            .any(|f| f.get("field").and_then(Value::as_str) == Some("execution_id")),
+        "missing execution_id coverage field: {v}"
+    );
+    assert!(
+        fields.iter().all(|f| {
+            f.get("field").is_some()
+                && f.get("present").and_then(Value::as_u64).is_some()
+                && f.get("non_null").and_then(Value::as_u64).is_some()
+                && f.get("total").and_then(Value::as_u64).is_some()
+        }),
+        "invalid field shape in telemetry payload: {v}"
+    );
+    let drift = v.get("contract_drift").expect("contract_drift");
+    assert!(drift.get("new_keys_second_half").is_some());
+    assert!(drift.get("missing_keys_second_half").is_some());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn telemetry_json_output_is_stable_on_macos() {
+    let repo = TempRepo::new();
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row = serde_json::json!({
+        "execution_id":"m1","timestamp":"2026-01-01T00:00:00Z","command":"cx",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":12,"schema_enforced":false,"schema_valid":true
+    });
+    let mut text = serde_json::to_string(&row).expect("row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out1 = repo.run(&["telemetry", "1", "--json"]);
+    let out2 = repo.run(&["telemetry", "1", "--json"]);
+    assert!(out1.status.success(), "stderr={}", stderr_str(&out1));
+    assert!(out2.status.success(), "stderr={}", stderr_str(&out2));
+
+    let v1: Value = serde_json::from_str(&stdout_str(&out1)).expect("json1");
+    let v2: Value = serde_json::from_str(&stdout_str(&out2)).expect("json2");
+    assert_eq!(
+        v1.get("window_runs").and_then(Value::as_u64),
+        Some(1),
+        "unexpected telemetry window: {v1}"
+    );
+    assert_eq!(v1, v2, "telemetry output drifted on repeated invocation");
 }
