@@ -38,6 +38,7 @@ All notable changes to this project are documented in this file.
   - `src/compat_cmd.rs`
   - `src/cmdctx.rs`
   - `src/execution.rs`
+  - `src/native_cmd.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -73,6 +74,7 @@ All notable changes to this project are documented in this file.
 - Renamed execution core module path from `exec_core` to `execution` and rewired call sites.
 - Migrated `task_cmds` and `compat_cmd` to `handler(ctx, args, deps)` style entrypoints.
 - Reorganized source layout: moved orchestrator to `src/app/mod.rs` and consolidated domain modules under `src/modules/`.
+- Extracted native command dispatcher (`run` match logic) into `src/native_cmd.rs` with `handler(ctx, args, deps)`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

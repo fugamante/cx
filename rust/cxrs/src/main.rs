@@ -29,6 +29,8 @@ mod llm;
 mod logs;
 #[path = "modules/logview.rs"]
 mod logview;
+#[path = "modules/native_cmd.rs"]
+mod native_cmd;
 #[path = "modules/optimize.rs"]
 mod optimize;
 #[path = "modules/paths.rs"]

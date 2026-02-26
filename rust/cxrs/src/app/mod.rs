@@ -15,6 +15,7 @@ use crate::introspect::{
 };
 use crate::logs::cmd_logs;
 use crate::logview::{cmd_budget, cmd_log_tail};
+use crate::native_cmd;
 use crate::optimize::{parse_optimize_args, print_optimize};
 use crate::policy::cmd_policy;
 use crate::prompting::{cmd_fanout, cmd_prompt, cmd_promptlint, cmd_roles};
@@ -357,6 +358,112 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
     compat_cmd::handler(&cmd_ctx(), args, &compat_deps())
 }
 
+fn native_print_version() {
+    introspect_print_version(APP_NAME, APP_VERSION);
+}
+
+fn native_cmd_schema(args: &[String]) -> i32 {
+    cmd_schema(APP_NAME, args)
+}
+
+fn native_cmd_logs(args: &[String]) -> i32 {
+    cmd_logs(APP_NAME, args)
+}
+
+fn native_cmd_ci(args: &[String]) -> i32 {
+    cmd_ci(APP_NAME, args)
+}
+
+fn native_cmd_where(args: &[String]) -> i32 {
+    print_where(args, APP_VERSION)
+}
+
+fn native_cmd_diag() -> i32 {
+    cmd_diag(APP_VERSION)
+}
+
+fn native_cmd_core() -> i32 {
+    introspect_cmd_core(APP_VERSION)
+}
+
+fn native_cmd_llm(args: &[String]) -> i32 {
+    cmd_llm(APP_NAME, args)
+}
+
+fn native_cmd_policy(args: &[String]) -> i32 {
+    cmd_policy(args, APP_NAME)
+}
+
+fn native_cmd_doctor() -> i32 {
+    doctor::print_doctor(crate::execution::run_llm_jsonl)
+}
+
+fn native_cmd_health() -> i32 {
+    doctor::cmd_health(crate::execution::run_llm_jsonl, cmd_cxo)
+}
+
+fn native_deps() -> native_cmd::NativeDeps {
+    native_cmd::NativeDeps {
+        print_help,
+        print_task_help,
+        print_version: native_print_version,
+        cmd_schema: native_cmd_schema,
+        cmd_logs: native_cmd_logs,
+        cmd_ci: native_cmd_ci,
+        cmd_core: native_cmd_core,
+        cmd_task,
+        cmd_where: native_cmd_where,
+        cmd_routes,
+        cmd_diag: native_cmd_diag,
+        cmd_parity,
+        is_native_name,
+        is_compat_name,
+        cmd_doctor: native_cmd_doctor,
+        cmd_state_show,
+        cmd_state_get,
+        cmd_state_set,
+        cmd_llm: native_cmd_llm,
+        cmd_policy: native_cmd_policy,
+        cmd_bench,
+        print_metrics,
+        cmd_prompt,
+        cmd_roles,
+        cmd_fanout,
+        cmd_promptlint,
+        cmd_cx_compat,
+        cmd_cx,
+        cmd_cxj,
+        cmd_cxo,
+        cmd_cxol,
+        cmd_cxcopy,
+        cmd_fix,
+        cmd_budget,
+        cmd_log_tail,
+        cmd_health: native_cmd_health,
+        cmd_rtk_status,
+        cmd_log_on,
+        cmd_log_off,
+        cmd_alert_show,
+        cmd_alert_on,
+        cmd_alert_off,
+        cmd_chunk,
+        print_profile,
+        print_alert,
+        parse_optimize_args,
+        print_optimize,
+        print_worklog,
+        print_trace,
+        cmd_next,
+        cmd_diffsum,
+        cmd_fix_run,
+        cmd_commitjson,
+        cmd_commitmsg,
+        cmd_replay,
+        cmd_quarantine_list,
+        cmd_quarantine_show,
+    }
+}
+
 pub(crate) fn is_compat_name(name: &str) -> bool {
     matches!(
         name,
@@ -518,288 +625,7 @@ pub(crate) fn is_native_name(name: &str) -> bool {
 
 pub fn run() -> i32 {
     let args: Vec<String> = env::args().collect();
-    let cmd = args.get(1).map(String::as_str).unwrap_or("help");
-    let code = match cmd {
-        "help" | "-h" | "--help" => {
-            if args.get(2).map(String::as_str) == Some("task") {
-                print_task_help();
-            } else {
-                print_help();
-            }
-            0
-        }
-        "version" | "-V" | "--version" => {
-            introspect_print_version(APP_NAME, APP_VERSION);
-            0
-        }
-        "schema" => cmd_schema(APP_NAME, &args[2..]),
-        "logs" => cmd_logs(APP_NAME, &args[2..]),
-        "ci" => cmd_ci(APP_NAME, &args[2..]),
-        "core" => introspect_cmd_core(APP_VERSION),
-        "task" => cmd_task(&args[2..]),
-        "where" => print_where(&args[2..], APP_VERSION),
-        "routes" => cmd_routes(&args[2..]),
-        "diag" => cmd_diag(APP_VERSION),
-        "parity" => cmd_parity(),
-        "supports" => {
-            let Some(name) = args.get(2) else {
-                eprintln!("Usage: {APP_NAME} supports <subcommand>");
-                std::process::exit(2);
-            };
-            if is_native_name(name) || is_compat_name(name) {
-                println!("true");
-                0
-            } else {
-                println!("false");
-                1
-            }
-        }
-        "doctor" => doctor::print_doctor(crate::execution::run_llm_jsonl),
-        "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
-            "show" => cmd_state_show(),
-            "get" => {
-                let Some(key) = args.get(3) else {
-                    eprintln!("Usage: {APP_NAME} state get <key>");
-                    std::process::exit(2);
-                };
-                cmd_state_get(key)
-            }
-            "set" => {
-                let Some(key) = args.get(3) else {
-                    eprintln!("Usage: {APP_NAME} state set <key> <value>");
-                    std::process::exit(2);
-                };
-                let Some(value) = args.get(4) else {
-                    eprintln!("Usage: {APP_NAME} state set <key> <value>");
-                    std::process::exit(2);
-                };
-                cmd_state_set(key, value)
-            }
-            other => {
-                eprintln!("{APP_NAME}: unknown state subcommand '{other}'");
-                eprintln!("Usage: {APP_NAME} state <show|get <key>|set <key> <value>>");
-                2
-            }
-        },
-        "llm" => cmd_llm(APP_NAME, &args[2..]),
-        "policy" => cmd_policy(&args[2..], APP_NAME),
-        "bench" => {
-            if args.len() < 5 {
-                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
-                std::process::exit(2);
-            }
-            let runs = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(0);
-            let delim = args.iter().position(|v| v == "--");
-            let Some(i) = delim else {
-                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
-                std::process::exit(2);
-            };
-            if i + 1 >= args.len() {
-                eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");
-                std::process::exit(2);
-            }
-            cmd_bench(runs, &args[i + 1..])
-        }
-        "metrics" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_metrics(n)
-        }
-        "prompt" => {
-            let Some(mode) = args.get(2) else {
-                eprintln!("Usage: {APP_NAME} prompt <implement|fix|test|doc|ops> <request>");
-                std::process::exit(2);
-            };
-            if args.len() < 4 {
-                eprintln!("Usage: {APP_NAME} prompt <implement|fix|test|doc|ops> <request>");
-                std::process::exit(2);
-            }
-            let request = args[3..].join(" ");
-            cmd_prompt(mode, &request)
-        }
-        "roles" => cmd_roles(args.get(2).map(String::as_str)),
-        "fanout" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} fanout <objective>");
-                std::process::exit(2);
-            }
-            cmd_fanout(&args[2..].join(" "))
-        }
-        "promptlint" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(200);
-            cmd_promptlint(n)
-        }
-        "cx" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cx <command> [args...]");
-                std::process::exit(2);
-            }
-            if is_compat_name(&args[2]) {
-                cmd_cx_compat(&args[2..])
-            } else {
-                cmd_cx(&args[2..])
-            }
-        }
-        "cxj" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cxj <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_cxj(&args[2..])
-        }
-        "cxo" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cxo <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_cxo(&args[2..])
-        }
-        "cxol" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cxol <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_cxol(&args[2..])
-        }
-        "cxcopy" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cxcopy <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_cxcopy(&args[2..])
-        }
-        "fix" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} fix <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_fix(&args[2..])
-        }
-        "budget" => cmd_budget(),
-        "log-tail" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(10);
-            cmd_log_tail(n)
-        }
-        "health" => doctor::cmd_health(crate::execution::run_llm_jsonl, cmd_cxo),
-        "rtk-status" => cmd_rtk_status(),
-        "log-on" => cmd_log_on(),
-        "log-off" => cmd_log_off(),
-        "alert-show" => cmd_alert_show(),
-        "alert-on" => cmd_alert_on(),
-        "alert-off" => cmd_alert_off(),
-        "chunk" => cmd_chunk(),
-        "cx-compat" => cmd_cx_compat(&args[2..]),
-        "profile" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_profile(n)
-        }
-        "alert" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_alert(n)
-        }
-        "optimize" => {
-            let (n, json_out) = match parse_optimize_args(&args[2..], 200) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("{APP_NAME} optimize: {e}");
-                    std::process::exit(2);
-                }
-            };
-            print_optimize(n, json_out)
-        }
-        "worklog" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_worklog(n)
-        }
-        "trace" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(1);
-            print_trace(n)
-        }
-        "next" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} next <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_next(&args[2..])
-        }
-        "diffsum" => cmd_diffsum(false),
-        "diffsum-staged" => cmd_diffsum(true),
-        "fix-run" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} fix-run <command> [args...]");
-                std::process::exit(2);
-            }
-            cmd_fix_run(&args[2..])
-        }
-        "commitjson" => cmd_commitjson(),
-        "commitmsg" => cmd_commitmsg(),
-        "replay" => {
-            let Some(id) = args.get(2) else {
-                eprintln!("Usage: {APP_NAME} replay <quarantine_id>");
-                std::process::exit(2);
-            };
-            cmd_replay(id)
-        }
-        "quarantine" => match args.get(2).map(String::as_str).unwrap_or("list") {
-            "list" => {
-                let n = args
-                    .get(3)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(20);
-                cmd_quarantine_list(n)
-            }
-            "show" => {
-                let Some(id) = args.get(3) else {
-                    eprintln!("Usage: {APP_NAME} quarantine show <quarantine_id>");
-                    std::process::exit(2);
-                };
-                cmd_quarantine_show(id)
-            }
-            other => {
-                eprintln!("{APP_NAME}: unknown quarantine subcommand '{other}'");
-                eprintln!("Usage: {APP_NAME} quarantine <list [N]|show <id>>");
-                2
-            }
-        },
-        _ => {
-            eprintln!("{APP_NAME}: unknown command '{cmd}'");
-            eprintln!("Run '{APP_NAME} help' for usage.");
-            2
-        }
-    };
-    code
+    native_cmd::handler(&cmd_ctx(), &args, &native_deps())
 }
 
 #[cfg(test)]
