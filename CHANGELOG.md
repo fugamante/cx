@@ -54,6 +54,9 @@ All notable changes to this project are documented in this file.
   - timeout-failure injection coverage with timeout metadata assertions
   - schema-failure injection coverage with quarantine/log assertions
   - replay determinism loop coverage (`replay` repeated runs)
+  - ollama timeout/failure-path coverage with backend + timeout log assertions
+  - rtk capture failure fallback coverage (`capture_provider=native`, `rtk_used=false`)
+  - `fix-run` policy-block invariant coverage (`policy_blocked=true` + reason present)
 
 ### Changed
 - Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.

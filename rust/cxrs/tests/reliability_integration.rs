@@ -182,6 +182,16 @@ fn assert_required_run_fields(v: &Value) {
     }
 }
 
+fn mock_codex_jsonl_agent_text(text: &str) -> String {
+    format!(
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":{text:?}}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":64,"cached_input_tokens":8,"output_tokens":12}}}}'
+"#
+    )
+}
+
 #[test]
 fn timeout_injection_logs_timeout_metadata_and_required_fields() {
     let repo = TempRepo::new();
@@ -321,4 +331,121 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":80,"cached_input
             baseline = Some(parsed);
         }
     }
+}
+
+#[test]
+fn ollama_timeout_failure_logs_backend_and_timeout_fields() {
+    let repo = TempRepo::new();
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+sleep 2
+exit 0
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["cxo", "echo", "hello"],
+        &[
+            ("CX_LLM_BACKEND", "ollama"),
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+            ("CX_CMD_TIMEOUT_SECS", "1"),
+        ],
+    );
+    assert!(
+        !out.status.success(),
+        "expected ollama timeout; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_required_run_fields(last);
+    assert_eq!(
+        last.get("backend_used").and_then(Value::as_str),
+        Some("ollama")
+    );
+    assert_eq!(last.get("timed_out").and_then(Value::as_bool), Some(true));
+    assert_eq!(last.get("timeout_secs").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        last.get("schema_valid").and_then(Value::as_bool),
+        Some(false)
+    );
+}
+
+#[test]
+fn rtk_failure_falls_back_to_native_and_logs_capture_provider() {
+    let repo = TempRepo::new();
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
+    repo.write_mock(
+        "rtk",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "--help" ]; then exit 0; fi
+if [ "$1" = "--version" ]; then
+  echo "rtk 0.22.1"
+  exit 0
+fi
+exit 2
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["cxo", "git", "status", "--short"],
+        &[
+            ("CX_CAPTURE_PROVIDER", "rtk"),
+            ("CX_RTK_SYSTEM", "1"),
+            ("CX_NATIVE_REDUCE", "0"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "expected success with native fallback; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_required_run_fields(last);
+    assert_eq!(
+        last.get("capture_provider").and_then(Value::as_str),
+        Some("native")
+    );
+    assert_eq!(last.get("rtk_used").and_then(Value::as_bool), Some(false));
+}
+
+#[test]
+fn fix_run_policy_block_is_logged_with_reason() {
+    let repo = TempRepo::new();
+    let fix_json = r#"{"analysis":"dangerous path","commands":["rm -rf /tmp/cxrs-danger-test"]}"#;
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text(fix_json));
+
+    let out = repo.run_with_env(
+        &["fix-run", "echo", "hello"],
+        &[("CXFIX_RUN", "1"), ("CXFIX_FORCE", "0"), ("CX_UNSAFE", "0")],
+    );
+    assert!(
+        out.status.success(),
+        "fix-run should return wrapped command exit status; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("blocked dangerous command"),
+        "expected policy warning in stderr: {}",
+        stderr_str(&out)
+    );
+
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_required_run_fields(last);
+    assert_eq!(
+        last.get("policy_blocked").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        last.get("policy_reason")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.contains("rm -rf")),
+        "policy_reason missing rm -rf context: {last}"
+    );
 }
