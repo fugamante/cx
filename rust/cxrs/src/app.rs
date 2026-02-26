@@ -6,9 +6,10 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Instant;
 
+use crate::agentcmds;
 use crate::analytics::{
     parse_ts_epoch, print_alert, print_metrics, print_profile, print_trace, print_worklog,
 };
@@ -1510,147 +1511,27 @@ fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
 }
 
 fn cmd_cx(command: &[String]) -> i32 {
-    let result = match execute_task(TaskSpec {
-        command_name: "cx".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::Plain,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cx: {e}");
-            return 1;
-        }
-    };
-    print!("{}", result.stdout);
-    result.system_status.unwrap_or(0)
+    agentcmds::cmd_cx(command, execute_task)
 }
 
 fn cmd_cxj(command: &[String]) -> i32 {
-    let result = match execute_task(TaskSpec {
-        command_name: "cxj".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::Jsonl,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxj: {e}");
-            return 1;
-        }
-    };
-    print!("{}", result.stdout);
-    result.system_status.unwrap_or(0)
+    agentcmds::cmd_cxj(command, execute_task)
 }
 
 fn cmd_cxo(command: &[String]) -> i32 {
-    let result = match execute_task(TaskSpec {
-        command_name: "cxo".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::AgentText,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxo: {e}");
-            return 1;
-        }
-    };
-    println!("{}", result.stdout);
-    result.system_status.unwrap_or(0)
+    agentcmds::cmd_cxo(command, execute_task)
 }
 
 fn cmd_cxol(command: &[String]) -> i32 {
-    cmd_cx(command)
+    agentcmds::cmd_cxol(command, execute_task)
 }
 
 fn cmd_cxcopy(command: &[String]) -> i32 {
-    let result = match execute_task(TaskSpec {
-        command_name: "cxcopy".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::AgentText,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxcopy: {e}");
-            return 1;
-        }
-    };
-    let text = result.stdout;
-    if text.trim().is_empty() {
-        eprintln!("cxrs cxcopy: nothing to copy");
-        return 1;
-    }
-    let mut pb = match Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxcopy: pbcopy unavailable: {e}");
-            return 1;
-        }
-    };
-    if let Some(stdin) = pb.stdin.as_mut() {
-        let _ = stdin.write_all(text.as_bytes());
-    }
-    match pb.wait() {
-        Ok(s) if s.success() => {
-            println!("Copied to clipboard.");
-            result.system_status.unwrap_or(0)
-        }
-        Ok(s) => {
-            eprintln!("cxrs cxcopy: pbcopy failed with status {}", s);
-            1
-        }
-        Err(e) => {
-            eprintln!("cxrs cxcopy: pbcopy wait failed: {e}");
-            1
-        }
-    }
+    agentcmds::cmd_cxcopy(command, execute_task)
 }
 
 fn cmd_fix(command: &[String]) -> i32 {
-    let (captured, status, capture_stats) = match run_system_command_capture(command) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs fix: {e}");
-            return 1;
-        }
-    };
-    let prompt = format!(
-        "You are my terminal debugging assistant.\nTask:\n1) Explain what happened (brief).\n2) If the command failed, diagnose likely cause(s).\n3) Propose the next 3 commands to run to confirm/fix.\n4) If it is a configuration issue, point to exact file/line patterns to check.\n\nCommand:\n{}\n\nExit status: {}\n\nOutput:\n{}",
-        command.join(" "),
-        status,
-        captured
-    );
-    let result = match execute_task(TaskSpec {
-        command_name: "cxfix".to_string(),
-        input: TaskInput::Prompt(prompt),
-        output_kind: LlmOutputKind::AgentText,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: Some(capture_stats),
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs fix: {e}");
-            return status;
-        }
-    };
-    println!("{}", result.stdout);
-    status
+    agentcmds::cmd_fix(command, run_system_command_capture, execute_task)
 }
 
 fn cmd_parity() -> i32 {

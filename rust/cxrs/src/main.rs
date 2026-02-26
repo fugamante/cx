@@ -1,3 +1,4 @@
+mod agentcmds;
 mod analytics;
 mod app;
 mod capture;
