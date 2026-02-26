@@ -69,6 +69,10 @@ All notable changes to this project are documented in this file.
     - schema-command enforcement under `CX_MODE=lean` (schema remains enforced/validated)
 
 ### Changed
+- Expanded policy-path safety coverage and enforcement:
+  - hardened path resolution checks for write targets (absolute, relative, `~/`, `$HOME`) against repo-root boundaries
+  - added symlink parent canonicalization checks to block path-escape writes via in-repo symlinks
+  - added policy tests for `/usr` vs `/usr/local` behavior, repo-root writes, and symlink escape scenarios
 - Expanded `cxparity` overlap coverage and invariants:
   - widened shared-command matrix from a minimal subset to include `cx`, `cxj`, `cxol`, `cxcopy`, `cxnext`, `cxdiffsum_staged`, `cxcommitmsg`, and `cxcommitjson`
   - added deterministic local parity mocks (`codex` + clipboard backend) so parity runs are stable and backend-independent

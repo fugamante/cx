@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::app_config;
@@ -68,27 +69,77 @@ fn collect_write_candidates(cmd: &str) -> Vec<String> {
 }
 
 fn path_is_outside_repo(p: &str, repo_root: &Path) -> bool {
-    let root_s = repo_root.to_string_lossy().to_string();
     let path = p.trim();
     if path.is_empty() {
         return false;
     }
-    if path.contains("..") || path.starts_with("~/") || path == "~" {
+    if path.contains("..") || path == "~" {
         return true;
     }
-    if path.starts_with("$HOME") || path.starts_with("${HOME}") {
+
+    let root_abs = canonical_or_owned(repo_root);
+    let candidate = resolve_candidate_path(path, repo_root);
+    if candidate.is_none() {
         return true;
     }
-    if !path.starts_with('/') {
-        return false;
+    let candidate = candidate.expect("checked some");
+    if candidate.exists() {
+        let canon = canonical_or_owned(&candidate);
+        return !canon_starts_with(&canon, &root_abs);
     }
-    !(path == root_s || path.starts_with(&(root_s + "/")))
+    if let Some(parent) = candidate.parent()
+        && parent.exists()
+    {
+        let parent_canon = canonical_or_owned(parent);
+        if !canon_starts_with(&parent_canon, &root_abs) {
+            return true;
+        }
+    }
+    !lexically_inside_root(&candidate, repo_root)
 }
 
 fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
     collect_write_candidates(cmd)
         .into_iter()
         .any(|p| path_is_outside_repo(&p, repo_root))
+}
+
+fn canonical_or_owned(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn canon_starts_with(path: &Path, root: &Path) -> bool {
+    path == root || path.starts_with(root)
+}
+
+fn resolve_candidate_path(path: &str, repo_root: &Path) -> Option<PathBuf> {
+    if let Some(home) = env::var_os("HOME") {
+        if path == "~" {
+            return Some(PathBuf::from(home));
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            return Some(PathBuf::from(home).join(rest));
+        }
+        if let Some(rest) = path.strip_prefix("$HOME/") {
+            return Some(PathBuf::from(home).join(rest));
+        }
+        if let Some(rest) = path.strip_prefix("${HOME}/") {
+            return Some(PathBuf::from(home).join(rest));
+        }
+    }
+    if path.starts_with('$') {
+        return None;
+    }
+    if path.starts_with('/') {
+        return Some(PathBuf::from(path));
+    }
+    Some(repo_root.join(path))
+}
+
+fn lexically_inside_root(candidate: &Path, repo_root: &Path) -> bool {
+    let root_s = repo_root.to_string_lossy().to_string();
+    let cand = candidate.to_string_lossy().to_string();
+    cand == root_s || cand.starts_with(&(root_s + "/"))
 }
 
 fn matches_sudo(lower: &str) -> bool {
@@ -245,6 +296,43 @@ mod tests {
     fn blocks_write_outside_repo() {
         let root = Path::new("/tmp/repo");
         let decision = evaluate_command_safety("echo hi > /etc/out.txt", root);
+        assert!(matches!(decision, SafetyDecision::Dangerous(_)));
+    }
+
+    #[test]
+    fn blocks_chmod_usr_and_allows_usr_local_rule_only() {
+        let root = Path::new("/tmp/repo");
+        let blocked = evaluate_command_safety("chmod 755 /usr/bin/tool", root);
+        assert!(matches!(blocked, SafetyDecision::Dangerous(_)));
+        let not_protected_rule = evaluate_command_safety("chmod 755 /usr/local/bin/tool", root);
+        assert!(matches!(not_protected_rule, SafetyDecision::Dangerous(_)));
+    }
+
+    #[test]
+    fn allows_write_to_repo_root_path() {
+        let root = Path::new("/tmp/repo");
+        let decision = evaluate_command_safety("touch /tmp/repo/output.txt", root);
+        assert!(matches!(decision, SafetyDecision::Safe));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blocks_symlink_escape_write_target() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!(
+            "cx-policy-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let repo = base.join("repo");
+        let outside = base.join("outside");
+        let _ = fs::create_dir_all(&repo);
+        let _ = fs::create_dir_all(&outside);
+        let link = repo.join("link");
+        let _ = symlink(&outside, &link);
+        let cmd = format!("echo hi > {}/escape.txt", link.display());
+        let decision = evaluate_command_safety(&cmd, &repo);
+        let _ = fs::remove_dir_all(&base);
         assert!(matches!(decision, SafetyDecision::Dangerous(_)));
     }
 }
