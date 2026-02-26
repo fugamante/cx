@@ -34,6 +34,7 @@ All notable changes to this project are documented in this file.
   - `src/structured_cmds.rs`
   - `src/task_cmds.rs`
   - `src/bench_parity.rs`
+  - `src/exec_core.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -63,6 +64,7 @@ All notable changes to this project are documented in this file.
 - Extracted structured command family (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`) into `src/structured_cmds.rs`.
 - Extracted task command dispatcher (`task add/list/show/claim/complete/fail/fanout/run/run-all`) into `src/task_cmds.rs`.
 - Extracted `bench` and `parity` command flows into `src/bench_parity.rs`.
+- Extracted execution core (`run_llm_plain`, `run_llm_jsonl`, `execute_task`) into `src/exec_core.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

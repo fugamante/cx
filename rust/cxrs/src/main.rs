@@ -6,6 +6,7 @@ mod capture;
 mod diagnostics;
 mod doctor;
 mod error;
+mod exec_core;
 mod execmeta;
 mod introspect;
 mod llm;

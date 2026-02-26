@@ -1,7 +1,5 @@
-use serde_json::Value;
 use std::env;
 use std::io::Read;
-use std::time::Instant;
 
 use crate::agentcmds;
 use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
@@ -9,13 +7,9 @@ use crate::bench_parity;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
 use crate::diagnostics::cmd_diag;
 use crate::doctor;
-use crate::execmeta::{make_execution_id, utc_now_iso};
+use crate::execmeta::utc_now_iso;
 use crate::introspect::{
     cmd_core as introspect_cmd_core, print_version as introspect_print_version,
-};
-use crate::llm::{
-    extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
-    wrap_agent_text_as_jsonl,
 };
 use crate::logs::cmd_logs;
 use crate::logview::{cmd_budget, cmd_log_tail};
@@ -24,12 +18,9 @@ use crate::policy::cmd_policy;
 use crate::prompting::{cmd_fanout, cmd_prompt, cmd_promptlint, cmd_roles};
 use crate::quarantine::{cmd_quarantine_list, cmd_quarantine_show};
 use crate::routing::{cmd_routes, print_where};
-use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
-use crate::runtime::{llm_backend, logging_enabled, resolve_ollama_model_for_run};
 use crate::runtime_controls::{
     cmd_alert_off, cmd_alert_on, cmd_alert_show, cmd_log_off, cmd_log_on, cmd_rtk_status,
 };
-use crate::schema::{build_strict_schema_prompt, validate_schema_instance};
 use crate::schema_ops::{cmd_ci, cmd_schema};
 use crate::settings_cmds::{cmd_llm, cmd_state_get, cmd_state_set, cmd_state_show};
 use crate::state::{current_task_id, current_task_parent_id, set_state_path};
@@ -39,11 +30,7 @@ use crate::taskrun::{TaskRunner, run_task_by_id};
 use crate::tasks::{
     cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, write_tasks,
 };
-use crate::types::{
-    CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, TaskInput, TaskSpec,
-    UsageStats,
-};
-use crate::util::sha256_hex;
+use crate::types::{ExecutionResult, TaskSpec};
 
 const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
@@ -180,222 +167,8 @@ fn cmd_task(args: &[String]) -> i32 {
 
 // runs.jsonl readers moved to `logs.rs`
 
-fn run_llm_plain(prompt: &str) -> Result<String, String> {
-    if llm_backend() == "ollama" {
-        run_ollama_plain(prompt, &resolve_ollama_model_for_run()?)
-    } else {
-        run_codex_plain(prompt)
-    }
-}
-
-fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
-    if llm_backend() != "ollama" {
-        return run_codex_jsonl(prompt);
-    }
-    let text = run_ollama_plain(prompt, &resolve_ollama_model_for_run()?)?;
-    wrap_agent_text_as_jsonl(&text)
-}
-
 fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
-    let started = Instant::now();
-    let execution_id = make_execution_id(&spec.command_name);
-
-    let (prompt, capture_stats, system_status) = match spec.input {
-        TaskInput::Prompt(p) => (p, CaptureStats::default(), None),
-        TaskInput::SystemCommand(cmd) => {
-            let (captured, status, stats) = run_system_command_capture(&cmd)?;
-            (captured, stats, Some(status))
-        }
-    };
-    let capture_stats = spec.capture_override.unwrap_or(capture_stats);
-
-    let mut schema_valid: Option<bool> = None;
-    let mut quarantine_id: Option<String> = None;
-    let mut usage = UsageStats::default();
-    let stdout: String;
-    let stderr = String::new();
-
-    match spec.output_kind {
-        LlmOutputKind::Plain => {
-            stdout = run_llm_plain(&prompt)?;
-        }
-        LlmOutputKind::Jsonl => {
-            let jsonl = run_llm_jsonl(&prompt)?;
-            usage = usage_from_jsonl(&jsonl);
-            stdout = jsonl;
-        }
-        LlmOutputKind::AgentText => {
-            let jsonl = run_llm_jsonl(&prompt)?;
-            usage = usage_from_jsonl(&jsonl);
-            stdout = extract_agent_text(&jsonl).unwrap_or_default();
-        }
-        LlmOutputKind::SchemaJson => {
-            let schema = spec
-                .schema
-                .as_ref()
-                .ok_or_else(|| "schema execution missing schema".to_string())?;
-            let task_input = spec
-                .schema_task_input
-                .as_deref()
-                .unwrap_or(&prompt)
-                .to_string();
-            let schema_pretty = serde_json::to_string_pretty(&schema.value)
-                .unwrap_or_else(|_| schema.value.to_string());
-            let retry_allowed = env::var("CX_SCHEMA_RELAXED").ok().as_deref() != Some("1");
-            let mut attempts: Vec<QuarantineAttempt> = Vec::new();
-            let mut final_reason: Option<String> = None;
-            let mut last_full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);
-
-            let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), String> {
-                let jsonl = run_llm_jsonl(full_prompt)?;
-                let usage = usage_from_jsonl(&jsonl);
-                let raw = extract_agent_text(&jsonl).unwrap_or_default();
-                Ok((raw, usage))
-            };
-
-            let validate_raw = |raw: &str| -> Result<Value, String> {
-                if raw.trim().is_empty() {
-                    return Err("empty_agent_message".to_string());
-                }
-                validate_schema_instance(schema, raw)
-            };
-
-            // Attempt 1
-            let full_prompt1 = last_full_prompt.clone();
-            let (raw1, usage1) = run_attempt(&full_prompt1)?;
-            usage = usage1.clone();
-            match validate_raw(&raw1) {
-                Ok(valid) => {
-                    schema_valid = Some(true);
-                    stdout = valid.to_string();
-                }
-                Err(reason1) => {
-                    final_reason = Some(reason1.clone());
-                    attempts.push(QuarantineAttempt {
-                        reason: reason1.clone(),
-                        prompt: full_prompt1.clone(),
-                        prompt_sha256: sha256_hex(&full_prompt1),
-                        raw_response: raw1.clone(),
-                        raw_sha256: sha256_hex(&raw1),
-                    });
-
-                    // Attempt 2 (bounded retry) before quarantine
-                    if retry_allowed {
-                        let full_prompt2 = format!(
-                            "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\n\nPrevious attempt failed validation: {reason1}\n\nSchema:\n{schema_pretty}\n\nTask input:\n{task_input}\n"
-                        );
-                        last_full_prompt = full_prompt2.clone();
-                        let (raw2, usage2) = run_attempt(&full_prompt2)?;
-                        usage = usage2;
-                        match validate_raw(&raw2) {
-                            Ok(valid) => {
-                                schema_valid = Some(true);
-                                stdout = valid.to_string();
-                                final_reason = None;
-                                // No quarantine when retry succeeds.
-                            }
-                            Err(reason2) => {
-                                final_reason = Some(reason2.clone());
-                                attempts.push(QuarantineAttempt {
-                                    reason: reason2.clone(),
-                                    prompt: full_prompt2.clone(),
-                                    prompt_sha256: sha256_hex(&full_prompt2),
-                                    raw_response: raw2.clone(),
-                                    raw_sha256: sha256_hex(&raw2),
-                                });
-
-                                let qid = log_schema_failure(
-                                    &spec.command_name,
-                                    &reason2,
-                                    &raw2,
-                                    &schema_pretty,
-                                    &task_input,
-                                    attempts.clone(),
-                                )
-                                .unwrap_or_else(|_| "".to_string());
-                                schema_valid = Some(false);
-                                quarantine_id = if qid.is_empty() { None } else { Some(qid) };
-                                stdout = raw2;
-                            }
-                        }
-                    } else {
-                        let qid = log_schema_failure(
-                            &spec.command_name,
-                            &reason1,
-                            &raw1,
-                            &schema_pretty,
-                            &task_input,
-                            attempts.clone(),
-                        )
-                        .unwrap_or_else(|_| "".to_string());
-                        schema_valid = Some(false);
-                        quarantine_id = if qid.is_empty() { None } else { Some(qid) };
-                        stdout = raw1;
-                    }
-                }
-            }
-            // keep full prompt hash/logging correlation for schema tasks
-            if spec.logging_enabled && logging_enabled() {
-                let _ = log_codex_run(RunLogInput {
-                    tool: &spec.command_name,
-                    prompt: &last_full_prompt,
-                    duration_ms: started.elapsed().as_millis() as u64,
-                    usage: Some(&usage),
-                    capture: Some(&capture_stats),
-                    schema_ok: schema_valid.unwrap_or(false),
-                    schema_reason: if schema_valid == Some(false) {
-                        final_reason.as_deref().or(Some("schema_validation_failed"))
-                    } else {
-                        None
-                    },
-                    schema_name: spec.schema.as_ref().map(|s| s.name.as_str()),
-                    quarantine_id: quarantine_id.as_deref(),
-                    policy_blocked: None,
-                    policy_reason: None,
-                });
-            }
-            return Ok(ExecutionResult {
-                stdout,
-                stderr,
-                duration_ms: started.elapsed().as_millis() as u64,
-                schema_valid,
-                quarantine_id,
-                capture_stats,
-                execution_id,
-                usage,
-                system_status,
-            });
-        }
-    }
-
-    if spec.logging_enabled && logging_enabled() {
-        let schema_name = spec.schema.as_ref().map(|s| s.name.as_str());
-        let _ = log_codex_run(RunLogInput {
-            tool: &spec.command_name,
-            prompt: &prompt,
-            duration_ms: started.elapsed().as_millis() as u64,
-            usage: Some(&usage),
-            capture: Some(&capture_stats),
-            schema_ok: schema_valid.unwrap_or(true),
-            schema_reason: None,
-            schema_name,
-            quarantine_id: quarantine_id.as_deref(),
-            policy_blocked: None,
-            policy_reason: None,
-        });
-    }
-
-    Ok(ExecutionResult {
-        stdout,
-        stderr,
-        duration_ms: started.elapsed().as_millis() as u64,
-        schema_valid,
-        quarantine_id,
-        capture_stats,
-        execution_id,
-        usage,
-        system_status,
-    })
+    crate::exec_core::execute_task(spec)
 }
 
 fn cmd_bench(runs: usize, command: &[String]) -> i32 {
@@ -473,7 +246,7 @@ fn cmd_commitmsg() -> i32 {
 }
 
 fn cmd_replay(id: &str) -> i32 {
-    structured_cmds::cmd_replay(id, run_llm_jsonl)
+    structured_cmds::cmd_replay(id, crate::exec_core::run_llm_jsonl)
 }
 
 fn cmd_cx_compat(args: &[String]) -> i32 {
@@ -495,7 +268,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             introspect_print_version(APP_NAME, APP_VERSION);
             0
         }
-        "cxdoctor" | "doctor" => doctor::print_doctor(run_llm_jsonl),
+        "cxdoctor" | "doctor" => doctor::print_doctor(crate::exec_core::run_llm_jsonl),
         "cxwhere" | "where" => print_where(&args[1..], APP_VERSION),
         "cxroutes" | "routes" => cmd_routes(&args[1..]),
         "cxdiag" | "diag" => cmd_diag(APP_VERSION),
@@ -689,7 +462,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
                 .unwrap_or(10);
             cmd_log_tail(n)
         }
-        "cxhealth" | "health" => doctor::cmd_health(run_llm_jsonl, cmd_cxo),
+        "cxhealth" | "health" => doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo),
         "cxrtk" | "rtk-status" => cmd_rtk_status(),
         "cxlog_on" | "log-on" => cmd_log_on(),
         "cxlog_off" | "log-off" => cmd_log_off(),
@@ -936,7 +709,7 @@ pub fn run() -> i32 {
                 1
             }
         }
-        "doctor" => doctor::print_doctor(run_llm_jsonl),
+        "doctor" => doctor::print_doctor(crate::exec_core::run_llm_jsonl),
         "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
             "get" => {
@@ -1077,7 +850,7 @@ pub fn run() -> i32 {
                 .unwrap_or(10);
             cmd_log_tail(n)
         }
-        "health" => doctor::cmd_health(run_llm_jsonl, cmd_cxo),
+        "health" => doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo),
         "rtk-status" => cmd_rtk_status(),
         "log-on" => cmd_log_on(),
         "log-off" => cmd_log_off(),
@@ -1189,6 +962,8 @@ mod tests {
     use super::*;
     use crate::capture::{BudgetConfig, choose_clip_mode, clip_text_with_config, should_use_rtk};
     use crate::logs::append_jsonl;
+    use crate::runlog::log_schema_failure;
+    use serde_json::Value;
     use serde_json::json;
     use std::fs;
     use std::process::Command;
