@@ -5,6 +5,7 @@ mod logs;
 mod paths;
 mod schema;
 mod state;
+mod tasks;
 mod types;
 mod util;
 

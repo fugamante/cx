@@ -19,7 +19,7 @@ use crate::types::{
 };
 use crate::paths::{
     repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
-    resolve_state_file, resolve_tasks_file, repo_root_hint,
+    resolve_state_file, repo_root_hint,
 };
 use crate::logs::{
     append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file,
@@ -28,6 +28,9 @@ use crate::schema::{
     build_strict_schema_prompt, list_schemas, load_schema, schema_name_for_tool, validate_schema_instance,
 };
 use crate::state::{ensure_state_value, read_state_value, state_cache_clear, write_json_atomic};
+use crate::tasks::{
+    cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status, write_tasks,
+};
 use crate::util::sha256_hex;
 
 const APP_NAME: &str = "cxrs";
@@ -770,195 +773,6 @@ fn current_task_parent_id() -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn task_role_valid(role: &str) -> bool {
-    matches!(
-        role,
-        "architect" | "implementer" | "reviewer" | "tester" | "doc"
-    )
-}
-
-fn read_tasks() -> Result<Vec<TaskRecord>, String> {
-    let path = resolve_tasks_file()?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let mut s = String::new();
-    File::open(&path)
-        .map_err(|e| format!("cannot open {}: {e}", path.display()))?
-        .read_to_string(&mut s)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    if s.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    serde_json::from_str::<Vec<TaskRecord>>(&s)
-        .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))
-}
-
-fn write_tasks(tasks: &[TaskRecord]) -> Result<(), String> {
-    let path = resolve_tasks_file()?;
-    let value = serde_json::to_value(tasks).map_err(|e| format!("failed to encode tasks: {e}"))?;
-    write_json_atomic(&path, &value)
-}
-
-fn next_task_id(tasks: &[TaskRecord]) -> String {
-    let mut max_id = 0u64;
-    for t in tasks {
-        if let Some(num) =
-            t.id.strip_prefix("task_")
-                .and_then(|v| v.parse::<u64>().ok())
-        {
-            if num > max_id {
-                max_id = num;
-            }
-        }
-    }
-    format!("task_{:03}", max_id + 1)
-}
-
-fn cmd_task_add(args: &[String]) -> i32 {
-    if args.is_empty() {
-        eprintln!(
-            "Usage: {APP_NAME} task add <objective> [--role <role>] [--parent <id>] [--context <ref>]"
-        );
-        return 2;
-    }
-    let mut obj_parts: Vec<String> = Vec::new();
-    let mut i = 0usize;
-    while i < args.len() {
-        if args[i].starts_with("--") {
-            break;
-        }
-        obj_parts.push(args[i].clone());
-        i += 1;
-    }
-    let objective = obj_parts.join(" ").trim().to_string();
-    if objective.is_empty() {
-        eprintln!("cxrs task add: objective cannot be empty");
-        return 2;
-    }
-    let mut role = "implementer".to_string();
-    let mut parent_id: Option<String> = None;
-    let mut context_ref = String::new();
-    let mut i = i;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--role" => {
-                let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --role requires a value");
-                    return 2;
-                };
-                role = v.to_lowercase();
-                i += 2;
-            }
-            "--parent" => {
-                let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --parent requires a value");
-                    return 2;
-                };
-                parent_id = Some(v.to_string());
-                i += 2;
-            }
-            "--context" => {
-                let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --context requires a value");
-                    return 2;
-                };
-                context_ref = v.to_string();
-                i += 2;
-            }
-            other => {
-                eprintln!("cxrs task add: unknown flag '{other}'");
-                return 2;
-            }
-        }
-    }
-    if !task_role_valid(&role) {
-        eprintln!("cxrs task add: invalid role '{role}'");
-        return 2;
-    }
-
-    let mut tasks = match read_tasks() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
-    let id = next_task_id(&tasks);
-    let now = utc_now_iso();
-    tasks.push(TaskRecord {
-        id: id.clone(),
-        parent_id,
-        role,
-        objective,
-        context_ref,
-        status: "pending".to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-    });
-    if let Err(e) = write_tasks(&tasks) {
-        eprintln!("cxrs task add: {e}");
-        return 1;
-    }
-    println!("{id}");
-    0
-}
-
-fn cmd_task_list(status_filter: Option<&str>) -> i32 {
-    let tasks = match read_tasks() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
-    let filtered: Vec<TaskRecord> = match status_filter {
-        Some(s) => tasks.into_iter().filter(|t| t.status == s).collect(),
-        None => tasks,
-    };
-    if filtered.is_empty() {
-        println!("No tasks.");
-        return 0;
-    }
-    println!("id | role | status | parent_id | objective");
-    println!("---|---|---|---|---");
-    for t in filtered {
-        println!(
-            "{} | {} | {} | {} | {}",
-            t.id,
-            t.role,
-            t.status,
-            t.parent_id.unwrap_or_else(|| "-".to_string()),
-            t.objective
-        );
-    }
-    0
-}
-
-fn cmd_task_show(id: &str) -> i32 {
-    let tasks = match read_tasks() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
-    let Some(task) = tasks.into_iter().find(|t| t.id == id) else {
-        eprintln!("cxrs task show: task not found: {id}");
-        return 1;
-    };
-    match serde_json::to_string_pretty(&task) {
-        Ok(s) => {
-            println!("{s}");
-            0
-        }
-        Err(e) => {
-            eprintln!("cxrs task show: render failed: {e}");
-            1
-        }
-    }
-}
-
 fn parse_words(input: &str) -> Vec<String> {
     input
         .split_whitespace()
@@ -1165,20 +979,7 @@ fn run_task_by_id(
 }
 
 fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
-    let mut tasks = match read_tasks() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
-    let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
-        eprintln!("cxrs task: task not found: {id}");
-        return 1;
-    };
-    task.status = new_status.to_string();
-    task.updated_at = utc_now_iso();
-    if let Err(e) = write_tasks(&tasks) {
+    if let Err(e) = set_task_status(id, new_status) {
         eprintln!("cxrs task: {e}");
         return 1;
     }
@@ -1193,162 +994,10 @@ fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     0
 }
 
-fn cmd_task_fanout(objective: &str, from: Option<&str>) -> i32 {
-    let obj = objective.trim();
-    if obj.is_empty() {
-        eprintln!("Usage: {APP_NAME} task fanout <objective>");
-        return 2;
-    }
-    let mut tasks = match read_tasks() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
-    let parent_id = next_task_id(&tasks);
-    let now = utc_now_iso();
-    tasks.push(TaskRecord {
-        id: parent_id.clone(),
-        parent_id: None,
-        role: "architect".to_string(),
-        objective: obj.to_string(),
-        context_ref: "fanout_parent".to_string(),
-        status: "pending".to_string(),
-        created_at: now.clone(),
-        updated_at: now.clone(),
-    });
-
-    let source = from.unwrap_or("worktree");
-    let diff = match source {
-        "staged-diff" => Command::new("git")
-            .args(["diff", "--staged", "--no-color"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                if o.status.success() {
-                    Some(String::from_utf8_lossy(&o.stdout).to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default(),
-        "worktree" => Command::new("git")
-            .args(["diff", "--no-color"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                if o.status.success() {
-                    Some(String::from_utf8_lossy(&o.stdout).to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default(),
-        "log" => Command::new("git")
-            .args(["log", "--oneline", "-n", "200"])
-            .output()
-            .ok()
-            .and_then(|o| {
-                if o.status.success() {
-                    Some(String::from_utf8_lossy(&o.stdout).to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default(),
-        x if x.starts_with("file:") => {
-            let p = x.trim_start_matches("file:");
-            fs::read_to_string(p).unwrap_or_default()
-        }
-        _ => {
-            eprintln!("cxrs task fanout: unsupported --from source '{source}'");
-            return 2;
-        }
-    };
-    let budget = env::var("CX_CONTEXT_BUDGET_CHARS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(12000);
-    let chunks = if diff.trim().is_empty() {
-        Vec::new()
-    } else {
-        chunk_text_by_budget(&diff, budget)
-    };
-    let chunk_count = chunks.len().clamp(1, 6);
-    let roles_cycle = ["architect", "implementer", "reviewer", "tester", "doc"];
-    let mut created: Vec<TaskRecord> = Vec::new();
-    for i in 0..chunk_count {
-        let ridx = (i + 1) % roles_cycle.len();
-        let role = roles_cycle[ridx].to_string();
-        let id = next_task_id(&tasks);
-        let context_ref = if chunks.is_empty() {
-            format!("objective:{obj}")
-        } else {
-            format!("diff_chunk_{}/{}", i + 1, chunk_count)
-        };
-        let sub_obj = match role.as_str() {
-            "architect" => format!("Define implementation plan for: {obj}"),
-            "implementer" => format!("Implement chunk {} for: {obj}", i + 1),
-            "reviewer" => format!(
-                "Review chunk {} changes for correctness/safety: {obj}",
-                i + 1
-            ),
-            "tester" => format!("Create/execute tests for chunk {}: {obj}", i + 1),
-            _ => format!("Document chunk {} outcomes: {obj}", i + 1),
-        };
-        let rec = TaskRecord {
-            id: id.clone(),
-            parent_id: Some(parent_id.clone()),
-            role,
-            objective: sub_obj,
-            context_ref,
-            status: "pending".to_string(),
-            created_at: utc_now_iso(),
-            updated_at: utc_now_iso(),
-        };
-        tasks.push(rec.clone());
-        created.push(rec);
-    }
-    while created.len() < 3 {
-        let role = roles_cycle[(created.len() + 1) % roles_cycle.len()].to_string();
-        let id = next_task_id(&tasks);
-        let rec = TaskRecord {
-            id: id.clone(),
-            parent_id: Some(parent_id.clone()),
-            role: role.clone(),
-            objective: format!("{} workstream for: {}", role, obj),
-            context_ref: "objective".to_string(),
-            status: "pending".to_string(),
-            created_at: utc_now_iso(),
-            updated_at: utc_now_iso(),
-        };
-        tasks.push(rec.clone());
-        created.push(rec);
-    }
-    if created.len() > 8 {
-        created.truncate(8);
-    }
-    if let Err(e) = write_tasks(&tasks) {
-        eprintln!("cxrs task fanout: {e}");
-        return 1;
-    }
-    println!("parent: {parent_id}");
-    println!("id | role | status | context_ref | objective");
-    println!("---|---|---|---|---");
-    for t in created {
-        println!(
-            "{} | {} | {} | {} | {}",
-            t.id, t.role, t.status, t.context_ref, t.objective
-        );
-    }
-    0
-}
-
 fn cmd_task(args: &[String]) -> i32 {
     let sub = args.first().map(String::as_str).unwrap_or("list");
     match sub {
-        "add" => cmd_task_add(&args[1..]),
+        "add" => cmd_task_add(APP_NAME, &args[1..]),
         "list" => {
             let mut status_filter: Option<&str> = None;
             let mut i = 1usize;
@@ -1427,7 +1076,7 @@ fn cmd_task(args: &[String]) -> i32 {
                 objective_parts.push(args[i].clone());
                 i += 1;
             }
-            cmd_task_fanout(&objective_parts.join(" "), from)
+            cmd_task_fanout(APP_NAME, &objective_parts.join(" "), from)
         }
         "run" => {
             let Some(id) = args.get(1) else {
