@@ -140,6 +140,10 @@ impl TempRepo {
             .join("quarantine")
             .join(format!("{id}.json"))
     }
+
+    fn state_file(&self) -> PathBuf {
+        self.root.join(".codex").join("state.json")
+    }
 }
 
 impl Drop for TempRepo {
@@ -164,6 +168,11 @@ fn parse_jsonl(path: &Path) -> Vec<Value> {
         .filter(|l| !l.trim().is_empty())
         .map(|line| serde_json::from_str::<Value>(line).expect("valid json line"))
         .collect()
+}
+
+fn read_json(path: &Path) -> Value {
+    let text = fs::read_to_string(path).expect("read json");
+    serde_json::from_str::<Value>(&text).expect("parse json")
 }
 
 #[cfg(unix)]
@@ -581,6 +590,152 @@ exit 0
     assert_eq!(
         last.get("schema_valid").and_then(Value::as_bool),
         Some(false)
+    );
+}
+
+#[test]
+fn ollama_model_unset_set_transitions_are_persisted_and_enforced() {
+    let repo = TempRepo::new();
+    repo.write_mock("ollama", "#!/usr/bin/env bash\ncat >/dev/null\necho ok\n");
+
+    let unset_all = repo.run_with_env(&["llm", "unset", "all"], &[]);
+    assert!(unset_all.status.success(), "unset all should succeed");
+
+    let use_backend_only = repo.run_with_env(&["llm", "use", "ollama"], &[]);
+    assert!(
+        use_backend_only.status.success(),
+        "llm use ollama should succeed; stdout={} stderr={}",
+        stdout_str(&use_backend_only),
+        stderr_str(&use_backend_only)
+    );
+
+    let missing_model_run = repo.run_with_env(&["cxo", "echo", "hello"], &[]);
+    assert!(
+        !missing_model_run.status.success(),
+        "expected failure when ollama model unset; stdout={} stderr={}",
+        stdout_str(&missing_model_run),
+        stderr_str(&missing_model_run)
+    );
+    assert!(
+        stderr_str(&missing_model_run).contains("ollama model is unset"),
+        "missing unset model guidance: {}",
+        stderr_str(&missing_model_run)
+    );
+
+    let set_model = repo.run_with_env(&["llm", "set-model", "llama3.1"], &[]);
+    assert!(set_model.status.success(), "set-model should succeed");
+    let show = repo.run_with_env(&["llm", "show"], &[]);
+    let show_text = stdout_str(&show);
+    assert!(show_text.contains("llm_backend: ollama"), "{show_text}");
+    assert!(show_text.contains("ollama_model: llama3.1"), "{show_text}");
+
+    let state = read_json(&repo.state_file());
+    assert_eq!(
+        state
+            .get("preferences")
+            .and_then(|v| v.get("llm_backend"))
+            .and_then(Value::as_str),
+        Some("ollama")
+    );
+    assert_eq!(
+        state
+            .get("preferences")
+            .and_then(|v| v.get("ollama_model"))
+            .and_then(Value::as_str),
+        Some("llama3.1")
+    );
+}
+
+#[test]
+fn ollama_schema_malformed_output_creates_quarantine() {
+    let repo = TempRepo::new();
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo "this is not json"
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["next", "echo", "hello"],
+        &[("CX_LLM_BACKEND", "ollama"), ("CX_OLLAMA_MODEL", "llama3.1")],
+    );
+    assert!(
+        !out.status.success(),
+        "expected schema failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+
+    let sf_log = parse_jsonl(&repo.schema_fail_log());
+    let sf_last = sf_log.last().expect("schema failure row");
+    let qid = sf_last
+        .get("quarantine_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert!(!qid.is_empty(), "expected quarantine_id");
+    assert!(repo.quarantine_file(qid).exists(), "missing quarantine file");
+
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_eq!(
+        last.get("backend_used").and_then(Value::as_str),
+        Some("ollama")
+    );
+    assert_eq!(
+        last.get("schema_valid").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(last.get("quarantine_id").and_then(Value::as_str), Some(qid));
+}
+
+#[test]
+fn ollama_schema_commands_remain_enforced_when_mode_is_lean() {
+    let repo = TempRepo::new();
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo '{"commands":["git status --short","cargo test -q"]}'
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["next", "echo", "hello"],
+        &[
+            ("CX_MODE", "lean"),
+            ("CX_LLM_BACKEND", "ollama"),
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "expected schema success; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let text = stdout_str(&out);
+    assert!(text.contains("git status --short"), "{text}");
+    assert!(text.contains("cargo test -q"), "{text}");
+
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_eq!(
+        last.get("backend_used").and_then(Value::as_str),
+        Some("ollama")
+    );
+    assert_eq!(
+        last.get("execution_mode").and_then(Value::as_str),
+        Some("lean")
+    );
+    assert_eq!(
+        last.get("schema_enforced").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        last.get("schema_valid").and_then(Value::as_bool),
+        Some(true)
     );
 }
 

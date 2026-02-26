@@ -63,6 +63,10 @@ All notable changes to this project are documented in this file.
     - unwritable `.codex/quarantine` error surfacing during schema failure handling
     - unwritable `.codex/cxlogs` resilience (command execution remains functional)
     - timeout override end-to-end coverage for `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, and `CX_TIMEOUT_SHELL_SECS`
+  - expanded Ollama backend coverage:
+    - unset/set model transition enforcement with persisted state verification
+    - malformed schema-output handling under Ollama with quarantine/log assertions
+    - schema-command enforcement under `CX_MODE=lean` (schema remains enforced/validated)
 
 ### Changed
 - Expanded `cxparity` overlap coverage and invariants:
