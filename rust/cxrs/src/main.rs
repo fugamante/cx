@@ -7,6 +7,7 @@ mod logs;
 mod optimize;
 mod paths;
 mod policy;
+mod prompting;
 mod quarantine;
 mod runlog;
 mod runtime;
