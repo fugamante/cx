@@ -36,6 +36,8 @@ All notable changes to this project are documented in this file.
   - `src/bench_parity.rs`
   - `src/exec_core.rs`
   - `src/compat_cmd.rs`
+  - `src/cmdctx.rs`
+  - `src/execution.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -67,6 +69,9 @@ All notable changes to this project are documented in this file.
 - Extracted `bench` and `parity` command flows into `src/bench_parity.rs`.
 - Extracted execution core (`run_llm_plain`, `run_llm_jsonl`, `execute_task`) into `src/exec_core.rs`.
 - Extracted `cx-compat` command dispatcher into `src/compat_cmd.rs`.
+- Introduced shared command context type in `src/cmdctx.rs` for handler-style module entrypoints.
+- Renamed execution core module path from `exec_core` to `execution` and rewired call sites.
+- Migrated `task_cmds` and `compat_cmd` to `handler(ctx, args, deps)` style entrypoints.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

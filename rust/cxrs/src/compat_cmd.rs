@@ -1,3 +1,5 @@
+use crate::cmdctx::CmdCtx;
+
 pub struct CompatDeps {
     pub print_help: fn(),
     pub print_task_help: fn(),
@@ -53,7 +55,8 @@ pub struct CompatDeps {
     pub cmd_quarantine_show: fn(&str) -> i32,
 }
 
-pub fn cmd_cx_compat(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
+    let app_name = ctx.app_name;
     if args.is_empty() {
         eprintln!("Usage: {app_name} cx <command> [args...]");
         return 2;

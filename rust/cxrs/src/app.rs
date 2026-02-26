@@ -5,6 +5,7 @@ use crate::agentcmds;
 use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
 use crate::bench_parity;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
+use crate::cmdctx::CmdCtx;
 use crate::compat_cmd;
 use crate::diagnostics::cmd_diag;
 use crate::doctor;
@@ -162,14 +163,23 @@ fn task_cmd_deps() -> task_cmds::TaskCmdDeps {
     }
 }
 
+fn cmd_ctx() -> CmdCtx {
+    CmdCtx {
+        app_name: APP_NAME,
+        app_version: APP_VERSION,
+        execute_task,
+        run_llm_jsonl: crate::execution::run_llm_jsonl,
+    }
+}
+
 fn cmd_task(args: &[String]) -> i32 {
-    task_cmds::cmd_task(APP_NAME, args, &task_cmd_deps())
+    task_cmds::handler(&cmd_ctx(), args, &task_cmd_deps())
 }
 
 // runs.jsonl readers moved to `logs.rs`
 
 fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
-    crate::exec_core::execute_task(spec)
+    crate::execution::execute_task(spec)
 }
 
 fn cmd_bench(runs: usize, command: &[String]) -> i32 {
@@ -247,7 +257,7 @@ fn cmd_commitmsg() -> i32 {
 }
 
 fn cmd_replay(id: &str) -> i32 {
-    structured_cmds::cmd_replay(id, crate::exec_core::run_llm_jsonl)
+    structured_cmds::cmd_replay(id, crate::execution::run_llm_jsonl)
 }
 
 fn compat_print_version() {
@@ -279,11 +289,11 @@ fn compat_cmd_llm(args: &[String]) -> i32 {
 }
 
 fn compat_cmd_doctor() -> i32 {
-    doctor::print_doctor(crate::exec_core::run_llm_jsonl)
+    doctor::print_doctor(crate::execution::run_llm_jsonl)
 }
 
 fn compat_cmd_health() -> i32 {
-    doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo)
+    doctor::cmd_health(crate::execution::run_llm_jsonl, cmd_cxo)
 }
 
 fn compat_deps() -> compat_cmd::CompatDeps {
@@ -344,7 +354,7 @@ fn compat_deps() -> compat_cmd::CompatDeps {
 }
 
 fn cmd_cx_compat(args: &[String]) -> i32 {
-    compat_cmd::cmd_cx_compat(APP_NAME, args, &compat_deps())
+    compat_cmd::handler(&cmd_ctx(), args, &compat_deps())
 }
 
 pub(crate) fn is_compat_name(name: &str) -> bool {
@@ -544,7 +554,7 @@ pub fn run() -> i32 {
                 1
             }
         }
-        "doctor" => doctor::print_doctor(crate::exec_core::run_llm_jsonl),
+        "doctor" => doctor::print_doctor(crate::execution::run_llm_jsonl),
         "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
             "get" => {
@@ -685,7 +695,7 @@ pub fn run() -> i32 {
                 .unwrap_or(10);
             cmd_log_tail(n)
         }
-        "health" => doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo),
+        "health" => doctor::cmd_health(crate::execution::run_llm_jsonl, cmd_cxo),
         "rtk-status" => cmd_rtk_status(),
         "log-on" => cmd_log_on(),
         "log-off" => cmd_log_off(),

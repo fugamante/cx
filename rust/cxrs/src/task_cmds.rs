@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::cmdctx::CmdCtx;
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
 use crate::tasks::set_task_status;
@@ -36,7 +37,8 @@ pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     0
 }
 
-pub fn cmd_task(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
+pub fn handler(ctx: &CmdCtx, args: &[String], deps: &TaskCmdDeps) -> i32 {
+    let app_name = ctx.app_name;
     let sub = args.first().map(String::as_str).unwrap_or("list");
     match sub {
         "add" => (deps.cmd_task_add)(app_name, &args[1..]),
