@@ -43,6 +43,7 @@ jobs:
           cd rust/cxrs
           cargo fmt --check
           cargo check
+          cargo clippy --all-targets -- -D warnings
           cargo test --tests
 
       - name: Reliability Suite

@@ -17,6 +17,9 @@ use crate::paths::{repo_root_hint, resolve_log_file};
 use crate::process::run_command_output_with_timeout;
 use crate::routing::{bash_function_names, route_handler_for};
 
+type SchemaKeys = Option<Vec<&'static str>>;
+type ParityCase = (&'static str, Vec<&'static str>, SchemaKeys);
+
 fn run_command_for_bench(
     command: &[String],
     disable_cx_log: bool,
@@ -100,11 +103,9 @@ pub fn cmd_bench(app_name: &str, runs: usize, command: &[String]) -> i32 {
     if stats.failures > 0 { 1 } else { 0 }
 }
 
-fn parity_overlap(
-    repo: &std::path::Path,
-) -> Vec<(&'static str, Vec<&'static str>, Option<Vec<&'static str>>)> {
+fn parity_overlap(repo: &std::path::Path) -> Vec<ParityCase> {
     let bash_funcs = bash_function_names(repo);
-    let parity_catalog: Vec<(&str, Vec<&str>, Option<Vec<&str>>)> = vec![
+    let parity_catalog: Vec<ParityCase> = vec![
         ("cxo", vec!["echo", "hi"], None),
         ("cx", vec!["echo", "hi"], None),
         ("cxj", vec!["echo", "hi"], None),
@@ -127,66 +128,46 @@ fn parity_overlap(
         .collect()
 }
 
-fn evaluate_parity_case(
-    repo: &std::path::Path,
-    exe: &std::path::Path,
-    temp_repo: &std::path::Path,
-    temp_log_file: &std::path::Path,
+struct ParityEvalCtx<'a> {
+    repo: &'a std::path::Path,
+    exe: &'a std::path::Path,
+    temp_repo: &'a std::path::Path,
+    temp_log_file: &'a std::path::Path,
     budget_chars: usize,
-    cmd: &str,
-    args: &[&str],
-    schema_keys: &Option<Vec<&str>>,
-    mock_dir: &Path,
-) -> ParityRow {
+    mock_dir: &'a Path,
+}
+
+struct ParityCaseInput<'a> {
+    cmd: &'a str,
+    args: &'a [&'a str],
+    schema_keys: &'a SchemaKeys,
+}
+
+fn evaluate_parity_case(ctx: &ParityEvalCtx<'_>, case: ParityCaseInput<'_>) -> ParityRow {
     let mut row = ParityRow {
-        cmd: cmd.to_string(),
+        cmd: case.cmd.to_string(),
         checked: true,
         ..Default::default()
     };
-    run_rust_case(
-        &mut row,
-        exe,
-        temp_repo,
-        temp_log_file,
-        budget_chars,
-        cmd,
-        args,
-        schema_keys,
-        mock_dir,
-    );
-    run_bash_case(
-        &mut row,
-        repo,
-        temp_repo,
-        temp_log_file,
-        budget_chars,
-        cmd,
-        args,
-        schema_keys,
-        mock_dir,
-    );
+    run_rust_case(&mut row, ctx, &case);
+    run_bash_case(&mut row, ctx, &case);
     row
 }
 
-fn run_rust_case(
-    row: &mut ParityRow,
-    exe: &std::path::Path,
-    temp_repo: &std::path::Path,
-    temp_log_file: &std::path::Path,
-    budget_chars: usize,
-    cmd: &str,
-    args: &[&str],
-    schema_keys: &Option<Vec<&str>>,
-    mock_dir: &Path,
-) {
-    let before_rust = file_len(temp_log_file);
-    let mut rust_cmd = Command::new(exe);
-    rust_cmd.arg("cx-compat").arg(cmd).args(args);
-    with_parity_env(&mut rust_cmd, mock_dir, temp_repo);
+fn run_rust_case(row: &mut ParityRow, ctx: &ParityEvalCtx<'_>, case: &ParityCaseInput<'_>) {
+    let before_rust = file_len(ctx.temp_log_file);
+    let mut rust_cmd = Command::new(ctx.exe);
+    rust_cmd.arg("cx-compat").arg(case.cmd).args(case.args);
+    with_parity_env(&mut rust_cmd, ctx.mock_dir, ctx.temp_repo);
     rust_cmd.env("CX_EXECUTION_PATH", "rust:cxparity");
     if let Ok(out) = run_command_output_with_timeout(rust_cmd, "cxparity rust case") {
-        let (ok, json_ok, logs_ok, budget_ok) =
-            run_parity_path(out, temp_log_file, before_rust, budget_chars, schema_keys);
+        let (ok, json_ok, logs_ok, budget_ok) = run_parity_path(
+            out,
+            ctx.temp_log_file,
+            before_rust,
+            ctx.budget_chars,
+            case.schema_keys,
+        );
         row.rust_ok = ok;
         row.json_ok = json_ok;
         row.logs_ok = logs_ok;
@@ -194,31 +175,26 @@ fn run_rust_case(
     }
 }
 
-fn run_bash_case(
-    row: &mut ParityRow,
-    repo: &std::path::Path,
-    temp_repo: &std::path::Path,
-    temp_log_file: &std::path::Path,
-    budget_chars: usize,
-    cmd: &str,
-    args: &[&str],
-    schema_keys: &Option<Vec<&str>>,
-    mock_dir: &Path,
-) {
-    let before_bash = file_len(temp_log_file);
+fn run_bash_case(row: &mut ParityRow, ctx: &ParityEvalCtx<'_>, case: &ParityCaseInput<'_>) {
+    let before_bash = file_len(ctx.temp_log_file);
     let bash_cmd = format!(
         "source '{}' >/dev/null 2>&1; {} {}",
-        repo.join("cx.sh").display(),
-        cmd,
-        args.join(" ")
+        ctx.repo.join("cx.sh").display(),
+        case.cmd,
+        case.args.join(" ")
     );
     let mut bash_proc = Command::new("bash");
     bash_proc.arg("-lc").arg(bash_cmd);
-    with_parity_env(&mut bash_proc, mock_dir, temp_repo);
+    with_parity_env(&mut bash_proc, ctx.mock_dir, ctx.temp_repo);
     bash_proc.env("CX_EXECUTION_PATH", "bash:cxparity");
     if let Ok(out) = run_command_output_with_timeout(bash_proc, "cxparity bash case") {
-        let (ok, json_ok, logs_ok, budget_ok) =
-            run_parity_path(out, temp_log_file, before_bash, budget_chars, schema_keys);
+        let (ok, json_ok, logs_ok, budget_ok) = run_parity_path(
+            out,
+            ctx.temp_log_file,
+            before_bash,
+            ctx.budget_chars,
+            case.schema_keys,
+        );
         row.bash_ok = ok;
         row.json_ok = row.json_ok && json_ok;
         row.logs_ok = row.logs_ok && logs_ok;
@@ -236,7 +212,7 @@ fn resolve_parity_context() -> Result<(PathBuf, std::path::PathBuf, usize), i32>
 }
 
 fn parity_rows(
-    overlap: Vec<(&'static str, Vec<&'static str>, Option<Vec<&'static str>>)>,
+    overlap: Vec<ParityCase>,
     repo: &Path,
     exe: &Path,
     temp_repo: &Path,
@@ -244,19 +220,24 @@ fn parity_rows(
     budget_chars: usize,
     mock_dir: &Path,
 ) -> (Vec<ParityRow>, bool) {
+    let ctx = ParityEvalCtx {
+        repo,
+        exe,
+        temp_repo,
+        temp_log_file,
+        budget_chars,
+        mock_dir,
+    };
     let mut rows: Vec<ParityRow> = Vec::new();
     let mut pass_all = true;
     for (cmd, args, schema_keys) in overlap {
         let row = evaluate_parity_case(
-            repo,
-            exe,
-            temp_repo,
-            temp_log_file,
-            budget_chars,
-            cmd,
-            &args,
-            &schema_keys,
-            mock_dir,
+            &ctx,
+            ParityCaseInput {
+                cmd,
+                args: &args,
+                schema_keys: &schema_keys,
+            },
         );
         if !(row.rust_ok && row.bash_ok && row.json_ok && row.logs_ok && row.budget_ok) {
             pass_all = false;

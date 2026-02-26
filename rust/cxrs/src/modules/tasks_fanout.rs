@@ -53,7 +53,7 @@ fn make_subtask(
     objective: &str,
     parent_id: &str,
     has_chunks: bool,
-    tasks: &mut Vec<TaskRecord>,
+    tasks: &[TaskRecord],
 ) -> TaskRecord {
     let id = next_task_id(tasks);
     let context_ref = if has_chunks {
@@ -83,16 +83,26 @@ fn make_subtask(
     }
 }
 
+fn next_task_id_with_created(tasks: &[TaskRecord], created: &[TaskRecord]) -> String {
+    let max_n = tasks
+        .iter()
+        .chain(created.iter())
+        .filter_map(|t| t.id.strip_prefix("task_")?.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("task_{:03}", max_n + 1)
+}
+
 fn ensure_min_created(
     created: &mut Vec<TaskRecord>,
     parent_id: &str,
     objective: &str,
-    tasks: &mut Vec<TaskRecord>,
+    tasks: &[TaskRecord],
 ) {
     let roles_cycle = ["architect", "implementer", "reviewer", "tester", "doc"];
     while created.len() < 3 {
         let role = roles_cycle[(created.len() + 1) % roles_cycle.len()].to_string();
-        let id = next_task_id(tasks);
+        let id = next_task_id_with_created(tasks, created);
         let rec = TaskRecord {
             id,
             parent_id: Some(parent_id.to_string()),
@@ -103,7 +113,6 @@ fn ensure_min_created(
             created_at: utc_now_iso(),
             updated_at: utc_now_iso(),
         };
-        tasks.push(rec.clone());
         created.push(rec);
     }
 }

@@ -1,195 +1,10 @@
+mod common;
+
+use common::{
+    TempRepo, parse_jsonl, read_json, set_readonly, set_writable, stderr_str, stdout_str,
+};
 use serde_json::{Value, json};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-fn git_bin() -> String {
-    if let Ok(v) = std::env::var("GIT_BIN")
-        && !v.trim().is_empty()
-    {
-        return v;
-    }
-    for c in ["git", "/opt/homebrew/bin/git", "/usr/bin/git"] {
-        if std::process::Command::new(c)
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
-            return c.to_string();
-        }
-    }
-    "git".to_string()
-}
-
-fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
-    let mut last = None;
-    for _ in 0..5 {
-        let out = Command::new(git_bin())
-            .arg("init")
-            .arg("-q")
-            .arg(format!("--template={}", template_dir.display()))
-            .current_dir(root)
-            .output()
-            .expect("run git init");
-        if out.status.success() {
-            return;
-        }
-        last = Some(out);
-        sleep(Duration::from_millis(50));
-    }
-    panic!("git init failed after retries: {:?}", last);
-}
-
-struct TempRepo {
-    root: PathBuf,
-    home: PathBuf,
-    mock_bin: PathBuf,
-    original_path: String,
-}
-
-impl TempRepo {
-    fn new() -> Self {
-        let base = std::env::temp_dir();
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = base.join(format!("cxrs-rel-repo-{}-{}", std::process::id(), ts));
-        let home = base.join(format!("cxrs-rel-home-{}-{}", std::process::id(), ts));
-        let mock_bin = base.join(format!("cxrs-rel-mockbin-{}-{}", std::process::id(), ts));
-
-        fs::create_dir_all(&root).expect("create temp repo dir");
-        fs::create_dir_all(&home).expect("create temp home dir");
-        fs::create_dir_all(&mock_bin).expect("create mock bin dir");
-
-        let template_dir = root.join(".git-template");
-        fs::create_dir_all(&template_dir).expect("create git template dir");
-        init_git_repo_with_retry(&root, &template_dir);
-
-        let original_path = std::env::var("PATH").unwrap_or_default();
-        let me = Self {
-            root,
-            home,
-            mock_bin,
-            original_path,
-        };
-        me.copy_schema_registry();
-        me
-    }
-
-    fn copy_schema_registry(&self) {
-        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join(".codex")
-            .join("schemas");
-        let dst = self.root.join(".codex").join("schemas");
-        fs::create_dir_all(&dst).expect("create schema dst dir");
-        for entry in fs::read_dir(&src).expect("read schema src dir") {
-            let entry = entry.expect("schema dir entry");
-            let path = entry.path();
-            if path.extension().and_then(|v| v.to_str()) == Some("json") {
-                let fname = path.file_name().expect("schema filename");
-                fs::copy(&path, dst.join(fname)).expect("copy schema file");
-            }
-        }
-    }
-
-    fn write_mock(&self, name: &str, body: &str) {
-        let p = self.mock_bin.join(name);
-        fs::write(&p, body).expect("write mock");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&p).expect("mock metadata").permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&p, perms).expect("set mock executable");
-        }
-    }
-
-    fn run_with_env(&self, args: &[&str], envs: &[(&str, &str)]) -> Output {
-        let path = format!("{}:{}", self.mock_bin.display(), self.original_path);
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_cxrs"));
-        cmd.args(args)
-            .current_dir(&self.root)
-            .env("HOME", &self.home)
-            .env("PATH", path)
-            .env("CX_RTK_SYSTEM", "0");
-        for (k, v) in envs {
-            cmd.env(k, v);
-        }
-        cmd.output().expect("run cxrs")
-    }
-
-    fn runs_log(&self) -> PathBuf {
-        self.root.join(".codex").join("cxlogs").join("runs.jsonl")
-    }
-
-    fn schema_fail_log(&self) -> PathBuf {
-        self.root
-            .join(".codex")
-            .join("cxlogs")
-            .join("schema_failures.jsonl")
-    }
-
-    fn quarantine_file(&self, id: &str) -> PathBuf {
-        self.root
-            .join(".codex")
-            .join("quarantine")
-            .join(format!("{id}.json"))
-    }
-
-    fn state_file(&self) -> PathBuf {
-        self.root.join(".codex").join("state.json")
-    }
-}
-
-impl Drop for TempRepo {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-        let _ = fs::remove_dir_all(&self.home);
-        let _ = fs::remove_dir_all(&self.mock_bin);
-    }
-}
-
-fn stdout_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).to_string()
-}
-
-fn stderr_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).to_string()
-}
-
-fn parse_jsonl(path: &Path) -> Vec<Value> {
-    let text = fs::read_to_string(path).expect("read jsonl");
-    text.lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|line| serde_json::from_str::<Value>(line).expect("valid json line"))
-        .collect()
-}
-
-fn read_json(path: &Path) -> Value {
-    let text = fs::read_to_string(path).expect("read json");
-    serde_json::from_str::<Value>(&text).expect("parse json")
-}
-
-#[cfg(unix)]
-fn set_readonly(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(path).expect("metadata").permissions();
-    perms.set_mode(0o555);
-    fs::set_permissions(path, perms).expect("set readonly");
-}
-
-#[cfg(unix)]
-fn set_writable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(path).expect("metadata").permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).expect("set writable");
-}
 
 fn assert_required_run_fields(v: &Value) {
     for key in [
@@ -219,7 +34,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":64,"cached_inp
 
 #[test]
 fn timeout_injection_logs_timeout_metadata_and_required_fields() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
         r#"#!/usr/bin/env bash
@@ -256,7 +71,7 @@ sleep 2
 
 #[test]
 fn timeout_override_llm_precedence_is_logged_end_to_end() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
         r#"#!/usr/bin/env bash
@@ -288,7 +103,7 @@ sleep 2
 
 #[test]
 fn timeout_override_git_precedence_is_logged_end_to_end() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "git",
         r#"#!/usr/bin/env bash
@@ -317,7 +132,7 @@ exit 0
 
 #[test]
 fn timeout_override_shell_precedence_applies_to_clipboard_backend() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("codex", &mock_codex_jsonl_agent_text("copy me"));
     repo.write_mock(
         "pbcopy",
@@ -347,7 +162,7 @@ exit 0
 
 #[test]
 fn schema_failure_injection_creates_quarantine_and_run_flags() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
         r#"#!/usr/bin/env bash
@@ -388,7 +203,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
 
 #[test]
 fn missing_schema_file_fails_structured_command_cleanly() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     let schema_file = repo
         .root
         .join(".codex")
@@ -416,7 +231,7 @@ fn missing_schema_file_fails_structured_command_cleanly() {
 
 #[test]
 fn corrupted_quarantine_record_fails_show_with_clear_error() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     let qdir = repo.root.join(".codex").join("quarantine");
     fs::create_dir_all(&qdir).expect("create quarantine dir");
     let qid = "bad_record";
@@ -438,7 +253,7 @@ fn corrupted_quarantine_record_fails_show_with_clear_error() {
 
 #[test]
 fn unwritable_quarantine_path_surfaces_schema_failure_io_error() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     let qdir = repo.root.join(".codex").join("quarantine");
     fs::create_dir_all(&qdir).expect("create quarantine dir");
     #[cfg(unix)]
@@ -472,7 +287,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":32,"cached_input
 
 #[test]
 fn unwritable_run_log_path_does_not_break_command_execution() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     let logs_dir = repo.root.join(".codex").join("cxlogs");
     fs::create_dir_all(&logs_dir).expect("create logs dir");
     #[cfg(unix)]
@@ -492,7 +307,7 @@ fn unwritable_run_log_path_does_not_break_command_execution() {
 
 #[test]
 fn replay_is_deterministic_and_schema_valid_over_repeated_runs() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
         r#"#!/usr/bin/env bash
@@ -555,7 +370,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":80,"cached_input
 
 #[test]
 fn ollama_timeout_failure_logs_backend_and_timeout_fields() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
         r#"#!/usr/bin/env bash
@@ -595,7 +410,7 @@ exit 0
 
 #[test]
 fn ollama_model_unset_set_transitions_are_persisted_and_enforced() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("ollama", "#!/usr/bin/env bash\ncat >/dev/null\necho ok\n");
 
     let unset_all = repo.run_with_env(&["llm", "unset", "all"], &[]);
@@ -648,7 +463,7 @@ fn ollama_model_unset_set_transitions_are_persisted_and_enforced() {
 
 #[test]
 fn ollama_schema_malformed_output_creates_quarantine() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
         r#"#!/usr/bin/env bash
@@ -698,7 +513,7 @@ echo "this is not json"
 
 #[test]
 fn ollama_schema_commands_remain_enforced_when_mode_is_lean() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
         r#"#!/usr/bin/env bash
@@ -747,7 +562,7 @@ echo '{"commands":["git status --short","cargo test -q"]}'
 
 #[test]
 fn rtk_failure_falls_back_to_native_and_logs_capture_provider() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
     repo.write_mock(
         "rtk",
@@ -787,13 +602,18 @@ exit 2
 
 #[test]
 fn fix_run_policy_block_is_logged_with_reason() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-rel");
     let fix_json = r#"{"analysis":"dangerous path","commands":["rm -rf /tmp/cxrs-danger-test"]}"#;
     repo.write_mock("codex", &mock_codex_jsonl_agent_text(fix_json));
 
     let out = repo.run_with_env(
         &["fix-run", "echo", "hello"],
-        &[("CXFIX_RUN", "1"), ("CXFIX_FORCE", "0"), ("CX_UNSAFE", "0")],
+        &[
+            ("CXFIX_RUN", "1"),
+            ("CXFIX_FORCE", "0"),
+            ("CX_UNSAFE", "0"),
+            ("CX_TIMEOUT_LLM_SECS", "20"),
+        ],
     );
     assert!(
         out.status.success(),

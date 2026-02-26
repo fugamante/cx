@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 
+type ToolTokenMap = HashMap<String, (u64, u64)>;
+
 fn print_roles() -> i32 {
     println!("== cxrs roles ==");
     println!("architect   Define approach, boundaries, and tradeoffs.");
@@ -199,11 +201,9 @@ fn load_promptlint_runs(
     Ok((log_file, runs))
 }
 
-fn collect_promptlint_maps(
-    runs: &[crate::types::RunEntry],
-) -> (HashMap<String, (u64, u64)>, HashMap<String, (u64, u64)>) {
-    let mut tool_eff: HashMap<String, (u64, u64)> = HashMap::new();
-    let mut tool_cache: HashMap<String, (u64, u64)> = HashMap::new();
+fn collect_promptlint_maps(runs: &[crate::types::RunEntry]) -> (ToolTokenMap, ToolTokenMap) {
+    let mut tool_eff: ToolTokenMap = HashMap::new();
+    let mut tool_cache: ToolTokenMap = HashMap::new();
     for r in runs {
         let tool = r.tool.clone().unwrap_or_else(|| "unknown".to_string());
         let eff = r.effective_input_tokens.unwrap_or(0);
@@ -219,7 +219,7 @@ fn collect_promptlint_maps(
     (tool_eff, tool_cache)
 }
 
-fn top_effective_rows(tool_eff: &HashMap<String, (u64, u64)>) -> Vec<(String, u64)> {
+fn top_effective_rows(tool_eff: &ToolTokenMap) -> Vec<(String, u64)> {
     let mut rows: Vec<(String, u64)> = tool_eff
         .iter()
         .map(|(tool, (sum, count))| (tool.clone(), if *count == 0 { 0 } else { sum / count }))
@@ -231,7 +231,7 @@ fn top_effective_rows(tool_eff: &HashMap<String, (u64, u64)>) -> Vec<(String, u6
 
 fn prompt_drift_rows(
     runs: &[crate::types::RunEntry],
-    tool_eff: &HashMap<String, (u64, u64)>,
+    tool_eff: &ToolTokenMap,
 ) -> Vec<(String, i64, u64, u64)> {
     let mid = runs.len() / 2;
     let (first, second) = runs.split_at(mid.max(1).min(runs.len()));
@@ -265,7 +265,7 @@ fn sum_eff_for_tool(runs: &[crate::types::RunEntry], tool: &str) -> (u64, u64) {
     (sum, count)
 }
 
-fn poor_cache_rows(tool_cache: &HashMap<String, (u64, u64)>) -> Vec<(String, u64)> {
+fn poor_cache_rows(tool_cache: &ToolTokenMap) -> Vec<(String, u64)> {
     let mut rows: Vec<(String, u64)> = tool_cache
         .iter()
         .filter_map(|(tool, (cached, input))| {

@@ -106,7 +106,7 @@ pub fn cmd_diag(app_version: &str) -> i32 {
     let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
     let schema_dir = repo.join(".codex").join("schemas");
 
-    print_diag_header(app_version, &cfg);
+    print_diag_header(app_version, cfg);
     println!("capture_provider_config: {provider}");
     println!(
         "capture_provider_resolved: {}",

@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `rust/cxrs/src/modules/execution_logging.rs`:
+  - extracted execution error-log payload/writer from `execution.rs` to keep execution core lean and reusable.
+- `rust/cxrs/src/modules/logs_stats.rs`:
+  - extracted `logs stats` / `telemetry` analysis engine from `logs_cmd.rs`.
+  - added `--strict` contract gate (non-zero exit on strict field-coverage violations).
+  - added `--severity` compact health output (`ok|warning|critical`).
+- `rust/cxrs/tests/common/mod.rs` shared integration fixture:
+  - centralized temp repo setup, schema fixture copy, command execution helpers, and JSON/JSONL readers.
+- telemetry strictness integration coverage:
+  - `logs_stats_strict_and_severity_flags_behave_as_expected`.
 - `rust/cxrs/src/modules/config.rs`:
   - centralized `AppConfig` startup snapshot for runtime env/default resolution
   - centralized app constants (`APP_NAME`, `APP_DESC`, `APP_VERSION`)
@@ -77,6 +87,15 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `.github/workflows/cxrs-compat.yml` now enforces:
+  - `cargo clippy --all-targets -- -D warnings` in the Rust check gate.
+- `rust/cxrs/src/modules/logs_cmd.rs` reduced scope:
+  - kept `validate|migrate` orchestration and delegated stats/telemetry to `logs_stats`.
+- `rust/cxrs/src/modules/execution.rs` reduced complexity and size:
+  - moved error-log emission into `execution_logging`.
+- Integration suites (`commands_integration`, `llm_config`, `reliability_integration`) now use shared fixture helpers under `tests/common`.
+- Clippy hardening sweep removed warning classes under `-D warnings`:
+  - `too_many_arguments`, `type_complexity`, `collapsible_if`, `needless_borrow`, and default-reassign patterns.
 - Expanded policy-path safety coverage and enforcement:
   - hardened path resolution checks for write targets (absolute, relative, `~/`, `$HOME`) against repo-root boundaries
   - added symlink parent canonicalization checks to block path-escape writes via in-repo symlinks

@@ -171,16 +171,28 @@ fn validate_budget(
     budget
 }
 
-fn print_ci_json(
+struct CiJsonOutput<'a> {
     ok: bool,
-    args: &CiArgs,
-    root: &Path,
-    schema_dir: &Path,
+    args: &'a CiArgs,
+    root: &'a Path,
+    schema_dir: &'a Path,
     log_file: Option<PathBuf>,
-    budget: &crate::capture::BudgetConfig,
+    budget: &'a crate::capture::BudgetConfig,
     warnings: Vec<String>,
     errors: Vec<String>,
-) -> i32 {
+}
+
+fn print_ci_json(out: CiJsonOutput<'_>) -> i32 {
+    let CiJsonOutput {
+        ok,
+        args,
+        root,
+        schema_dir,
+        log_file,
+        budget,
+        warnings,
+        errors,
+    } = out;
     let v = json!({
         "ok": ok,
         "strict": args.strict,
@@ -278,16 +290,16 @@ pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
 
     let ok = errors.is_empty();
     if parsed.json_out {
-        return print_ci_json(
+        return print_ci_json(CiJsonOutput {
             ok,
-            &parsed,
-            &root,
-            &schema_dir,
+            args: &parsed,
+            root: &root,
+            schema_dir: &schema_dir,
             log_file,
-            &budget,
+            budget: &budget,
             warnings,
             errors,
-        );
+        });
     }
     print_ci_text(ok, &root, &schema_dir, &budget, &warnings, &errors)
 }

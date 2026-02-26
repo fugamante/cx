@@ -155,10 +155,10 @@ fn generate_commitjson_value(execute_task: ExecuteTaskFn) -> Result<Value, Strin
         capture_override: Some(capture_stats),
     })?;
     let mut v = parse_schema_json(&result)?;
-    if v.get("scope").is_none() {
-        if let Some(obj) = v.as_object_mut() {
-            obj.insert("scope".to_string(), Value::Null);
-        }
+    if v.get("scope").is_none()
+        && let Some(obj) = v.as_object_mut()
+    {
+        obj.insert("scope".to_string(), Value::Null);
     }
     Ok(v)
 }

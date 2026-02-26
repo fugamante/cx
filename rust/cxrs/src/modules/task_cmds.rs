@@ -12,14 +12,16 @@ pub struct TaskCmdDeps {
     pub cmd_task_show: fn(&str) -> i32,
     pub cmd_task_fanout: fn(&str, &str, Option<&str>) -> i32,
     pub read_tasks: fn() -> Result<Vec<TaskRecord>, String>,
-    pub run_task_by_id: fn(
-        &TaskRunner,
-        &str,
-        Option<&str>,
-        Option<&str>,
-    ) -> Result<(i32, Option<String>), TaskRunError>,
+    pub run_task_by_id: TaskRunByIdFn,
     pub make_task_runner: fn() -> TaskRunner,
 }
+
+type TaskRunByIdFn = fn(
+    &TaskRunner,
+    &str,
+    Option<&str>,
+    Option<&str>,
+) -> Result<(i32, Option<String>), TaskRunError>;
 
 pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     if let Err(e) = set_task_status(id, new_status) {
@@ -28,10 +30,10 @@ pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     }
     if new_status == "in_progress" {
         let _ = set_state_path("runtime.current_task_id", Value::String(id.to_string()));
-    } else if matches!(new_status, "complete" | "failed") {
-        if current_task_id().as_deref() == Some(id) {
-            let _ = set_state_path("runtime.current_task_id", Value::Null);
-        }
+    } else if matches!(new_status, "complete" | "failed")
+        && current_task_id().as_deref() == Some(id)
+    {
+        let _ = set_state_path("runtime.current_task_id", Value::Null);
     }
     println!("{id}: {new_status}");
     0

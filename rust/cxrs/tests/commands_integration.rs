@@ -1,173 +1,12 @@
+mod common;
+
+use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-fn git_bin() -> String {
-    if let Ok(v) = std::env::var("GIT_BIN")
-        && !v.trim().is_empty()
-    {
-        return v;
-    }
-    for c in ["git", "/opt/homebrew/bin/git", "/usr/bin/git"] {
-        if std::process::Command::new(c)
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
-            return c.to_string();
-        }
-    }
-    "git".to_string()
-}
-
-fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
-    let mut last = None;
-    for _ in 0..5 {
-        let out = Command::new(git_bin())
-            .arg("init")
-            .arg("-q")
-            .arg(format!("--template={}", template_dir.display()))
-            .current_dir(root)
-            .output()
-            .expect("run git init");
-        if out.status.success() {
-            return;
-        }
-        last = Some(out);
-        sleep(Duration::from_millis(50));
-    }
-    panic!("git init failed after retries: {:?}", last);
-}
-
-struct TempRepo {
-    root: PathBuf,
-    home: PathBuf,
-    mock_bin: PathBuf,
-    original_path: String,
-}
-
-impl TempRepo {
-    fn new() -> Self {
-        let base = std::env::temp_dir();
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = base.join(format!("cxrs-it-repo-{}-{}", std::process::id(), ts));
-        let home = base.join(format!("cxrs-it-home-{}-{}", std::process::id(), ts));
-        let mock_bin = base.join(format!("cxrs-it-mockbin-{}-{}", std::process::id(), ts));
-
-        fs::create_dir_all(&root).expect("create temp repo dir");
-        fs::create_dir_all(&home).expect("create temp home dir");
-        fs::create_dir_all(&mock_bin).expect("create mock bin dir");
-
-        let template_dir = root.join(".git-template");
-        fs::create_dir_all(&template_dir).expect("create git template dir");
-        init_git_repo_with_retry(&root, &template_dir);
-
-        let original_path = std::env::var("PATH").unwrap_or_default();
-
-        let me = Self {
-            root,
-            home,
-            mock_bin,
-            original_path,
-        };
-        me.copy_schema_registry();
-        me
-    }
-
-    fn copy_schema_registry(&self) {
-        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join(".codex")
-            .join("schemas");
-        let dst = self.root.join(".codex").join("schemas");
-        fs::create_dir_all(&dst).expect("create schema dst dir");
-        for entry in fs::read_dir(&src).expect("read schema src dir") {
-            let entry = entry.expect("schema dir entry");
-            let path = entry.path();
-            if path.extension().and_then(|v| v.to_str()) == Some("json") {
-                let fname = path.file_name().expect("schema filename");
-                fs::copy(&path, dst.join(fname)).expect("copy schema file");
-            }
-        }
-    }
-
-    fn write_mock_codex(&self, body: &str) {
-        let codex_path = self.mock_bin.join("codex");
-        fs::write(&codex_path, body).expect("write mock codex");
-        let mut perms = fs::metadata(&codex_path)
-            .expect("codex metadata")
-            .permissions();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            perms.set_mode(0o755);
-            fs::set_permissions(&codex_path, perms).expect("set mock codex executable");
-        }
-    }
-
-    fn run(&self, args: &[&str]) -> Output {
-        let path = format!("{}:{}", self.mock_bin.display(), self.original_path);
-        Command::new(env!("CARGO_BIN_EXE_cxrs"))
-            .args(args)
-            .current_dir(&self.root)
-            .env("HOME", &self.home)
-            .env("PATH", path)
-            .env("CX_RTK_SYSTEM", "0")
-            .output()
-            .expect("run cxrs command")
-    }
-
-    fn tasks_file(&self) -> PathBuf {
-        self.root.join(".codex").join("tasks.json")
-    }
-
-    fn schema_fail_log(&self) -> PathBuf {
-        self.root
-            .join(".codex")
-            .join("cxlogs")
-            .join("schema_failures.jsonl")
-    }
-
-    fn runs_log(&self) -> PathBuf {
-        self.root.join(".codex").join("cxlogs").join("runs.jsonl")
-    }
-
-    fn quarantine_dir(&self) -> PathBuf {
-        self.root.join(".codex").join("quarantine")
-    }
-}
-
-impl Drop for TempRepo {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-        let _ = fs::remove_dir_all(&self.home);
-        let _ = fs::remove_dir_all(&self.mock_bin);
-    }
-}
-
-fn stdout_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).to_string()
-}
-
-fn stderr_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).to_string()
-}
-
-fn read_json(path: &Path) -> Value {
-    let s = fs::read_to_string(path).expect("read json file");
-    serde_json::from_str(&s).expect("parse json")
-}
 
 #[test]
 fn task_lifecycle_add_claim_complete() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-it");
 
     let add = repo.run(&[
         "task",
@@ -209,7 +48,7 @@ fn task_lifecycle_add_claim_complete() {
 
 #[test]
 fn schema_failure_creates_quarantine_and_logs() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-it");
 
     // Mock codex JSONL output with invalid JSON payload for schema commands.
     repo.write_mock_codex(
@@ -263,7 +102,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
 
 #[test]
 fn command_parsing_and_file_io_edge_cases() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-it");
 
     let bad_status = repo.run(&["task", "list", "--status", "bogus"]);
     assert_eq!(bad_status.status.code(), Some(2));
@@ -292,7 +131,7 @@ fn command_parsing_and_file_io_edge_cases() {
 
 #[test]
 fn logs_stats_and_telemetry_alias_report_population_and_drift() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let row1 = serde_json::json!({
@@ -351,10 +190,45 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     assert!(drift.get("missing_keys_second_half").is_some());
 }
 
+#[test]
+fn logs_stats_strict_and_severity_flags_behave_as_expected() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let weak_row = serde_json::json!({
+        "execution_id":"e1","timestamp":"2026-01-01T00:00:00Z","command":"cx",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean"
+    });
+    let mut text = serde_json::to_string(&weak_row).expect("row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let strict = repo.run(&["logs", "stats", "1", "--strict"]);
+    assert_eq!(
+        strict.status.code(),
+        Some(1),
+        "stdout={}",
+        stdout_str(&strict)
+    );
+    let strict_out = stdout_str(&strict);
+    assert!(strict_out.contains("severity: critical"), "{strict_out}");
+    assert!(strict_out.contains("strict_violations"), "{strict_out}");
+
+    let severity_only = repo.run(&["telemetry", "1", "--severity"]);
+    assert!(
+        severity_only.status.success(),
+        "stderr={}",
+        stderr_str(&severity_only)
+    );
+    let sev_out = stdout_str(&severity_only);
+    assert!(sev_out.contains("severity:"), "{sev_out}");
+    assert!(!sev_out.contains("field_population"), "{sev_out}");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn telemetry_json_output_is_stable_on_macos() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let row = serde_json::json!({

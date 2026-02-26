@@ -74,33 +74,35 @@ fn normalize_execution_log_row(
 ) -> ExecutionLog {
     let backend_used = get_str(obj, &["backend_used", "llm_backend"], "codex");
     let (schema_enforced, schema_valid) = normalize_schema_fields(obj);
-    let mut row = ExecutionLog::default();
-    row.execution_id = get_str(obj, &["execution_id"], "").if_empty_else(|| {
-        format!(
-            "legacy_{}",
-            sha256_hex(&format!("{command}|{ts}|{cwd_val}"))
-        )
-    });
-    row.timestamp = ts.clone();
-    row.ts = ts;
-    row.command = command.clone();
-    row.tool = command;
-    row.cwd = cwd_val;
-    row.scope = scope_val;
-    row.repo_root = repo_root_val;
-    row.backend_used = backend_used.clone();
-    row.llm_backend = backend_used;
-    row.execution_mode = get_str(
-        obj,
-        &["execution_mode"],
-        if has_modern { "lean" } else { "legacy" },
-    );
-    row.schema_enforced = schema_enforced;
-    row.schema_valid = schema_valid;
-    row.schema_ok = obj
-        .get("schema_ok")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let mut row = ExecutionLog {
+        execution_id: get_str(obj, &["execution_id"], "").if_empty_else(|| {
+            format!(
+                "legacy_{}",
+                sha256_hex(&format!("{command}|{ts}|{cwd_val}"))
+            )
+        }),
+        timestamp: ts.clone(),
+        ts,
+        command: command.clone(),
+        tool: command,
+        cwd: cwd_val,
+        scope: scope_val,
+        repo_root: repo_root_val,
+        backend_used: backend_used.clone(),
+        llm_backend: backend_used,
+        execution_mode: get_str(
+            obj,
+            &["execution_mode"],
+            if has_modern { "lean" } else { "legacy" },
+        ),
+        schema_enforced,
+        schema_valid,
+        schema_ok: obj
+            .get("schema_ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        ..Default::default()
+    };
     fill_optional_fields(obj, &mut row);
     row
 }

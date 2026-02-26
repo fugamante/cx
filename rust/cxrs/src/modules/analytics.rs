@@ -284,7 +284,7 @@ fn top_heaviest(runs: &[RunEntry]) -> Vec<(u64, String, String)> {
     heaviest
 }
 
-fn print_alert_header(
+struct AlertHeaderStats {
     n: usize,
     runs_len: usize,
     max_ms: u64,
@@ -293,13 +293,15 @@ fn print_alert_header(
     token_violations: usize,
     sum_in: u64,
     sum_cached: u64,
-) {
-    println!("== cxrs alert (last {n} runs) ==");
-    println!("Runs: {runs_len}");
-    println!("Thresholds: max_ms={max_ms}, max_eff_in={max_eff}");
-    println!("Slow threshold violations: {slow_violations}");
-    println!("Token threshold violations: {token_violations}");
-    match (sum_in > 0).then_some((sum_cached as f64 / sum_in as f64) * 100.0) {
+}
+
+fn print_alert_header(s: &AlertHeaderStats) {
+    println!("== cxrs alert (last {} runs) ==", s.n);
+    println!("Runs: {}", s.runs_len);
+    println!("Thresholds: max_ms={}, max_eff_in={}", s.max_ms, s.max_eff);
+    println!("Slow threshold violations: {}", s.slow_violations);
+    println!("Token threshold violations: {}", s.token_violations);
+    match (s.sum_in > 0).then_some((s.sum_cached as f64 / s.sum_in as f64) * 100.0) {
         Some(v) => println!("Avg cache hit rate: {}%", v.round() as i64),
         None => println!("Avg cache hit rate: n/a"),
     }
@@ -337,16 +339,17 @@ pub fn print_alert(n: usize) -> i32 {
     let (slow_violations, token_violations, sum_in, sum_cached) =
         collect_alert_stats(&runs, max_ms, max_eff);
 
-    print_alert_header(
+    let header = AlertHeaderStats {
         n,
-        runs.len(),
+        runs_len: runs.len(),
         max_ms,
         max_eff,
         slow_violations,
         token_violations,
         sum_in,
         sum_cached,
-    );
+    };
+    print_alert_header(&header);
 
     print_top_runs(
         "Top 5 slowest:",

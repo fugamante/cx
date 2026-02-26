@@ -33,6 +33,8 @@ mod error;
 mod execmeta;
 #[path = "modules/execution.rs"]
 mod execution;
+#[path = "modules/execution_logging.rs"]
+mod execution_logging;
 #[path = "modules/help.rs"]
 mod help;
 #[path = "modules/introspect.rs"]
@@ -41,6 +43,8 @@ mod introspect;
 mod llm;
 #[path = "modules/logs.rs"]
 mod logs;
+#[path = "modules/logs_stats.rs"]
+mod logs_stats;
 #[path = "modules/logview.rs"]
 mod logview;
 #[path = "modules/native_cmd.rs"]

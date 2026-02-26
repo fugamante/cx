@@ -47,12 +47,12 @@ const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "logs",
-        usage: "logs stats [N] [--json]",
+        usage: "logs stats [N] [--json] [--strict] [--severity]",
         description: "Telemetry health and contract-drift summary",
     },
     CommandHelp {
         name: "telemetry",
-        usage: "telemetry [N] [--json]",
+        usage: "telemetry [N] [--json] [--strict] [--severity]",
         description: "Alias for 'logs stats'",
     },
     CommandHelp {

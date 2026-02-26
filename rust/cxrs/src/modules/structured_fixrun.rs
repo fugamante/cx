@@ -223,7 +223,7 @@ fn execute_fix_commands(
         let root = repo_root()
             .or_else(|| env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
-        match evaluate_command_safety(&c, &root) {
+        match evaluate_command_safety(c, &root) {
             SafetyDecision::Safe => {}
             SafetyDecision::Dangerous(reason) => {
                 if !(force || allow_unsafe) {

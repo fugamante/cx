@@ -169,9 +169,9 @@ fn compression_rows(provider_stats: HashMap<String, (u64, u64, u64, u64)>) -> Ve
     rows
 }
 
-fn build_anomalies(
-    top_dur: &[(String, u64)],
-    top_eff: &[(String, u64)],
+struct AnomalyInput<'a> {
+    top_dur: &'a [(String, u64)],
+    top_eff: &'a [(String, u64)],
     max_ms: u64,
     max_eff: u64,
     first_cache: Option<f64>,
@@ -179,7 +179,20 @@ fn build_anomalies(
     schema_fail_freq: Option<f64>,
     clip_freq: Option<f64>,
     timeout_freq: Option<f64>,
-) -> Vec<String> {
+}
+
+fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
+    let AnomalyInput {
+        top_dur,
+        top_eff,
+        max_ms,
+        max_eff,
+        first_cache,
+        second_cache,
+        schema_fail_freq,
+        clip_freq,
+        timeout_freq,
+    } = input;
     let mut anomalies: Vec<String> = Vec::new();
     push_latency_anomaly(&mut anomalies, top_dur, max_ms);
     push_token_anomaly(&mut anomalies, top_eff, max_eff);
@@ -312,17 +325,17 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
     let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
     let (agg, d) = analyze_runs(&runs, max_ms, max_eff);
 
-    let anomalies = build_anomalies(
-        &d.top_dur,
-        &d.top_eff,
+    let anomalies = build_anomalies(AnomalyInput {
+        top_dur: &d.top_dur,
+        top_eff: &d.top_eff,
         max_ms,
         max_eff,
-        d.first_cache,
-        d.second_cache,
-        d.schema_fail_freq,
-        d.clip_freq,
-        d.timeout_freq,
-    );
+        first_cache: d.first_cache,
+        second_cache: d.second_cache,
+        schema_fail_freq: d.schema_fail_freq,
+        clip_freq: d.clip_freq,
+        timeout_freq: d.timeout_freq,
+    });
     let recommendations = build_recommendations(
         &d.top_eff,
         d.first_cache,

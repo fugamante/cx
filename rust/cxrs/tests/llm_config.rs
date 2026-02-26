@@ -1,108 +1,11 @@
+mod common;
+
+use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-fn git_bin() -> String {
-    if let Ok(v) = std::env::var("GIT_BIN")
-        && !v.trim().is_empty()
-    {
-        return v;
-    }
-    for c in ["git", "/opt/homebrew/bin/git", "/usr/bin/git"] {
-        if std::process::Command::new(c)
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
-            return c.to_string();
-        }
-    }
-    "git".to_string()
-}
-
-fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
-    let mut last = None;
-    for _ in 0..5 {
-        let out = Command::new(git_bin())
-            .arg("init")
-            .arg("-q")
-            .arg(format!("--template={}", template_dir.display()))
-            .current_dir(root)
-            .output()
-            .expect("run git init");
-        if out.status.success() {
-            return;
-        }
-        last = Some(out);
-        sleep(Duration::from_millis(50));
-    }
-    panic!("git init failed after retries: {:?}", last);
-}
-
-struct TempRepo {
-    root: PathBuf,
-    home: PathBuf,
-}
-
-impl TempRepo {
-    fn new() -> Self {
-        let base = std::env::temp_dir();
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = base.join(format!("cxrs-test-repo-{}-{}", std::process::id(), ts));
-        let home = base.join(format!("cxrs-test-home-{}-{}", std::process::id(), ts));
-        fs::create_dir_all(&root).expect("create temp repo dir");
-        fs::create_dir_all(&home).expect("create temp home dir");
-
-        let template_dir = root.join(".git-template");
-        fs::create_dir_all(&template_dir).expect("create git template dir");
-        init_git_repo_with_retry(&root, &template_dir);
-
-        Self { root, home }
-    }
-
-    fn state_file(&self) -> PathBuf {
-        self.root.join(".codex").join("state.json")
-    }
-
-    fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_cxrs"))
-            .args(args)
-            .current_dir(&self.root)
-            .env("HOME", &self.home)
-            .output()
-            .expect("run cxrs command")
-    }
-}
-
-impl Drop for TempRepo {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).to_string()
-}
-
-fn stderr_str(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).to_string()
-}
-
-fn read_json(path: &Path) -> Value {
-    let text = fs::read_to_string(path).expect("read json file");
-    serde_json::from_str::<Value>(&text).expect("parse json")
-}
 
 #[test]
 fn llm_use_persists_backend_and_model() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-llm");
 
     let out = repo.run(&["llm", "use", "ollama", "llama3.1"]);
     assert!(
@@ -142,7 +45,7 @@ fn llm_use_persists_backend_and_model() {
 
 #[test]
 fn llm_unset_can_clear_model_backend_and_all() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-llm");
 
     let out = repo.run(&["llm", "use", "ollama", "llama3.1"]);
     assert!(
@@ -197,7 +100,7 @@ fn llm_unset_can_clear_model_backend_and_all() {
 
 #[test]
 fn ollama_without_model_fails_non_interactive_with_clear_error() {
-    let repo = TempRepo::new();
+    let repo = TempRepo::new("cxrs-llm");
 
     assert!(repo.run(&["llm", "unset", "all"]).status.success());
     assert!(repo.run(&["llm", "use", "ollama"]).status.success());
