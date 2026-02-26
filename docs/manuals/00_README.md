@@ -1,7 +1,7 @@
 # cx manuals (browse layout)
 
 This folder is organized for fast browsing (source vs outputs vs build artifacts).
-This branch documents the Rust-first refactor (`codex/rust-refactor`) as the canonical technical direction.
+This repository documents the Rust-first runtime as the canonical technical direction.
 
 ## Outputs
 

@@ -1,6 +1,7 @@
 .codex/*
 !.codex/schemas/
 !.codex/schemas/*.json
+PROJECT_CONTEXT.md
 *.swp
 .DS_Store
 docs/CX_MANUAL*

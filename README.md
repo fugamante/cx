@@ -209,3 +209,13 @@ cd ../..
 - No automatic checks run during shell startup.
 - Diagnostics are sent to stderr; pipeline-oriented command output remains on stdout.
 - RTK is never used to transform schema JSON outputs.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE`.
+
+## Contributing and Security
+
+- Contributing guide: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Security reporting: `SECURITY.md`

@@ -127,8 +127,8 @@ Current compat coverage:
 - `worklog`
 
 GitHub Actions:
-- Workflow: `cxrs-compat` (`/path/to/cxcodex/.github/workflows/cxrs-compat.yml`)
-- Triggered on pushes/PRs to `codex/rust-refactor` when Rust/Bash-compat paths change.
+- Workflow: `cxrs-compat` (`.github/workflows/cxrs-compat.yml`)
+- Triggered on pushes/PRs that touch Rust/Bash-compat paths.
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
 
 RTK version guard:
@@ -225,3 +225,7 @@ cargo run -- replay <id>
 - add explicit chunking helpers and expose chunk-aware fanout workflows
 - align remaining edge-case behavior for `cxhealth`/`cxdoctor` and command-output formatting parity
 - add explicit session-mode preflight (`subscription` vs `visitor`) with log metadata
+
+## License
+
+MIT. See the repository root `LICENSE`.
