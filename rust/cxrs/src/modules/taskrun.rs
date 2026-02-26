@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::env;
 use std::fmt;
+use std::process::Command;
 
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskRecord, TaskSpec};
 
@@ -37,11 +38,14 @@ pub struct TaskRunner {
 }
 
 fn parse_words(input: &str) -> Vec<String> {
-    input
-        .split_whitespace()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
+    match shell_words::split(input) {
+        Ok(v) => v,
+        Err(_) => input
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+    }
 }
 
 fn command_status_or_usage(run: fn(&[String]) -> i32, args: &[String]) -> i32 {
@@ -78,23 +82,60 @@ fn run_task_prompt(
     Ok((0, Some(res.execution_id)))
 }
 
+fn run_objective_subprocess(
+    objective_words: &[String],
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+) -> Result<i32, String> {
+    if objective_words.is_empty() {
+        return Ok(2);
+    }
+    let exe = env::current_exe().map_err(|e| format!("cxrs task run: current_exe failed: {e}"))?;
+    let mut cmd = Command::new(exe);
+    cmd.args(objective_words);
+    if let Some(mode) = mode_override {
+        cmd.env("CX_MODE", mode);
+    }
+    if let Some(backend) = backend_override {
+        cmd.env("CX_LLM_BACKEND", backend);
+    }
+    let status = crate::process::run_command_status_with_timeout(cmd, "cxtask_run subprocess")?;
+    Ok(status.code().unwrap_or(1))
+}
+
 fn dispatch_task_command(
     runner: &TaskRunner,
-    cmd0: &str,
-    args: &[String],
+    words: &[String],
     task: &TaskRecord,
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
 ) -> Result<(i32, Option<String>), String> {
+    let Some(cmd0) = words.first().map(String::as_str) else {
+        return run_task_prompt(runner, task);
+    };
+    let args: Vec<String> = words.iter().skip(1).cloned().collect();
+    if mode_override.is_some() || backend_override.is_some() {
+        match cmd0 {
+            "cxcommitjson" | "commitjson" | "cxcommitmsg" | "commitmsg" | "cxdiffsum"
+            | "diffsum" | "cxdiffsum_staged" | "diffsum-staged" | "cxnext" | "next"
+            | "cxfix_run" | "fix-run" | "cxfix" | "fix" | "cx" | "cxj" | "cxo" => {
+                let code = run_objective_subprocess(words, mode_override, backend_override)?;
+                return Ok((code, None));
+            }
+            _ => {}
+        }
+    }
     let status = match cmd0 {
         "cxcommitjson" | "commitjson" => (runner.cmd_commitjson)(),
         "cxcommitmsg" | "commitmsg" => (runner.cmd_commitmsg)(),
         "cxdiffsum" | "diffsum" => (runner.cmd_diffsum)(false),
         "cxdiffsum_staged" | "diffsum-staged" => (runner.cmd_diffsum)(true),
-        "cxnext" | "next" => command_status_or_usage(runner.cmd_next, args),
-        "cxfix_run" | "fix-run" => command_status_or_usage(runner.cmd_fix_run, args),
-        "cxfix" | "fix" => command_status_or_usage(runner.cmd_fix, args),
-        "cx" => command_status_or_usage(runner.cmd_cx, args),
-        "cxj" => command_status_or_usage(runner.cmd_cxj, args),
-        "cxo" => command_status_or_usage(runner.cmd_cxo, args),
+        "cxnext" | "next" => command_status_or_usage(runner.cmd_next, &args),
+        "cxfix_run" | "fix-run" => command_status_or_usage(runner.cmd_fix_run, &args),
+        "cxfix" | "fix" => command_status_or_usage(runner.cmd_fix, &args),
+        "cx" => command_status_or_usage(runner.cmd_cx, &args),
+        "cxj" => command_status_or_usage(runner.cmd_cxj, &args),
+        "cxo" => command_status_or_usage(runner.cmd_cxo, &args),
         _ => return run_task_prompt(runner, task),
     };
     Ok((status, None))
@@ -103,53 +144,11 @@ fn dispatch_task_command(
 fn run_task_objective(
     runner: &TaskRunner,
     task: &TaskRecord,
-) -> Result<(i32, Option<String>), String> {
-    let words = parse_words(&task.objective);
-    let Some(cmd0) = words.first().map(String::as_str) else {
-        return run_task_prompt(runner, task);
-    };
-    let args: Vec<String> = words.iter().skip(1).cloned().collect();
-    dispatch_task_command(runner, cmd0, &args, task)
-}
-
-fn apply_task_env(
     mode_override: Option<&str>,
     backend_override: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    let prev_mode = env::var("CX_MODE").ok();
-    let prev_backend = env::var("CX_LLM_BACKEND").ok();
-    if let Some(m) = mode_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_MODE", m) };
-    }
-    if let Some(b) = backend_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_LLM_BACKEND", b) };
-    }
-    (prev_mode, prev_backend)
-}
-
-fn restore_task_env(prev_mode: Option<String>, prev_backend: Option<String>) {
-    match prev_mode {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_MODE", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_MODE") }
-        }
-    }
-    match prev_backend {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_LLM_BACKEND", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_LLM_BACKEND") }
-        }
-    }
+) -> Result<(i32, Option<String>), String> {
+    let words = parse_words(&task.objective);
+    dispatch_task_command(runner, &words, task, mode_override, backend_override)
 }
 
 fn set_runtime_task_state(runner: &TaskRunner, id: &str, parent_id: Option<&String>) {
@@ -222,11 +221,7 @@ pub fn run_task_by_id(
     let prev_parent_id = (runner.current_task_parent_id)();
     set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
 
-    let (prev_mode, prev_backend) = apply_task_env(mode_override, backend_override);
-
-    let exec = run_task_objective(runner, &tasks[idx]);
-
-    restore_task_env(prev_mode, prev_backend);
+    let exec = run_task_objective(runner, &tasks[idx], mode_override, backend_override);
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
 
     let (status_code, execution_id, objective_err) = match exec {

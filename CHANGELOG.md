@@ -59,6 +59,12 @@ All notable changes to this project are documented in this file.
   - `fix-run` policy-block invariant coverage (`policy_blocked=true` + reason present)
 
 ### Changed
+- Hardened task execution overrides in `rust/cxrs/src/modules/taskrun.rs`:
+  - replaced in-process environment mutation for `--mode`/`--backend` overrides with subprocess-based execution for recognized command objectives
+  - eliminated unsafe global env toggling in task-run paths while preserving command routing behavior
+- Improved task objective tokenization in `rust/cxrs/src/modules/taskrun.rs`:
+  - command-like objectives now parse with shell-quoted semantics via `shell-words`
+  - falls back to whitespace split only if shell parsing fails
 - Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.
 - Replaced repeated env/default lookups across core modules with `AppConfig` reads (`app`, `capture`, `runtime`, `runlog`, `execution`, `structured_cmds`, `bench_parity`, `diagnostics`, `introspect`, `logview`, `policy`, `tasks`, `schema`, `compat_cmd`, `native_cmd`).
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
