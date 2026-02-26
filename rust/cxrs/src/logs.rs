@@ -12,6 +12,43 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static RUNS_PARSE_WARNED: AtomicBool = AtomicBool::new(false);
 
+pub fn validate_execution_log_row(row: &ExecutionLog) -> Result<(), String> {
+    if row.execution_id.trim().is_empty() {
+        return Err("execution log missing execution_id".to_string());
+    }
+    if row.timestamp.trim().is_empty() {
+        return Err("execution log missing timestamp".to_string());
+    }
+    if row.command.trim().is_empty() {
+        return Err("execution log missing command".to_string());
+    }
+    if row.backend_used.trim().is_empty() {
+        return Err("execution log missing backend_used".to_string());
+    }
+    if row.execution_mode.trim().is_empty() {
+        return Err("execution log missing execution_mode".to_string());
+    }
+    if row.schema_enforced && !row.schema_ok {
+        if row
+            .schema_reason
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err("schema failure missing schema_reason".to_string());
+        }
+        if row
+            .quarantine_id
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err("schema failure missing quarantine_id".to_string());
+        }
+    }
+    Ok(())
+}
+
 pub fn append_jsonl(path: &Path, value: &Value) -> Result<(), String> {
     append_jsonl_cx(path, value).map_err(|e| e.to_string())
 }

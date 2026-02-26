@@ -27,7 +27,8 @@ use crate::paths::{
 };
 use crate::policy::{SafetyDecision, cmd_policy, evaluate_command_safety};
 use crate::logs::{
-    append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file,
+    append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_execution_log_row,
+    validate_runs_jsonl_file,
 };
 use crate::quarantine::{
     cmd_quarantine_list, cmd_quarantine_show, quarantine_store_with_attempts, read_quarantine_record,
@@ -138,38 +139,6 @@ fn print_task_help() {
 // path resolution moved to `paths.rs`
 // schema helpers moved to `schema.rs`
 // ensure_parent_dir moved to `paths.rs`
-
-fn validate_execution_log_row(row: &ExecutionLog) -> Result<(), String> {
-    if row.execution_id.trim().is_empty() {
-        return Err("execution log missing execution_id".to_string());
-    }
-    if row.timestamp.trim().is_empty() {
-        return Err("execution log missing timestamp".to_string());
-    }
-    if row.command.trim().is_empty() {
-        return Err("execution log missing command".to_string());
-    }
-    if row.backend_used.trim().is_empty() {
-        return Err("execution log missing backend_used".to_string());
-    }
-    if row.execution_mode.trim().is_empty() {
-        return Err("execution log missing execution_mode".to_string());
-    }
-    if row.schema_enforced && !row.schema_ok {
-        if row.schema_reason.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-            return Err("schema failure missing schema_reason".to_string());
-        }
-        if row
-            .quarantine_id
-            .as_ref()
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true)
-        {
-            return Err("schema failure missing quarantine_id".to_string());
-        }
-    }
-    Ok(())
-}
 
 fn prompt_preview(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
