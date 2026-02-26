@@ -3,7 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::app::{is_compat_name, is_native_name};
+use crate::command_names::{is_compat_name, is_native_name};
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{repo_root_hint, resolve_log_file, resolve_state_file};
 use crate::runtime::{llm_backend, llm_model};

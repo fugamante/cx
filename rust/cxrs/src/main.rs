@@ -9,6 +9,8 @@ mod bench_parity;
 mod capture;
 #[path = "modules/cmdctx.rs"]
 mod cmdctx;
+#[path = "modules/command_names.rs"]
+mod command_names;
 #[path = "modules/compat_cmd.rs"]
 mod compat_cmd;
 #[path = "modules/diagnostics.rs"]
