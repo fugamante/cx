@@ -5,6 +5,7 @@ use std::process::Command;
 
 use crate::capture::rtk_is_usable;
 use crate::llm::extract_agent_text;
+use crate::process::run_command_output_with_timeout;
 use crate::runtime::{llm_backend, llm_bin_name};
 
 type JsonlRunner = fn(&str) -> Result<String, String>;
@@ -113,15 +114,15 @@ fn probe_text_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), 
 fn print_git_context() {
     println!();
     println!("== git context (optional) ==");
-    match Command::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .output()
-    {
+    let mut repo_cmd = Command::new("git");
+    repo_cmd.args(["rev-parse", "--is-inside-work-tree"]);
+    match run_command_output_with_timeout(repo_cmd, "git rev-parse --is-inside-work-tree") {
         Ok(out) if out.status.success() => {
             println!("in git repo: yes");
-            if let Ok(branch_out) = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .output()
+            let mut branch_cmd = Command::new("git");
+            branch_cmd.args(["rev-parse", "--abbrev-ref", "HEAD"]);
+            if let Ok(branch_out) =
+                run_command_output_with_timeout(branch_cmd, "git rev-parse --abbrev-ref HEAD")
             {
                 let branch = String::from_utf8_lossy(&branch_out.stdout)
                     .trim()
@@ -163,7 +164,7 @@ pub fn cmd_health(run_llm_jsonl: JsonlRunner, run_cxo: CxoRunner) -> i32 {
     println!("== {backend} version ==");
     let mut version_cmd = Command::new(llm_bin);
     version_cmd.arg("--version");
-    match version_cmd.output() {
+    match run_command_output_with_timeout(version_cmd, &format!("{llm_bin} --version")) {
         Ok(out) => print!("{}", String::from_utf8_lossy(&out.stdout)),
         Err(e) => {
             eprintln!("cxrs health: {backend} --version failed: {e}");

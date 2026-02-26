@@ -3,6 +3,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::config::app_config;
+use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::types::CaptureStats;
 
 static RTK_WARNED_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
@@ -40,7 +41,9 @@ fn semver_cmp(a: (u64, u64, u64), b: (u64, u64, u64)) -> i8 {
 }
 
 pub fn rtk_version_raw() -> Option<String> {
-    let out = Command::new("rtk").arg("--version").output().ok()?;
+    let mut cmd = Command::new("rtk");
+    cmd.arg("--version");
+    let out = run_command_output_with_timeout(cmd, "rtk --version").ok()?;
     let mut s = String::from_utf8_lossy(&out.stdout).to_string();
     if s.trim().is_empty() {
         s = String::from_utf8_lossy(&out.stderr).to_string();
@@ -50,11 +53,11 @@ pub fn rtk_version_raw() -> Option<String> {
 }
 
 pub fn rtk_is_usable() -> bool {
-    if Command::new("rtk")
-        .arg("--help")
+    let mut cmd = Command::new("rtk");
+    cmd.arg("--help")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    if run_command_status_with_timeout(cmd, "rtk --help")
         .map(|s| !s.success())
         .unwrap_or(true)
     {
@@ -306,9 +309,7 @@ fn run_capture(command: &[String]) -> Result<(String, i32), String> {
     if command.len() > 1 {
         c.args(&command[1..]);
     }
-    let output = c
-        .output()
-        .map_err(|e| format!("failed to execute '{}': {e}", command[0]))?;
+    let output = run_command_output_with_timeout(c, &format!("system command '{}'", command[0]))?;
     let status = output.status.code().unwrap_or(1);
     let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

@@ -6,6 +6,7 @@ use std::process::Command;
 use crate::command_names::{is_compat_name, is_native_name};
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{repo_root_hint, resolve_log_file, resolve_state_file};
+use crate::process::run_command_output_with_timeout;
 use crate::runtime::{llm_backend, llm_model};
 
 const ROUTE_NAMES: &[&str] = &[
@@ -108,7 +109,9 @@ pub fn bash_type_of_function(repo: &Path, name: &str) -> Option<String> {
         cx_sh.display(),
         name
     );
-    let out = Command::new("bash").arg("-lc").arg(cmd).output().ok()?;
+    let mut bash_cmd = Command::new("bash");
+    bash_cmd.arg("-lc").arg(cmd);
+    let out = run_command_output_with_timeout(bash_cmd, "bash type -a").ok()?;
     if !out.status.success() {
         return None;
     }
@@ -249,7 +252,9 @@ pub fn bash_function_names(repo: &Path) -> Vec<String> {
         "source '{}' >/dev/null 2>&1; declare -F | awk '{{print $3}}'",
         cx_sh.display()
     );
-    let out = match Command::new("bash").arg("-lc").arg(cmd).output() {
+    let mut bash_cmd = Command::new("bash");
+    bash_cmd.arg("-lc").arg(cmd);
+    let out = match run_command_output_with_timeout(bash_cmd, "bash declare -F") {
         Ok(v) if v.status.success() => v,
         _ => return Vec::new(),
     };

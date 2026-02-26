@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use crate::process::run_command_output_with_timeout;
+
 pub fn repo_root() -> Option<PathBuf> {
     static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
     if env::var("CX_NO_CACHE").ok().as_deref() == Some("1") {
@@ -22,10 +24,9 @@ pub fn repo_root_hint() -> Option<PathBuf> {
 }
 
 fn repo_root_uncached() -> Option<PathBuf> {
-    let out = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--show-toplevel"]);
+    let out = run_command_output_with_timeout(cmd, "git rev-parse --show-toplevel").ok()?;
     if !out.status.success() {
         return None;
     }

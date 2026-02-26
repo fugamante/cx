@@ -7,6 +7,7 @@ use std::process::Command;
 use crate::analytics::parse_ts_epoch;
 use crate::diagnostics::{has_required_log_fields, last_appended_json_value};
 use crate::logs::load_runs_appended;
+use crate::process::run_command_status_with_timeout;
 use crate::types::RunEntry;
 
 #[derive(Default)]
@@ -176,11 +177,9 @@ pub fn setup_temp_repo() -> Result<PathBuf, String> {
             temp_repo.display()
         )
     })?;
-    let init_ok = Command::new("git")
-        .arg("init")
-        .arg("-q")
-        .current_dir(&temp_repo)
-        .status()
+    let mut init_cmd = Command::new("git");
+    init_cmd.arg("init").arg("-q").current_dir(&temp_repo);
+    let init_ok = run_command_status_with_timeout(init_cmd, "cxparity git init")
         .ok()
         .is_some_and(|s| s.success());
     if !init_ok {
@@ -192,11 +191,12 @@ pub fn setup_temp_repo() -> Result<PathBuf, String> {
     let stage_file = temp_repo.join("cxparity_tmp.txt");
     fs::write(&stage_file, "cx parity staged change\n")
         .map_err(|_| "cxparity: failed to write staged file".to_string())?;
-    let stage_ok = Command::new("git")
+    let mut add_cmd = Command::new("git");
+    add_cmd
         .arg("add")
         .arg("cxparity_tmp.txt")
-        .current_dir(&temp_repo)
-        .status()
+        .current_dir(&temp_repo);
+    let stage_ok = run_command_status_with_timeout(add_cmd, "cxparity git add")
         .ok()
         .is_some_and(|s| s.success());
     if !stage_ok {

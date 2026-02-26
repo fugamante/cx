@@ -15,6 +15,7 @@ pub const DEFAULT_CONTEXT_BUDGET_LINES: usize = 300;
 pub const DEFAULT_RUN_WINDOW: usize = 50;
 pub const DEFAULT_OPTIMIZE_WINDOW: usize = 200;
 pub const DEFAULT_QUARANTINE_LIST: usize = 20;
+pub const DEFAULT_CMD_TIMEOUT_SECS: usize = 120;
 
 /// Process-level configuration snapshot.
 ///
@@ -38,6 +39,7 @@ pub struct AppConfig {
     pub schema_relaxed: bool,
     pub cxlog_enabled: bool,
     pub capture_provider: String,
+    pub cmd_timeout_secs: usize,
 }
 
 static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
@@ -110,6 +112,7 @@ impl AppConfig {
             cxlog_enabled: env_bool("CXLOG_ENABLED", true),
             capture_provider: env::var("CX_CAPTURE_PROVIDER")
                 .unwrap_or_else(|_| "auto".to_string()),
+            cmd_timeout_secs: env_usize("CX_CMD_TIMEOUT_SECS", DEFAULT_CMD_TIMEOUT_SECS).max(1),
         }
     }
 }

@@ -13,6 +13,7 @@ use crate::bench_parity_support::{
 use crate::config::app_config;
 use crate::logs::file_len;
 use crate::paths::{repo_root_hint, resolve_log_file};
+use crate::process::run_command_output_with_timeout;
 use crate::routing::{bash_function_names, route_handler_for};
 
 fn run_command_for_bench(
@@ -30,9 +31,7 @@ fn run_command_for_bench(
     if disable_cx_log {
         cmd.env("CXLOG_ENABLED", "0");
     }
-    let output = cmd
-        .output()
-        .map_err(|e| format!("failed to execute '{}': {e}", command[0]))?;
+    let output = run_command_output_with_timeout(cmd, &format!("bench '{}'", command[0]))?;
     if passthru {
         let mut out = std::io::stdout();
         let mut err = std::io::stderr();
@@ -169,14 +168,14 @@ fn run_rust_case(
     schema_keys: &Option<Vec<&str>>,
 ) {
     let before_rust = file_len(temp_log_file);
-    if let Ok(out) = Command::new(exe)
+    let mut rust_cmd = Command::new(exe);
+    rust_cmd
         .arg("cx-compat")
         .arg(cmd)
         .args(args)
         .current_dir(temp_repo)
-        .env("CX_EXECUTION_PATH", "rust:cxparity")
-        .output()
-    {
+        .env("CX_EXECUTION_PATH", "rust:cxparity");
+    if let Ok(out) = run_command_output_with_timeout(rust_cmd, "cxparity rust case") {
         let (ok, json_ok, logs_ok, budget_ok) =
             run_parity_path(out, temp_log_file, before_rust, budget_chars, schema_keys);
         row.rust_ok = ok;
@@ -203,13 +202,13 @@ fn run_bash_case(
         cmd,
         args.join(" ")
     );
-    if let Ok(out) = Command::new("bash")
+    let mut bash_proc = Command::new("bash");
+    bash_proc
         .arg("-lc")
         .arg(bash_cmd)
         .current_dir(temp_repo)
-        .env("CX_EXECUTION_PATH", "bash:cxparity")
-        .output()
-    {
+        .env("CX_EXECUTION_PATH", "bash:cxparity");
+    if let Ok(out) = run_command_output_with_timeout(bash_proc, "cxparity bash case") {
         let (ok, json_ok, logs_ok, budget_ok) =
             run_parity_path(out, temp_log_file, before_bash, budget_chars, schema_keys);
         row.bash_ok = ok;

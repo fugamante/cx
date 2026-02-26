@@ -3,6 +3,7 @@ use std::fs;
 use std::process::Command;
 
 use crate::paths::repo_root_hint;
+use crate::process::run_command_output_with_timeout;
 
 pub fn prompt_preview(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
@@ -18,11 +19,12 @@ pub fn toolchain_version_string(app_version: &str) -> String {
                 base = trimmed.to_string();
             }
         }
-        if let Ok(out) = Command::new("git")
+        let mut git_cmd = Command::new("git");
+        git_cmd
             .arg("-C")
             .arg(&root)
-            .args(["rev-parse", "--short", "HEAD"])
-            .output()
+            .args(["rev-parse", "--short", "HEAD"]);
+        if let Ok(out) = run_command_output_with_timeout(git_cmd, "git rev-parse --short HEAD")
             && out.status.success()
         {
             let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();

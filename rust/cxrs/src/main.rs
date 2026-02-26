@@ -53,6 +53,8 @@ mod optimize_report;
 mod paths;
 #[path = "modules/policy.rs"]
 mod policy;
+#[path = "modules/process.rs"]
+mod process;
 #[path = "modules/prompting.rs"]
 mod prompting;
 #[path = "modules/quarantine.rs"]

@@ -1,7 +1,7 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use crate::error::{EXIT_OK, EXIT_RUNTIME, format_error, print_runtime_error};
+use crate::process::run_command_with_stdin_output_with_timeout;
 use crate::types::{CaptureStats, ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
 
 type TaskRunner = fn(TaskSpec) -> Result<ExecutionResult, String>;
@@ -109,28 +109,26 @@ pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
     if text.trim().is_empty() {
         return print_runtime_error("cxcopy", "nothing to copy");
     }
-    let mut pb = match Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-        Ok(v) => v,
-        Err(e) => {
-            return print_runtime_error("cxcopy", &format!("pbcopy unavailable: {e}"));
-        }
+    let pb_out = {
+        let cmd = Command::new("pbcopy");
+        run_command_with_stdin_output_with_timeout(cmd, &text, "pbcopy")
     };
-    if let Some(stdin) = pb.stdin.as_mut() {
-        let _ = stdin.write_all(text.as_bytes());
-    }
-    match pb.wait() {
-        Ok(s) if s.success() => {
+    match pb_out {
+        Ok(out) if out.status.success() => {
             println!("Copied to clipboard.");
             result.system_status.unwrap_or(0)
         }
-        Ok(s) => {
+        Ok(out) => {
             eprintln!(
                 "{}",
-                format_error("cxcopy", &format!("pbcopy failed with status {s}"))
+                format_error(
+                    "cxcopy",
+                    &format!("pbcopy failed with status {}", out.status)
+                )
             );
             EXIT_RUNTIME
         }
-        Err(e) => print_runtime_error("cxcopy", &format!("pbcopy wait failed: {e}")),
+        Err(e) => print_runtime_error("cxcopy", &format!("pbcopy failed: {e}")),
     }
 }
 

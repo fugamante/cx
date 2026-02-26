@@ -137,24 +137,25 @@ pub fn print_version(app_name: &str, app_version: &str) {
 
     println!("budget_chars: {}", cfg.budget_chars);
     println!("budget_lines: {}", cfg.budget_lines);
+    println!("cmd_timeout_secs: {}", cfg.cmd_timeout_secs);
     println!("clip_mode: {}", cfg.clip_mode);
     print_version_preferences();
 }
 
 pub fn cmd_core(app_version: &str) -> i32 {
-    let cfg = app_config();
-    let mode = cfg.cx_mode.clone();
+    let runtime_cfg = app_config();
+    let mode = runtime_cfg.cx_mode.clone();
     let backend = llm_backend();
     let model = llm_model();
     let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let capture_provider = cfg.capture_provider.clone();
+    let capture_provider = runtime_cfg.capture_provider.clone();
     let rtk_enabled = env::var("CX_RTK_SYSTEM")
         .ok()
         .and_then(|v| v.parse::<u8>().ok())
         .unwrap_or(1)
         == 1;
     let rtk_available = rtk_is_usable();
-    let cfg = budget_config_from_env();
+    let budget_cfg = budget_config_from_env();
     let log_file = resolve_log_file()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
@@ -171,10 +172,11 @@ pub fn cmd_core(app_version: &str) -> i32 {
     println!("capture_provider: {capture_provider}");
     println!("capture_rtk_enabled: {rtk_enabled}");
     println!("capture_rtk_available: {rtk_available}");
-    println!("budget_chars: {}", cfg.budget_chars);
-    println!("budget_lines: {}", cfg.budget_lines);
-    println!("clip_mode: {}", cfg.clip_mode);
-    println!("clip_footer: {}", cfg.clip_footer);
+    println!("budget_chars: {}", budget_cfg.budget_chars);
+    println!("budget_lines: {}", budget_cfg.budget_lines);
+    println!("cmd_timeout_secs: {}", runtime_cfg.cmd_timeout_secs);
+    println!("clip_mode: {}", budget_cfg.clip_mode);
+    println!("clip_footer: {}", budget_cfg.clip_footer);
     println!("schema_enforcement: true");
     println!("logging_enabled: {}", logging_enabled());
     println!("log_file: {log_file}");

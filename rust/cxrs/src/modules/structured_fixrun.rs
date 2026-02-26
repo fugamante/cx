@@ -8,6 +8,7 @@ use crate::config::app_config;
 use crate::error::{EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, format_error};
 use crate::paths::repo_root;
 use crate::policy::{SafetyDecision, evaluate_command_safety};
+use crate::process::run_command_status_with_timeout;
 use crate::runlog::{RunLogInput, log_codex_run};
 use crate::schema::load_schema;
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
@@ -231,7 +232,9 @@ fn execute_fix_commands(
             }
         }
         println!("-> {c}");
-        if let Err(e) = Command::new("bash").args(["-lc", c]).status() {
+        let mut shell_cmd = Command::new("bash");
+        shell_cmd.args(["-lc", c]);
+        if let Err(e) = run_command_status_with_timeout(shell_cmd, "cxfix_run command") {
             eprintln!(
                 "{}",
                 format_error("fix-run", &format!("failed to execute command: {e}"))

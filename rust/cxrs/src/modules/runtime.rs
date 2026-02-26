@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
 use crate::config::app_config;
+use crate::process::run_command_output_with_timeout;
 use crate::state::{read_state_value, set_state_path, value_at_path};
 
 pub fn llm_backend() -> String {
@@ -38,7 +39,9 @@ fn is_interactive_tty() -> bool {
 }
 
 fn ollama_list_models() -> Vec<String> {
-    let output = match Command::new("ollama").arg("list").output() {
+    let mut cmd = Command::new("ollama");
+    cmd.arg("list");
+    let output = match run_command_output_with_timeout(cmd, "ollama list") {
         Ok(v) if v.status.success() => v,
         _ => return Vec::new(),
     };

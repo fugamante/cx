@@ -9,19 +9,22 @@ use crate::config::app_config;
 use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::logs::file_len;
 use crate::paths::{repo_root_hint, resolve_log_file};
+use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::routing::{bash_type_of_function, route_handler_for};
 use crate::runtime::{llm_backend, llm_model};
 
 fn bin_in_path(bin: &str) -> bool {
-    Command::new("bash")
-        .args(["-lc", &format!("command -v {} >/dev/null 2>&1", bin)])
-        .status()
+    let mut cmd = Command::new("bash");
+    cmd.args(["-lc", &format!("command -v {} >/dev/null 2>&1", bin)]);
+    run_command_status_with_timeout(cmd, "command -v")
         .ok()
         .is_some_and(|s| s.success())
 }
 
 fn rtk_version_string() -> String {
-    let out = match Command::new("rtk").arg("--version").output() {
+    let mut cmd = Command::new("rtk");
+    cmd.arg("--version");
+    let out = match run_command_output_with_timeout(cmd, "rtk --version") {
         Ok(v) if v.status.success() => v,
         _ => return "<unavailable>".to_string(),
     };

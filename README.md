@@ -52,6 +52,7 @@ Design intent:
 
 Primary fields:
 - budgets: `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
+- process timeout: `CX_CMD_TIMEOUT_SECS` (default `120`)
 - backend/model: `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
 - execution mode: `CX_MODE`, `CX_SCHEMA_RELAXED`
 - operational toggles: `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`

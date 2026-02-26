@@ -4,19 +4,28 @@ use std::process::Command;
 use crate::capture::chunk_text_by_budget;
 use crate::config::app_config;
 use crate::execmeta::utc_now_iso;
+use crate::process::run_command_output_with_timeout;
 use crate::types::TaskRecord;
 
 use super::{next_task_id, read_tasks, write_tasks};
 
 fn collect_source_text(source: &str) -> Result<String, i32> {
     let out = match source {
-        "staged-diff" => Command::new("git")
-            .args(["diff", "--staged", "--no-color"])
-            .output(),
-        "worktree" => Command::new("git").args(["diff", "--no-color"]).output(),
-        "log" => Command::new("git")
-            .args(["log", "--oneline", "-n", "200"])
-            .output(),
+        "staged-diff" => {
+            let mut cmd = Command::new("git");
+            cmd.args(["diff", "--staged", "--no-color"]);
+            run_command_output_with_timeout(cmd, "task fanout staged-diff").ok()
+        }
+        "worktree" => {
+            let mut cmd = Command::new("git");
+            cmd.args(["diff", "--no-color"]);
+            run_command_output_with_timeout(cmd, "task fanout worktree").ok()
+        }
+        "log" => {
+            let mut cmd = Command::new("git");
+            cmd.args(["log", "--oneline", "-n", "200"]);
+            run_command_output_with_timeout(cmd, "task fanout log").ok()
+        }
         x if x.starts_with("file:") => {
             let p = x.trim_start_matches("file:");
             return Ok(fs::read_to_string(p).unwrap_or_default());
@@ -27,7 +36,6 @@ fn collect_source_text(source: &str) -> Result<String, i32> {
         }
     };
     Ok(out
-        .ok()
         .and_then(|o| {
             if o.status.success() {
                 Some(String::from_utf8_lossy(&o.stdout).to_string())

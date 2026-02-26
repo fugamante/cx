@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
+use crate::process::run_command_with_stdin_output_with_timeout;
 use crate::types::UsageStats;
 
 pub fn usage_from_jsonl(jsonl: &str) -> UsageStats {
@@ -51,23 +51,9 @@ pub fn extract_agent_text(jsonl: &str) -> Option<String> {
 }
 
 pub fn run_codex_jsonl(prompt: &str) -> Result<String, String> {
-    let mut child = Command::new("codex")
-        .args(["exec", "--json", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("failed to start codex: {e}"))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("failed writing prompt to codex stdin: {e}"))?;
-    }
-
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("failed waiting for codex: {e}"))?;
+    let mut cmd = Command::new("codex");
+    cmd.args(["exec", "--json", "-"]);
+    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "codex exec --json -")?;
 
     if !out.status.success() {
         return Err(format!("codex exited with status {}", out.status));
@@ -77,23 +63,9 @@ pub fn run_codex_jsonl(prompt: &str) -> Result<String, String> {
 }
 
 pub fn run_codex_plain(prompt: &str) -> Result<String, String> {
-    let mut child = Command::new("codex")
-        .args(["exec", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("failed to start codex: {e}"))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("failed writing prompt to codex stdin: {e}"))?;
-    }
-
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("failed waiting for codex: {e}"))?;
+    let mut cmd = Command::new("codex");
+    cmd.args(["exec", "-"]);
+    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "codex exec -")?;
     if !out.status.success() {
         return Err(format!("codex exited with status {}", out.status));
     }
@@ -101,23 +73,9 @@ pub fn run_codex_plain(prompt: &str) -> Result<String, String> {
 }
 
 pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, String> {
-    let mut child = Command::new("ollama")
-        .args(["run", model])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("failed to start ollama: {e}"))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("failed writing prompt to ollama stdin: {e}"))?;
-    }
-
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("failed waiting for ollama: {e}"))?;
+    let mut cmd = Command::new("ollama");
+    cmd.args(["run", model]);
+    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "ollama run")?;
     if !out.status.success() {
         return Err(format!("ollama exited with status {}", out.status));
     }

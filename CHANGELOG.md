@@ -43,6 +43,7 @@ All notable changes to this project are documented in this file.
   - `src/cmdctx.rs`
   - `src/execution.rs`
   - `src/native_cmd.rs`
+  - `src/process.rs` (timeout-aware external process runner)
 
 ### Changed
 - Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.
@@ -88,6 +89,8 @@ All notable changes to this project are documented in this file.
   - introduced `src/modules/bench_parity_support.rs` and rewired `bench_parity` to use helper-only support paths
   - simplified command-name and analytics/reporting helpers to reduce function complexity while preserving behavior
   - retained deterministic schema handling and run-log contract while reducing function size and duplication
+- Added timeout-aware execution for external command invocations and routed core command paths through shared timeout helpers.
+  - New env: `CX_CMD_TIMEOUT_SECS` (default `120`)
 
 ### Fixed
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).
