@@ -6,6 +6,7 @@ mod logs;
 mod paths;
 mod policy;
 mod quarantine;
+mod runtime;
 mod schema;
 mod state;
 mod tasks;
