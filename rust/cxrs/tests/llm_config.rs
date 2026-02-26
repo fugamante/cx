@@ -5,10 +5,28 @@ use std::process::{Command, Output};
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+fn git_bin() -> String {
+    if let Ok(v) = std::env::var("GIT_BIN")
+        && !v.trim().is_empty()
+    {
+        return v;
+    }
+    for c in ["git", "/opt/homebrew/bin/git", "/usr/bin/git"] {
+        if std::process::Command::new(c)
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
+            return c.to_string();
+        }
+    }
+    "git".to_string()
+}
+
 fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
     let mut last = None;
     for _ in 0..5 {
-        let out = Command::new("git")
+        let out = Command::new(git_bin())
             .arg("init")
             .arg("-q")
             .arg(format!("--template={}", template_dir.display()))

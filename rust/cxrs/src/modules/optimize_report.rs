@@ -67,7 +67,6 @@ impl Agg {
         let dur_entry = self.tool_dur.entry(tool).or_insert((0, 0));
         dur_entry.0 += dur;
         dur_entry.1 += 1;
-
         if dur > max_ms || eff > max_eff {
             self.alerts += 1;
         }
@@ -121,9 +120,10 @@ fn cache_halves(runs: &[RunEntry]) -> (Option<f64>, Option<f64>) {
         .iter()
         .map(|r| r.cached_input_tokens.unwrap_or(0))
         .sum();
-    let first_cache = (first_in > 0).then_some(first_cached as f64 / first_in as f64);
-    let second_cache = (second_in > 0).then_some(second_cached as f64 / second_in as f64);
-    (first_cache, second_cache)
+    (
+        (first_in > 0).then_some(first_cached as f64 / first_in as f64),
+        (second_in > 0).then_some(second_cached as f64 / second_in as f64),
+    )
 }
 
 fn compression_rows(provider_stats: HashMap<String, (u64, u64, u64, u64)>) -> Vec<Value> {
@@ -155,6 +155,64 @@ fn compression_rows(provider_stats: HashMap<String, (u64, u64, u64, u64)>) -> Ve
     rows
 }
 
+fn push_latency_anomaly(anomalies: &mut Vec<String>, top_dur: &[(String, u64)], max_ms: u64) {
+    if let Some((tool, avg)) = top_dur.first()
+        && *avg > max_ms / 2
+    {
+        anomalies.push(format!(
+            "High latency concentration: {tool} avg_duration_ms={avg}"
+        ));
+    }
+}
+
+fn push_token_anomaly(anomalies: &mut Vec<String>, top_eff: &[(String, u64)], max_eff: u64) {
+    if let Some((tool, avg)) = top_eff.first()
+        && *avg > max_eff / 2
+    {
+        anomalies.push(format!(
+            "High token load concentration: {tool} avg_effective_input_tokens={avg}"
+        ));
+    }
+}
+
+fn push_cache_anomaly(
+    anomalies: &mut Vec<String>,
+    first_cache: Option<f64>,
+    second_cache: Option<f64>,
+) {
+    if let (Some(a), Some(b)) = (first_cache, second_cache)
+        && b + 0.05 < a
+    {
+        anomalies.push(format!(
+            "Cache hit degraded: first_half={}%, second_half={}%,",
+            (a * 100.0).round() as i64,
+            (b * 100.0).round() as i64
+        ));
+    }
+}
+
+fn push_schema_anomaly(anomalies: &mut Vec<String>, schema_fail_freq: Option<f64>) {
+    if let Some(freq) = schema_fail_freq
+        && freq > 0.05
+    {
+        anomalies.push(format!(
+            "Schema failure frequency elevated: {}%",
+            (freq * 100.0).round() as i64
+        ));
+    }
+}
+
+fn push_clip_anomaly(anomalies: &mut Vec<String>, clip_freq: Option<f64>) {
+    if let Some(freq) = clip_freq
+        && freq > 0.30
+    {
+        anomalies.push(format!(
+            "Budget clipping frequent: {}% of captured runs",
+            (freq * 100.0).round() as i64
+        ));
+    }
+}
+
 fn build_anomalies(
     top_dur: &[(String, u64)],
     top_eff: &[(String, u64)],
@@ -166,45 +224,11 @@ fn build_anomalies(
     clip_freq: Option<f64>,
 ) -> Vec<String> {
     let mut anomalies: Vec<String> = Vec::new();
-    if let Some((tool, avg)) = top_dur.first()
-        && *avg > max_ms / 2
-    {
-        anomalies.push(format!(
-            "High latency concentration: {tool} avg_duration_ms={avg}"
-        ));
-    }
-    if let Some((tool, avg)) = top_eff.first()
-        && *avg > max_eff / 2
-    {
-        anomalies.push(format!(
-            "High token load concentration: {tool} avg_effective_input_tokens={avg}"
-        ));
-    }
-    if let (Some(a), Some(b)) = (first_cache, second_cache)
-        && b + 0.05 < a
-    {
-        anomalies.push(format!(
-            "Cache hit degraded: first_half={}%, second_half={}%,",
-            (a * 100.0).round() as i64,
-            (b * 100.0).round() as i64
-        ));
-    }
-    if let Some(freq) = schema_fail_freq
-        && freq > 0.05
-    {
-        anomalies.push(format!(
-            "Schema failure frequency elevated: {}%",
-            (freq * 100.0).round() as i64
-        ));
-    }
-    if let Some(freq) = clip_freq
-        && freq > 0.30
-    {
-        anomalies.push(format!(
-            "Budget clipping frequent: {}% of captured runs",
-            (freq * 100.0).round() as i64
-        ));
-    }
+    push_latency_anomaly(&mut anomalies, top_dur, max_ms);
+    push_token_anomaly(&mut anomalies, top_eff, max_eff);
+    push_cache_anomaly(&mut anomalies, first_cache, second_cache);
+    push_schema_anomaly(&mut anomalies, schema_fail_freq);
+    push_clip_anomaly(&mut anomalies, clip_freq);
     anomalies
 }
 
@@ -240,6 +264,98 @@ fn build_recommendations(
     recommendations
 }
 
+struct Derived {
+    top_eff: Vec<(String, u64)>,
+    top_dur: Vec<(String, u64)>,
+    cache_all: Option<f64>,
+    first_cache: Option<f64>,
+    second_cache: Option<f64>,
+    clip_freq: Option<f64>,
+    schema_fail_freq: Option<f64>,
+    compression: Vec<Value>,
+}
+
+fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
+    let top_eff = top_avg(agg.tool_eff.clone());
+    let top_dur = top_avg(agg.tool_dur.clone());
+    let cache_all = (agg.sum_in > 0).then_some(agg.sum_cached as f64 / agg.sum_in as f64);
+    let (first_cache, second_cache) = cache_halves(runs);
+    let clip_freq =
+        (agg.clipped_total > 0).then_some(agg.clipped_count as f64 / agg.clipped_total as f64);
+    let schema_fail_freq =
+        (agg.schema_total > 0).then_some(agg.schema_fails as f64 / agg.schema_total as f64);
+    let compression = compression_rows(agg.provider_stats.clone());
+    (
+        agg,
+        Derived {
+            top_eff,
+            top_dur,
+            cache_all,
+            first_cache,
+            second_cache,
+            clip_freq,
+            schema_fail_freq,
+            compression,
+        },
+    )
+}
+
+fn analyze_runs(runs: &[RunEntry], max_ms: u64, max_eff: u64) -> (Agg, Derived) {
+    let mut agg = Agg::default();
+    for r in runs {
+        agg.ingest(r, max_ms, max_eff);
+    }
+    derive_metrics(runs, agg)
+}
+
+fn build_scoreboard(total: u64, agg: &Agg, d: &Derived) -> Value {
+    json!({
+        "runs": total,
+        "alerts": agg.alerts,
+        "alerts_pct": if total == 0 { 0.0 } else { (agg.alerts as f64 / total as f64) * 100.0 },
+        "top_avg_duration_ms": d.top_dur,
+        "top_avg_effective_input_tokens": d.top_eff,
+        "cache_hit_rate": d.cache_all,
+        "cache_hit_trend": {
+            "first_half": d.first_cache,
+            "second_half": d.second_cache,
+            "delta": match (d.first_cache, d.second_cache) {
+                (Some(a), Some(b)) => Some(b - a),
+                _ => None
+            }
+        },
+        "schema_failure_frequency": {
+            "schema_runs": agg.schema_total,
+            "schema_failures": agg.schema_fails,
+            "rate": d.schema_fail_freq
+        },
+        "capture_provider_compression": d.compression,
+        "budget_clipping_frequency": {
+            "captured_runs": agg.clipped_total,
+            "clipped_runs": agg.clipped_count,
+            "rate": d.clip_freq
+        }
+    })
+}
+
+fn build_full_report(
+    n: usize,
+    total: u64,
+    scoreboard: Value,
+    anomalies: Vec<String>,
+    recommendations: Vec<String>,
+    log_file: &std::path::Path,
+) -> Value {
+    json!({
+        "window": n,
+        "runs": total,
+        "scoreboard": scoreboard,
+        "anomalies": anomalies,
+        "recommendations": recommendations,
+        "log_file": log_file.display().to_string()
+    })
+}
+
 pub fn optimize_report(n: usize) -> Result<Value, String> {
     let Some(log_file) = resolve_log_file() else {
         return Err("unable to resolve log file".to_string());
@@ -254,68 +370,29 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
 
     let max_ms = env_u64("CXALERT_MAX_MS", 12000);
     let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
-
-    let mut agg = Agg::default();
-    for r in &runs {
-        agg.ingest(r, max_ms, max_eff);
-    }
-
-    let top_eff = top_avg(agg.tool_eff);
-    let top_dur = top_avg(agg.tool_dur);
-    let cache_all = (agg.sum_in > 0).then_some(agg.sum_cached as f64 / agg.sum_in as f64);
-    let (first_cache, second_cache) = cache_halves(&runs);
-    let clip_freq =
-        (agg.clipped_total > 0).then_some(agg.clipped_count as f64 / agg.clipped_total as f64);
-    let schema_fail_freq =
-        (agg.schema_total > 0).then_some(agg.schema_fails as f64 / agg.schema_total as f64);
-    let compression = compression_rows(agg.provider_stats);
+    let (agg, d) = analyze_runs(&runs, max_ms, max_eff);
 
     let anomalies = build_anomalies(
-        &top_dur,
-        &top_eff,
+        &d.top_dur,
+        &d.top_eff,
         max_ms,
         max_eff,
-        first_cache,
-        second_cache,
-        schema_fail_freq,
-        clip_freq,
+        d.first_cache,
+        d.second_cache,
+        d.schema_fail_freq,
+        d.clip_freq,
     );
     let recommendations =
-        build_recommendations(&top_eff, first_cache, second_cache, agg.schema_fails);
+        build_recommendations(&d.top_eff, d.first_cache, d.second_cache, agg.schema_fails);
 
     let total = runs.len() as u64;
-    Ok(json!({
-        "window": n,
-        "runs": total,
-        "scoreboard": {
-            "runs": total,
-            "alerts": agg.alerts,
-            "alerts_pct": if total == 0 { 0.0 } else { (agg.alerts as f64 / total as f64) * 100.0 },
-            "top_avg_duration_ms": top_dur,
-            "top_avg_effective_input_tokens": top_eff,
-            "cache_hit_rate": cache_all,
-            "cache_hit_trend": {
-                "first_half": first_cache,
-                "second_half": second_cache,
-                "delta": match (first_cache, second_cache) {
-                    (Some(a), Some(b)) => Some(b - a),
-                    _ => None
-                }
-            },
-            "schema_failure_frequency": {
-                "schema_runs": agg.schema_total,
-                "schema_failures": agg.schema_fails,
-                "rate": schema_fail_freq
-            },
-            "capture_provider_compression": compression,
-            "budget_clipping_frequency": {
-                "captured_runs": agg.clipped_total,
-                "clipped_runs": agg.clipped_count,
-                "rate": clip_freq
-            }
-        },
-        "anomalies": anomalies,
-        "recommendations": recommendations,
-        "log_file": log_file.display().to_string()
-    }))
+    let scoreboard = build_scoreboard(total, &agg, &d);
+    Ok(build_full_report(
+        n,
+        total,
+        scoreboard,
+        anomalies,
+        recommendations,
+        &log_file,
+    ))
 }
