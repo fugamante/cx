@@ -70,18 +70,33 @@ cargo build
 
 ## Machine requirements
 
-Operating system:
-- macOS (primary tested target)
-- Linux (expected to work with equivalent CLI dependencies)
-- Windows: use WSL for now
+### Runtime (required)
 
-Required binaries:
-- `git`
-- `jq`
-- Rust toolchain (`cargo`, `rustc`)
-- default backend: `codex`
-- optional backend: `ollama` (with local model)
-- optional: `rtk`
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| OS | macOS or Linux | macOS (darwin) | Windows via WSL |
+| `bash` | 5.0+ | 5.3.9 | Shell/bootstrap compatibility paths |
+| `git` | 2.30+ | 2.53.0 | Repo, diff, and task context capture |
+| `jq` | 1.6+ | 1.8.1 | JSON helpers/scripts |
+| `codex` CLI | 0.103.0+ | 0.103.0 | Default backend |
+
+### Runtime (optional)
+
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| `ollama` | 0.17.0+ | 0.17.0 | Optional local backend |
+| `rtk` | 0.22.1+ | 0.22.2 | Optional capture compressor; unsupported versions auto-fallback to native |
+
+### Development / CI
+
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| `rustc` | 1.93.1 | 1.93.1 | Build/runtime implementation |
+| `cargo` | 1.93.1 | 1.93.1 | Build/test tooling |
+| `python3` | 3.10+ | 3.14.3 | Quality gate + support scripts |
+| `make` | 3.81+ | 3.81 | Convenience build/check targets |
+
+Rust crate dependencies are pinned in `Cargo.lock`.
 
 Platform notes:
 - `cxcopy` auto-selects clipboard backend: `pbcopy` (macOS), `wl-copy` (Wayland), or `xclip` (X11).

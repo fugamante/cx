@@ -92,11 +92,35 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 
 ## Requirements
 
-- OS: macOS or Linux
-- `bash`, `git`, `jq`
-- `codex` CLI (default provider)
-- optional: `ollama`, `rtk`
-- Rust toolchain (`cargo`, `rustc`) for development
+### Runtime (required)
+
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| OS | macOS or Linux | macOS (darwin) | Windows supported via WSL |
+| `bash` | 5.0+ | 5.3.9 | Shell wrappers/bootstrap |
+| `git` | 2.30+ | 2.53.0 | Repo detection, diff/log capture |
+| `jq` | 1.6+ | 1.8.1 | JSON processing and compatibility scripts |
+| `codex` CLI | 0.103.0+ | 0.103.0 | Default LLM backend |
+
+### Runtime (optional)
+
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| `ollama` | 0.17.0+ | 0.17.0 | Optional local LLM backend |
+| `rtk` | 0.22.1+ | 0.22.2 | Optional capture compression; auto-fallback to native if unsupported |
+
+### Development / CI
+
+| Dependency | Minimum | Validated in this repo | Notes |
+|---|---:|---:|---|
+| `rustc` | 1.93.1 | 1.93.1 | Canonical runtime is Rust |
+| `cargo` | 1.93.1 | 1.93.1 | Build/test |
+| `python3` | 3.10+ | 3.14.3 | Quality gate + helper scripts |
+| `make` | 3.81+ | 3.81 | Convenience targets (`make install`, compat checks) |
+
+### Rust crates
+
+Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible builds.
 
 ## Quick Start
 
