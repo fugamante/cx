@@ -24,6 +24,7 @@ All notable changes to this project are documented in this file.
   - `src/routing.rs`
   - `src/diagnostics.rs`
   - `src/analytics.rs`
+  - `src/logview.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -43,6 +44,7 @@ All notable changes to this project are documented in this file.
 - Extracted routing/provenance commands and helpers (`where`, `routes`, bash function resolution) from `app.rs` to `src/routing.rs`.
 - Extracted diagnostics helpers/command (`diag`, last-appended log helpers) from `app.rs` to `src/diagnostics.rs`.
 - Extracted analytics/reporting commands (`profile`, `metrics`, `alert`, `worklog`, `trace`) from `app.rs` to `src/analytics.rs`.
+- Extracted log presentation commands (`budget`, `log-tail`) from `app.rs` to `src/logview.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

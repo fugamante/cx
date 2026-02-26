@@ -6,6 +6,7 @@ mod error;
 mod execmeta;
 mod llm;
 mod logs;
+mod logview;
 mod optimize;
 mod paths;
 mod policy;
