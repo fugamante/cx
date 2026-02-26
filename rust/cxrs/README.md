@@ -50,6 +50,7 @@ Primary toggles:
 - `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
 - `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
 - `CX_CMD_TIMEOUT_SECS` (external command timeout, default `120`)
+- `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, `CX_TIMEOUT_SHELL_SECS` (optional per-command-class timeout overrides)
 - `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`
 
 ## Command execution path
@@ -83,7 +84,7 @@ Required binaries:
 - optional: `rtk`
 
 Platform notes:
-- `cxcopy` currently uses macOS `pbcopy`.
+- `cxcopy` auto-selects clipboard backend: `pbcopy` (macOS), `wl-copy` (Wayland), or `xclip` (X11).
 - Shell examples assume POSIX `bash`.
 - RTK routing is guarded by a supported-version range (`CX_RTK_MIN_VERSION`, `CX_RTK_MAX_VERSION`).
 - System capture provider is selectable with `CX_CAPTURE_PROVIDER=auto|rtk|native`.

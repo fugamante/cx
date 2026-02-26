@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use crate::error::{EXIT_OK, EXIT_RUNTIME, format_error, print_runtime_error};
+use crate::error::{EXIT_OK, format_error, print_runtime_error};
 use crate::process::run_command_with_stdin_output_with_timeout;
 use crate::types::{CaptureStats, ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
 
@@ -14,6 +14,32 @@ pub enum LlmMode {
     Jsonl,
     AgentText,
     SchemaJson,
+}
+
+struct ClipboardBackend {
+    bin: &'static str,
+    args: &'static [&'static str],
+    label: &'static str,
+}
+
+fn clipboard_backends() -> &'static [ClipboardBackend] {
+    &[
+        ClipboardBackend {
+            bin: "pbcopy",
+            args: &[],
+            label: "pbcopy",
+        },
+        ClipboardBackend {
+            bin: "wl-copy",
+            args: &[],
+            label: "wl-copy",
+        },
+        ClipboardBackend {
+            bin: "xclip",
+            args: &["-selection", "clipboard"],
+            label: "xclip",
+        },
+    ]
 }
 
 fn mode_to_task_spec(command: &[String], mode: LlmMode) -> Result<TaskSpec, String> {
@@ -109,27 +135,25 @@ pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
     if text.trim().is_empty() {
         return print_runtime_error("cxcopy", "nothing to copy");
     }
-    let pb_out = {
-        let cmd = Command::new("pbcopy");
-        run_command_with_stdin_output_with_timeout(cmd, &text, "pbcopy")
-    };
-    match pb_out {
-        Ok(out) if out.status.success() => {
-            println!("Copied to clipboard.");
-            result.system_status.unwrap_or(0)
+    let mut failures: Vec<String> = Vec::new();
+    for backend in clipboard_backends() {
+        let mut cmd = Command::new(backend.bin);
+        if !backend.args.is_empty() {
+            cmd.args(backend.args);
         }
-        Ok(out) => {
-            eprintln!(
-                "{}",
-                format_error(
-                    "cxcopy",
-                    &format!("pbcopy failed with status {}", out.status)
-                )
-            );
-            EXIT_RUNTIME
+        match run_command_with_stdin_output_with_timeout(cmd, &text, backend.label) {
+            Ok(out) if out.status.success() => {
+                println!("Copied to clipboard ({})", backend.bin);
+                return result.system_status.unwrap_or(0);
+            }
+            Ok(out) => failures.push(format!("{} exited with status {}", backend.bin, out.status)),
+            Err(e) => failures.push(format!("{} unavailable/failed: {}", backend.bin, e)),
         }
-        Err(e) => print_runtime_error("cxcopy", &format!("pbcopy failed: {e}")),
     }
+    print_runtime_error(
+        "cxcopy",
+        &format!("all clipboard backends failed: {}", failures.join("; ")),
+    )
 }
 
 pub fn cmd_fix(command: &[String], run_capture: CaptureRunner, run_task: TaskRunner) -> i32 {

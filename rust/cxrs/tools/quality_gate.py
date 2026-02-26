@@ -64,6 +64,12 @@ def main() -> int:
     parser.add_argument("--max-fn-lines", type=int, default=50)
     parser.add_argument("--allow-fn", action="append", default=["execute_task"])
     parser.add_argument("--strict-errors", action="store_true", help="fail if raw eprintln! count is non-zero")
+    parser.add_argument(
+        "--max-raw-eprintln",
+        type=int,
+        default=None,
+        help="fail if raw eprintln! count exceeds this baseline",
+    )
     args = parser.parse_args()
 
     src_root = pathlib.Path(args.src)
@@ -90,6 +96,11 @@ def main() -> int:
     print(f"raw_eprintln_count: {ep_count}")
 
     if file_v or fn_v:
+        return 1
+    if args.max_raw_eprintln is not None and ep_count > args.max_raw_eprintln:
+        print(
+            f"ERROR: raw_eprintln_count {ep_count} exceeds baseline {args.max_raw_eprintln}"
+        )
         return 1
     if args.strict_errors and ep_count > 0:
         return 1

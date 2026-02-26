@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static RUNS_PARSE_WARNED: AtomicBool = AtomicBool::new(false);
-const REQUIRED_STRICT_FIELDS: [&str; 23] = [
+const REQUIRED_STRICT_FIELDS: [&str; 26] = [
     "execution_id",
     "timestamp",
     "command",
@@ -32,6 +32,9 @@ const REQUIRED_STRICT_FIELDS: [&str; 23] = [
     "output_tokens",
     "policy_blocked",
     "policy_reason",
+    "timed_out",
+    "timeout_secs",
+    "command_label",
 ];
 const REQUIRED_LEGACY_ANY_OF: [(&str, &str); 3] = [
     ("ts", "timestamp"),

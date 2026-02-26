@@ -2,6 +2,10 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::logs::load_runs;
+use crate::optimize_rules::{
+    build_recommendations, push_cache_anomaly, push_clip_anomaly, push_latency_anomaly,
+    push_schema_anomaly, push_timeout_anomaly, push_token_anomaly,
+};
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
 
@@ -46,12 +50,14 @@ fn empty_report(n: usize, log_file: &std::path::Path) -> Value {
 struct Agg {
     tool_eff: HashMap<String, (u64, u64)>,
     tool_dur: HashMap<String, (u64, u64)>,
+    timeout_labels: HashMap<String, u64>,
     provider_stats: HashMap<String, (u64, u64, u64, u64)>,
     alerts: u64,
     schema_fails: u64,
     schema_total: u64,
     clipped_count: u64,
     clipped_total: u64,
+    timeout_count: u64,
     sum_in: u64,
     sum_cached: u64,
 }
@@ -75,6 +81,14 @@ impl Agg {
             if r.schema_valid == Some(false) {
                 self.schema_fails += 1;
             }
+        }
+        if r.timed_out.unwrap_or(false) {
+            self.timeout_count += 1;
+            let label = r
+                .command_label
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            *self.timeout_labels.entry(label).or_insert(0) += 1;
         }
         if r.clipped.is_some() {
             self.clipped_total += 1;
@@ -155,64 +169,6 @@ fn compression_rows(provider_stats: HashMap<String, (u64, u64, u64, u64)>) -> Ve
     rows
 }
 
-fn push_latency_anomaly(anomalies: &mut Vec<String>, top_dur: &[(String, u64)], max_ms: u64) {
-    if let Some((tool, avg)) = top_dur.first()
-        && *avg > max_ms / 2
-    {
-        anomalies.push(format!(
-            "High latency concentration: {tool} avg_duration_ms={avg}"
-        ));
-    }
-}
-
-fn push_token_anomaly(anomalies: &mut Vec<String>, top_eff: &[(String, u64)], max_eff: u64) {
-    if let Some((tool, avg)) = top_eff.first()
-        && *avg > max_eff / 2
-    {
-        anomalies.push(format!(
-            "High token load concentration: {tool} avg_effective_input_tokens={avg}"
-        ));
-    }
-}
-
-fn push_cache_anomaly(
-    anomalies: &mut Vec<String>,
-    first_cache: Option<f64>,
-    second_cache: Option<f64>,
-) {
-    if let (Some(a), Some(b)) = (first_cache, second_cache)
-        && b + 0.05 < a
-    {
-        anomalies.push(format!(
-            "Cache hit degraded: first_half={}%, second_half={}%,",
-            (a * 100.0).round() as i64,
-            (b * 100.0).round() as i64
-        ));
-    }
-}
-
-fn push_schema_anomaly(anomalies: &mut Vec<String>, schema_fail_freq: Option<f64>) {
-    if let Some(freq) = schema_fail_freq
-        && freq > 0.05
-    {
-        anomalies.push(format!(
-            "Schema failure frequency elevated: {}%",
-            (freq * 100.0).round() as i64
-        ));
-    }
-}
-
-fn push_clip_anomaly(anomalies: &mut Vec<String>, clip_freq: Option<f64>) {
-    if let Some(freq) = clip_freq
-        && freq > 0.30
-    {
-        anomalies.push(format!(
-            "Budget clipping frequent: {}% of captured runs",
-            (freq * 100.0).round() as i64
-        ));
-    }
-}
-
 fn build_anomalies(
     top_dur: &[(String, u64)],
     top_eff: &[(String, u64)],
@@ -222,6 +178,7 @@ fn build_anomalies(
     second_cache: Option<f64>,
     schema_fail_freq: Option<f64>,
     clip_freq: Option<f64>,
+    timeout_freq: Option<f64>,
 ) -> Vec<String> {
     let mut anomalies: Vec<String> = Vec::new();
     push_latency_anomaly(&mut anomalies, top_dur, max_ms);
@@ -229,72 +186,50 @@ fn build_anomalies(
     push_cache_anomaly(&mut anomalies, first_cache, second_cache);
     push_schema_anomaly(&mut anomalies, schema_fail_freq);
     push_clip_anomaly(&mut anomalies, clip_freq);
+    push_timeout_anomaly(&mut anomalies, timeout_freq);
     anomalies
-}
-
-fn build_recommendations(
-    top_eff: &[(String, u64)],
-    first_cache: Option<f64>,
-    second_cache: Option<f64>,
-    schema_fails: u64,
-) -> Vec<String> {
-    let mut recommendations: Vec<String> = Vec::new();
-    if let Some((tool, avg_eff)) = top_eff.first() {
-        recommendations.push(format!(
-            "{tool} exceeds average token threshold ({avg_eff}); recommend lean mode."
-        ));
-    }
-    if let (Some(a), Some(b)) = (first_cache, second_cache)
-        && b + 0.05 < a
-    {
-        recommendations.push("Cache hit rate degraded; inspect prompt drift.".to_string());
-    }
-    if schema_fails > 0 {
-        let tool = top_eff
-            .first()
-            .map(|v| v.0.clone())
-            .unwrap_or_else(|| "schema command".to_string());
-        recommendations.push(format!(
-            "Schema failures detected for {tool}; enforce deterministic mode."
-        ));
-    }
-    if recommendations.is_empty() {
-        recommendations.push("No significant anomalies in this window.".to_string());
-    }
-    recommendations
 }
 
 struct Derived {
     top_eff: Vec<(String, u64)>,
     top_dur: Vec<(String, u64)>,
+    top_timeout_labels: Vec<(String, u64)>,
     cache_all: Option<f64>,
     first_cache: Option<f64>,
     second_cache: Option<f64>,
     clip_freq: Option<f64>,
     schema_fail_freq: Option<f64>,
+    timeout_freq: Option<f64>,
     compression: Vec<Value>,
 }
 
 fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
     let top_eff = top_avg(agg.tool_eff.clone());
     let top_dur = top_avg(agg.tool_dur.clone());
+    let mut top_timeout_labels: Vec<(String, u64)> =
+        agg.timeout_labels.clone().into_iter().collect();
+    top_timeout_labels.sort_by(|a, b| b.1.cmp(&a.1));
+    top_timeout_labels.truncate(5);
     let cache_all = (agg.sum_in > 0).then_some(agg.sum_cached as f64 / agg.sum_in as f64);
     let (first_cache, second_cache) = cache_halves(runs);
     let clip_freq =
         (agg.clipped_total > 0).then_some(agg.clipped_count as f64 / agg.clipped_total as f64);
     let schema_fail_freq =
         (agg.schema_total > 0).then_some(agg.schema_fails as f64 / agg.schema_total as f64);
+    let timeout_freq = (!runs.is_empty()).then_some(agg.timeout_count as f64 / runs.len() as f64);
     let compression = compression_rows(agg.provider_stats.clone());
     (
         agg,
         Derived {
             top_eff,
             top_dur,
+            top_timeout_labels,
             cache_all,
             first_cache,
             second_cache,
             clip_freq,
             schema_fail_freq,
+            timeout_freq,
             compression,
         },
     )
@@ -328,6 +263,11 @@ fn build_scoreboard(total: u64, agg: &Agg, d: &Derived) -> Value {
             "schema_runs": agg.schema_total,
             "schema_failures": agg.schema_fails,
             "rate": d.schema_fail_freq
+        },
+        "timeout_frequency": {
+            "timeout_runs": agg.timeout_count,
+            "rate": d.timeout_freq,
+            "top_labels": d.top_timeout_labels
         },
         "capture_provider_compression": d.compression,
         "budget_clipping_frequency": {
@@ -381,9 +321,16 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         d.second_cache,
         d.schema_fail_freq,
         d.clip_freq,
+        d.timeout_freq,
     );
-    let recommendations =
-        build_recommendations(&d.top_eff, d.first_cache, d.second_cache, agg.schema_fails);
+    let recommendations = build_recommendations(
+        &d.top_eff,
+        d.first_cache,
+        d.second_cache,
+        agg.schema_fails,
+        agg.timeout_count,
+        &d.top_timeout_labels,
+    );
 
     let total = runs.len() as u64;
     let scoreboard = build_scoreboard(total, &agg, &d);

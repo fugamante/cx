@@ -134,6 +134,9 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.schema_prompt_sha256 = get_opt_str(obj, "schema_prompt_sha256");
     row.schema_sha256 = get_opt_str(obj, "schema_sha256");
     row.schema_attempt = get_opt_u64(obj, "schema_attempt");
+    row.timed_out = get_opt_bool(obj, "timed_out");
+    row.timeout_secs = get_opt_u64(obj, "timeout_secs");
+    row.command_label = get_opt_str(obj, "command_label");
     row.prompt_preview = get_opt_str(obj, "prompt_preview");
     row.policy_blocked = get_opt_bool(obj, "policy_blocked");
     row.policy_reason = get_opt_str(obj, "policy_reason");

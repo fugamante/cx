@@ -113,7 +113,7 @@ const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "cxcopy",
         usage: "cxcopy <cmd...>",
-        description: "Copy cxo output to clipboard (pbcopy)",
+        description: "Copy cxo output to clipboard (pbcopy/wl-copy/xclip)",
     },
     CommandHelp {
         name: "fix",

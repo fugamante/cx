@@ -19,6 +19,9 @@ pub struct RunLogInput<'a> {
     pub schema_prompt: Option<&'a str>,
     pub schema_raw: Option<&'a str>,
     pub schema_attempt: Option<u64>,
+    pub timed_out: Option<bool>,
+    pub timeout_secs: Option<u64>,
+    pub command_label: Option<&'a str>,
     pub duration_ms: u64,
     pub usage: Option<&'a UsageStats>,
     pub capture: Option<&'a CaptureStats>,
@@ -145,6 +148,9 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.schema_prompt_sha256 = input.schema_prompt.map(sha256_hex);
     row.schema_sha256 = input.schema_raw.map(sha256_hex);
     row.schema_attempt = input.schema_attempt;
+    row.timed_out = input.timed_out;
+    row.timeout_secs = input.timeout_secs;
+    row.command_label = input.command_label.map(|s| s.to_string());
     row.prompt_preview = Some(prompt_preview(input.prompt, 180));
     row.policy_blocked = input.policy_blocked;
     row.policy_reason = input.policy_reason.map(|s| s.to_string());

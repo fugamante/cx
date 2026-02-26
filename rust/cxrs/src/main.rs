@@ -49,6 +49,8 @@ mod optimize;
 mod optimize_print;
 #[path = "modules/optimize_report.rs"]
 mod optimize_report;
+#[path = "modules/optimize_rules.rs"]
+mod optimize_rules;
 #[path = "modules/paths.rs"]
 mod paths;
 #[path = "modules/policy.rs"]

@@ -46,6 +46,37 @@ fn print_capture_compression(sb: &Value) {
     }
 }
 
+fn print_timeout_frequency(sb: &Value) {
+    let Some(tf) = sb.get("timeout_frequency") else {
+        println!("timeout_frequency: n/a");
+        return;
+    };
+    let timeout_runs = tf.get("timeout_runs").and_then(Value::as_u64).unwrap_or(0);
+    let rate = tf
+        .get("rate")
+        .and_then(Value::as_f64)
+        .map(|v| format!("{}%", (v * 100.0).round() as i64))
+        .unwrap_or_else(|| "n/a".to_string());
+    println!("timeout_frequency: {rate} ({timeout_runs} runs)");
+    let labels = tf.get("top_labels").and_then(Value::as_array);
+    if let Some(rows) = labels
+        && !rows.is_empty()
+    {
+        println!("timeout_top_labels:");
+        for row in rows {
+            if let Some(pair) = row.as_array()
+                && pair.len() == 2
+            {
+                println!(
+                    "- {}: {}",
+                    pair[0].as_str().unwrap_or("unknown"),
+                    pair[1].as_u64().unwrap_or(0)
+                );
+            }
+        }
+    }
+}
+
 fn print_scoreboard(sb: &Value) {
     println!("Section A: Scoreboard");
     println!(
@@ -93,6 +124,7 @@ fn print_scoreboard(sb: &Value) {
             None => println!("budget_clipping_frequency: n/a"),
         }
     }
+    print_timeout_frequency(sb);
     print_capture_compression(sb);
 }
 

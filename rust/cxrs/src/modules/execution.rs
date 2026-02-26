@@ -7,6 +7,7 @@ use crate::llm::{
     extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
     wrap_agent_text_as_jsonl,
 };
+use crate::process::{is_timeout_error, parse_timeout_secs_from_error};
 use crate::runlog::log_schema_failure;
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
@@ -15,6 +16,53 @@ use crate::types::{
     UsageStats,
 };
 use crate::util::sha256_hex;
+
+fn command_label_from_error(err: &str) -> Option<&str> {
+    err.split(" timed out after ").next().map(str::trim)
+}
+
+fn log_execution_error(
+    spec: &TaskSpec,
+    prompt: &str,
+    capture_stats: &CaptureStats,
+    usage: &UsageStats,
+    schema_name: Option<&str>,
+    schema_prompt: Option<&str>,
+    schema_raw: Option<&str>,
+    schema_attempt: Option<u64>,
+    err: &str,
+    started: &Instant,
+) {
+    if !spec.logging_enabled {
+        return;
+    }
+    let timed_out = is_timeout_error(err);
+    let timeout_secs = parse_timeout_secs_from_error(err);
+    let command_label = if timed_out {
+        command_label_from_error(err)
+    } else {
+        None
+    };
+    let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
+        tool: &spec.command_name,
+        prompt,
+        schema_prompt,
+        schema_raw,
+        schema_attempt,
+        timed_out: Some(timed_out),
+        timeout_secs,
+        command_label,
+        duration_ms: started.elapsed().as_millis() as u64,
+        usage: Some(usage),
+        capture: Some(capture_stats),
+        schema_ok: false,
+        schema_reason: Some(err),
+        schema_name,
+        quarantine_id: None,
+        policy_blocked: None,
+        policy_reason: None,
+    });
+}
 
 pub fn run_llm_plain(prompt: &str) -> Result<String, String> {
     if llm_backend() == "ollama" {
@@ -36,14 +84,18 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
     let started = Instant::now();
     let execution_id = make_execution_id(&spec.command_name);
 
-    let (prompt, capture_stats, system_status) = match spec.input {
-        TaskInput::Prompt(p) => (p, CaptureStats::default(), None),
+    let (prompt, capture_stats, system_status) = match &spec.input {
+        TaskInput::Prompt(p) => (p.clone(), CaptureStats::default(), None),
         TaskInput::SystemCommand(cmd) => {
-            let (captured, status, stats) = crate::capture::run_system_command_capture(&cmd)?;
+            let (captured, status, stats) = crate::capture::run_system_command_capture(cmd)?;
             (captured, stats, Some(status))
         }
     };
-    let capture_stats = spec.capture_override.unwrap_or(capture_stats);
+    let capture_stats = spec
+        .capture_override
+        .as_ref()
+        .cloned()
+        .unwrap_or(capture_stats);
 
     let mut schema_valid: Option<bool> = None;
     let mut quarantine_id: Option<String> = None;
@@ -56,15 +108,66 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
 
     match spec.output_kind {
         LlmOutputKind::Plain => {
-            stdout = run_llm_plain(&prompt)?;
+            stdout = match run_llm_plain(&prompt) {
+                Ok(v) => v,
+                Err(e) => {
+                    log_execution_error(
+                        &spec,
+                        &prompt,
+                        &capture_stats,
+                        &usage,
+                        None,
+                        None,
+                        None,
+                        None,
+                        &e,
+                        &started,
+                    );
+                    return Err(e);
+                }
+            };
         }
         LlmOutputKind::Jsonl => {
-            let jsonl = run_llm_jsonl(&prompt)?;
+            let jsonl = match run_llm_jsonl(&prompt) {
+                Ok(v) => v,
+                Err(e) => {
+                    log_execution_error(
+                        &spec,
+                        &prompt,
+                        &capture_stats,
+                        &usage,
+                        None,
+                        None,
+                        None,
+                        None,
+                        &e,
+                        &started,
+                    );
+                    return Err(e);
+                }
+            };
             usage = usage_from_jsonl(&jsonl);
             stdout = jsonl;
         }
         LlmOutputKind::AgentText => {
-            let jsonl = run_llm_jsonl(&prompt)?;
+            let jsonl = match run_llm_jsonl(&prompt) {
+                Ok(v) => v,
+                Err(e) => {
+                    log_execution_error(
+                        &spec,
+                        &prompt,
+                        &capture_stats,
+                        &usage,
+                        None,
+                        None,
+                        None,
+                        None,
+                        &e,
+                        &started,
+                    );
+                    return Err(e);
+                }
+            };
             usage = usage_from_jsonl(&jsonl);
             stdout = extract_agent_text(&jsonl).unwrap_or_default();
         }
@@ -103,7 +206,24 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 validate_schema_instance(schema, raw)
             };
 
-            let (first_raw, first_usage) = run_attempt(&prompt_envelope.full_prompt)?;
+            let (first_raw, first_usage) = match run_attempt(&prompt_envelope.full_prompt) {
+                Ok(v) => v,
+                Err(e) => {
+                    log_execution_error(
+                        &spec,
+                        &task_input,
+                        &capture_stats,
+                        &usage,
+                        Some(schema.name.as_str()),
+                        Some(prompt_envelope.full_prompt.as_str()),
+                        Some(schema_pretty.as_str()),
+                        Some(1),
+                        &e,
+                        &started,
+                    );
+                    return Err(e);
+                }
+            };
             usage = first_usage;
 
             match validate_raw(&first_raw) {
@@ -128,7 +248,25 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         );
                         schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
                         schema_attempt_for_log = Some(2);
-                        let (retry_raw, retry_usage) = run_attempt(&prompt_envelope.full_prompt)?;
+                        let (retry_raw, retry_usage) =
+                            match run_attempt(&prompt_envelope.full_prompt) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    log_execution_error(
+                                        &spec,
+                                        &task_input,
+                                        &capture_stats,
+                                        &usage,
+                                        Some(schema.name.as_str()),
+                                        Some(prompt_envelope.full_prompt.as_str()),
+                                        Some(schema_pretty.as_str()),
+                                        Some(2),
+                                        &e,
+                                        &started,
+                                    );
+                                    return Err(e);
+                                }
+                            };
                         usage = retry_usage;
                         match validate_raw(&retry_raw) {
                             Ok(valid) => {
@@ -179,6 +317,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                             schema_prompt: schema_prompt_for_log.as_deref(),
                             schema_raw: schema_raw_for_log.as_deref(),
                             schema_attempt: schema_attempt_for_log,
+                            timed_out: None,
+                            timeout_secs: None,
+                            command_label: None,
                             duration_ms: started.elapsed().as_millis() as u64,
                             usage: Some(&usage),
                             capture: Some(&capture_stats),
@@ -213,6 +354,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             schema_prompt: schema_prompt_for_log.as_deref(),
             schema_raw: schema_raw_for_log.as_deref(),
             schema_attempt: schema_attempt_for_log,
+            timed_out: None,
+            timeout_secs: None,
+            command_label: None,
             duration_ms: started.elapsed().as_millis() as u64,
             usage: Some(&usage),
             capture: Some(&capture_stats),

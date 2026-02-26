@@ -44,6 +44,11 @@ All notable changes to this project are documented in this file.
   - `src/execution.rs`
   - `src/native_cmd.rs`
   - `src/process.rs` (timeout-aware external process runner)
+  - `src/optimize_rules.rs` (optimize anomaly/recommendation rules)
+- Timeout telemetry fields in run logs:
+  - `timed_out`
+  - `timeout_secs`
+  - `command_label`
 
 ### Changed
 - Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.
@@ -91,6 +96,15 @@ All notable changes to this project are documented in this file.
   - retained deterministic schema handling and run-log contract while reducing function size and duplication
 - Added timeout-aware execution for external command invocations and routed core command paths through shared timeout helpers.
   - New env: `CX_CMD_TIMEOUT_SECS` (default `120`)
+- Added optional timeout overrides by command class:
+  - `CX_TIMEOUT_LLM_SECS`
+  - `CX_TIMEOUT_GIT_SECS`
+  - `CX_TIMEOUT_SHELL_SECS`
+- Extended `cx optimize` scoreboard/anomaly/recommendation output with timeout frequency and top timeout labels.
+- Updated `cxcopy` clipboard handling to auto-try `pbcopy`, `wl-copy`, and `xclip` with timeout protection.
+- Added quality-gate baseline control to prevent silent growth of raw `eprintln!` usage:
+  - `tools/quality_gate.py --max-raw-eprintln <N>`
+  - wired into `.github/workflows/cxrs-compat.yml`.
 
 ### Fixed
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).

@@ -40,6 +40,12 @@ pub struct RunEntry {
     #[serde(default)]
     pub schema_attempt: Option<u64>,
     #[serde(default)]
+    pub timed_out: Option<bool>,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub command_label: Option<String>,
+    #[serde(default)]
     pub prompt_preview: Option<String>,
     #[serde(default)]
     pub system_output_len_raw: Option<u64>,
@@ -238,6 +244,9 @@ pub struct ExecutionLog {
     pub schema_prompt_sha256: Option<String>,
     pub schema_sha256: Option<String>,
     pub schema_attempt: Option<u64>,
+    pub timed_out: Option<bool>,
+    pub timeout_secs: Option<u64>,
+    pub command_label: Option<String>,
     pub prompt_preview: Option<String>,
     pub policy_blocked: Option<bool>,
     pub policy_reason: Option<String>,
