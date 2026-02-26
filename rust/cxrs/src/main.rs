@@ -9,6 +9,7 @@ mod paths;
 mod policy;
 mod prompting;
 mod quarantine;
+mod routing;
 mod runlog;
 mod runtime;
 mod schema;

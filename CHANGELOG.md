@@ -21,6 +21,7 @@ All notable changes to this project are documented in this file.
   - `src/execmeta.rs`, `src/runlog.rs` (`1380d5c`)
   - `src/optimize.rs`
   - `src/prompting.rs`
+  - `src/routing.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -37,6 +38,7 @@ All notable changes to this project are documented in this file.
 - Reused shared UTC timestamp helper across modules (`6a288a8`).
 - Extracted optimize analytics (`parse_optimize_args`, `optimize_report`, `print_optimize`) from `app.rs` to `src/optimize.rs`.
 - Extracted prompt engineering commands (`roles`, `prompt`, `fanout`, `promptlint`) from `app.rs` to `src/prompting.rs`.
+- Extracted routing/provenance commands and helpers (`where`, `routes`, bash function resolution) from `app.rs` to `src/routing.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed
