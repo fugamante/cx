@@ -6,68 +6,88 @@ use crate::types::{CaptureStats, ExecutionResult, LlmOutputKind, TaskInput, Task
 type TaskRunner = fn(TaskSpec) -> Result<ExecutionResult, String>;
 type CaptureRunner = fn(&[String]) -> Result<(String, i32, CaptureStats), String>;
 
-pub fn cmd_cx(command: &[String], run_task: TaskRunner) -> i32 {
-    let result = match run_task(TaskSpec {
-        command_name: "cx".to_string(),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum LlmMode {
+    Plain,
+    Jsonl,
+    AgentText,
+    SchemaJson,
+}
+
+fn mode_to_task_spec(command: &[String], mode: LlmMode) -> Result<TaskSpec, String> {
+    let (command_name, output_kind) = match mode {
+        LlmMode::Plain => ("cx", LlmOutputKind::Plain),
+        LlmMode::Jsonl => ("cxj", LlmOutputKind::Jsonl),
+        LlmMode::AgentText => ("cxo", LlmOutputKind::AgentText),
+        LlmMode::SchemaJson => {
+            return Err(
+                "LlmMode::SchemaJson requires explicit schema metadata; use structured commands"
+                    .to_string(),
+            );
+        }
+    };
+    Ok(TaskSpec {
+        command_name: command_name.to_string(),
         input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::Plain,
+        output_kind,
         schema: None,
         schema_task_input: None,
         logging_enabled: true,
         capture_override: None,
-    }) {
+    })
+}
+
+pub fn execute_llm_command(
+    command: &[String],
+    mode: LlmMode,
+    run_task: TaskRunner,
+) -> Result<ExecutionResult, String> {
+    let spec = mode_to_task_spec(command, mode)?;
+    run_task(spec)
+}
+
+fn run_and_print(
+    command: &[String],
+    mode: LlmMode,
+    run_task: TaskRunner,
+    with_newline: bool,
+) -> i32 {
+    let result = match execute_llm_command(command, mode, run_task) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs cx: {e}");
+            let name = match mode {
+                LlmMode::Plain => "cx",
+                LlmMode::Jsonl => "cxj",
+                LlmMode::AgentText => "cxo",
+                LlmMode::SchemaJson => "cx-schema",
+            };
+            eprintln!("cxrs {name}: {e}");
             return 1;
         }
     };
-    print!("{}", result.stdout);
+    if with_newline {
+        println!("{}", result.stdout);
+    } else {
+        print!("{}", result.stdout);
+    }
     result.system_status.unwrap_or(0)
+}
+
+pub fn cmd_cx(command: &[String], run_task: TaskRunner) -> i32 {
+    run_and_print(command, LlmMode::Plain, run_task, false)
 }
 
 pub fn cmd_cxj(command: &[String], run_task: TaskRunner) -> i32 {
-    let result = match run_task(TaskSpec {
-        command_name: "cxj".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::Jsonl,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxj: {e}");
-            return 1;
-        }
-    };
-    print!("{}", result.stdout);
-    result.system_status.unwrap_or(0)
+    run_and_print(command, LlmMode::Jsonl, run_task, false)
 }
 
 pub fn cmd_cxo(command: &[String], run_task: TaskRunner) -> i32 {
-    let result = match run_task(TaskSpec {
-        command_name: "cxo".to_string(),
-        input: TaskInput::SystemCommand(command.to_vec()),
-        output_kind: LlmOutputKind::AgentText,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    }) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs cxo: {e}");
-            return 1;
-        }
-    };
-    println!("{}", result.stdout);
-    result.system_status.unwrap_or(0)
+    run_and_print(command, LlmMode::AgentText, run_task, true)
 }
 
 pub fn cmd_cxol(command: &[String], run_task: TaskRunner) -> i32 {
-    cmd_cx(command, run_task)
+    run_and_print(command, LlmMode::Plain, run_task, false)
 }
 
 pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
