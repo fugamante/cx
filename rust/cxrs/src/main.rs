@@ -25,6 +25,8 @@ mod error;
 mod execmeta;
 #[path = "modules/execution.rs"]
 mod execution;
+#[path = "modules/help.rs"]
+mod help;
 #[path = "modules/introspect.rs"]
 mod introspect;
 #[path = "modules/llm.rs"]

@@ -15,6 +15,7 @@ use crate::config::{
 use crate::diagnostics::cmd_diag;
 use crate::doctor;
 use crate::execmeta::utc_now_iso;
+use crate::help::{render_help, render_task_help};
 use crate::introspect::{
     cmd_core as introspect_cmd_core, print_version as introspect_print_version,
 };
@@ -41,101 +42,19 @@ use crate::tasks::{
 use crate::types::{ExecutionResult, TaskSpec};
 
 fn print_help() {
-    println!("{APP_NAME} - {APP_DESC}");
-    println!();
-    println!("Usage:");
-    println!("  {APP_NAME} <command> [args]");
-    println!();
-    println!("Commands:");
-    println!("  version            Print tool version");
-    println!("  where              Show binary/source/log resolution details");
-    println!("  routes [--json] [cmd...]  Show routing map/introspection");
-    println!("  diag               Non-interactive diagnostic report");
-    println!("  parity             Run Rust/Bash parity invariants");
-    println!("  schema list [--json]  List registered schemas");
-    println!("  logs validate [--fix=false] [--legacy-ok]  Validate execution log JSONL contract");
-    println!(
-        "  logs migrate [--out PATH] [--in-place]  Normalize legacy run logs to current contract"
+    print!(
+        "{}",
+        render_help(
+            APP_NAME,
+            APP_DESC,
+            DEFAULT_RUN_WINDOW,
+            DEFAULT_QUARANTINE_LIST
+        )
     );
-    println!(
-        "  ci validate [--strict] [--legacy-ok] [--json]  CI-friendly validation gate (no network)"
-    );
-    println!("  core               Show execution-core pipeline config");
-    println!(
-        "  task <op> [...]    Task graph management (add/list/claim/complete/fail/show/fanout)"
-    );
-    println!("  doctor             Run non-interactive environment checks");
-    println!("  supports <name>    Exit 0 if subcommand is supported by cxrs");
-    println!(
-        "  llm <op> [...]     Manage LLM backend/model defaults (show|use|unset|set-backend|set-model|clear-model)"
-    );
-    println!("  state <op> [...]   Manage repo state JSON (show|get|set)");
-    println!("  policy [show|check ...] Show safety rules or classify a command");
-    println!("  bench <N> -- <cmd...>  Benchmark command runtime and tokens");
-    println!("  cx <cmd...>        Run command output through LLM text mode");
-    println!("  cxj <cmd...>       Run command output through LLM JSONL mode");
-    println!("  cxo <cmd...>       Run command output and print last agent message");
-    println!("  cxol <cmd...>      Run command output through LLM plain mode");
-    println!("  cxcopy <cmd...>    Copy cxo output to clipboard (pbcopy)");
-    println!("  fix <cmd...>       Explain failures and suggest next steps (text)");
-    println!("  budget             Show context budget settings and last clip fields");
-    println!("  log-tail [N]       Pretty-print last N log entries");
-    println!("  health             Run end-to-end selected-LLM/cx smoke checks");
-    println!("  rtk-status         Show RTK version/range decision and fallback mode");
-    println!("  log-on             Enable cx logging (process-local)");
-    println!("  log-off            Disable cx logging in this process");
-    println!("  alert-show         Show active alert thresholds/toggles");
-    println!("  alert-on           Enable alerts (process-local)");
-    println!("  alert-off          Disable alerts in this process");
-    println!("  chunk              Chunk stdin text by context budget chars");
-    println!("  metrics [N]        Token and duration aggregates from last N runs");
-    println!("  prompt <mode> <request>  Generate Codex-ready prompt block");
-    println!("  roles [role]       List roles or print role-specific prompt header");
-    println!("  fanout <objective> Generate role-tagged parallelizable subtasks");
-    println!("  promptlint [N]     Lint prompt/cost patterns from last N runs");
-    println!("  cx-compat <cmd...> Compatibility shim for bash-style cx command names");
-    println!(
-        "  profile [N]        Summarize last N runs from resolved cx log (default {})",
-        DEFAULT_RUN_WINDOW
-    );
-    println!(
-        "  alert [N]          Report anomalies from last N runs (default {})",
-        DEFAULT_RUN_WINDOW
-    );
-    println!("  optimize [N] [--json]  Recommend cost/latency improvements from last N runs");
-    println!(
-        "  worklog [N]        Emit Markdown worklog from last N runs (default {})",
-        DEFAULT_RUN_WINDOW
-    );
-    println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
-    println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
-    println!("  diffsum            Summarize unstaged diff (strict schema)");
-    println!("  diffsum-staged     Summarize staged diff (strict schema)");
-    println!("  fix-run <cmd...>   Suggest remediation commands for a failed command");
-    println!("  commitjson         Generate strict JSON commit object from staged diff");
-    println!("  commitmsg          Generate commit message text from staged diff");
-    println!("  replay <id>        Replay quarantined schema run in strict mode");
-    println!(
-        "  quarantine list [N]  Show recent quarantine entries (default {})",
-        DEFAULT_QUARANTINE_LIST
-    );
-    println!("  quarantine show <id> Show quarantined entry payload");
-    println!("  help               Print this help");
 }
 
 fn print_task_help() {
-    println!("cx help task");
-    println!();
-    println!("Task commands:");
-    println!("  cx task add \"<objective>\" --role <architect|implementer|reviewer|tester|doc>");
-    println!("  cx task list [--status pending|in_progress|complete|failed]");
-    println!("  cx task claim <id>");
-    println!("  cx task complete <id>");
-    println!("  cx task fail <id>");
-    println!("  cx task show <id>");
-    println!("  cx task fanout \"<objective>\" [--from staged-diff|worktree|log|file:PATH]");
-    println!("  cx task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]");
-    println!("  cx task run-all [--status pending]");
+    print!("{}", render_task_help());
 }
 
 // path resolution moved to `paths.rs`
