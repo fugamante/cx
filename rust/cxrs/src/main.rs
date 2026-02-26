@@ -39,6 +39,10 @@ mod logview;
 mod native_cmd;
 #[path = "modules/optimize.rs"]
 mod optimize;
+#[path = "modules/optimize_print.rs"]
+mod optimize_print;
+#[path = "modules/optimize_report.rs"]
+mod optimize_report;
 #[path = "modules/paths.rs"]
 mod paths;
 #[path = "modules/policy.rs"]
@@ -65,6 +69,10 @@ mod settings_cmds;
 mod state;
 #[path = "modules/structured_cmds.rs"]
 mod structured_cmds;
+#[path = "modules/structured_fixrun.rs"]
+mod structured_fixrun;
+#[path = "modules/structured_replay.rs"]
+mod structured_replay;
 #[path = "modules/task_cmds.rs"]
 mod task_cmds;
 #[path = "modules/taskrun.rs"]

@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build release install check fmt compat-check parity-check
+.PHONY: build release install check fmt compat-check parity-check quality
 
 fmt:
 	cargo fmt
@@ -26,3 +26,6 @@ compat-check:
 
 parity-check:
 	./scripts/parity_check.sh
+
+quality:
+	./tools/quality_gate.py --src src --max-file-lines 400 --max-fn-lines 50 --allow-fn execute_task
