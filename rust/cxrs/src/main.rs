@@ -4,6 +4,7 @@ mod error;
 mod execmeta;
 mod llm;
 mod logs;
+mod optimize;
 mod paths;
 mod policy;
 mod quarantine;

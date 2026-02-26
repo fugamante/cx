@@ -19,6 +19,7 @@ All notable changes to this project are documented in this file.
   - `src/policy.rs` (`16dc692`)
   - `src/runtime.rs` (`41ad1c4`)
   - `src/execmeta.rs`, `src/runlog.rs` (`1380d5c`)
+  - `src/optimize.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -33,6 +34,7 @@ All notable changes to this project are documented in this file.
 - Reworked run logging call sites to use a structured input object instead of long argument lists (`42c181f`).
 - Centralized execution log row validation in `src/logs.rs` (`c88978b`).
 - Reused shared UTC timestamp helper across modules (`6a288a8`).
+- Extracted optimize analytics (`parse_optimize_args`, `optimize_report`, `print_optimize`) from `app.rs` to `src/optimize.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed
