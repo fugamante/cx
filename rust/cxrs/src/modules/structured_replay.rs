@@ -8,6 +8,33 @@ use crate::schema::build_strict_schema_prompt;
 
 pub type JsonlRunner = fn(&str) -> Result<String, String>;
 
+fn log_replay_schema_failure(rec: &crate::types::QuarantineRecord, reason: &str, raw: &str) {
+    match log_schema_failure(
+        &format!("{}_replay", rec.tool),
+        reason,
+        raw,
+        &rec.schema,
+        &rec.prompt,
+        Vec::new(),
+    ) {
+        Ok(qid) => eprintln!(
+            "{}",
+            format_error("replay", &format!("{reason}; quarantine_id={qid}"))
+        ),
+        Err(e) => eprintln!(
+            "{}",
+            format_error("replay", &format!("failed to log schema failure: {e}"))
+        ),
+    }
+}
+
+fn ensure_quarantine_payload(rec: &crate::types::QuarantineRecord) -> Result<(), String> {
+    if rec.schema.trim().is_empty() || rec.prompt.trim().is_empty() {
+        return Err("quarantine entry is missing schema/prompt payload".to_string());
+    }
+    Ok(())
+}
+
 pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
@@ -17,14 +44,8 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
         }
     };
 
-    if rec.schema.trim().is_empty() || rec.prompt.trim().is_empty() {
-        eprintln!(
-            "{}",
-            format_error(
-                "replay",
-                "quarantine entry is missing schema/prompt payload"
-            )
-        );
+    if let Err(e) = ensure_quarantine_payload(&rec) {
+        eprintln!("{}", format_error("replay", &e));
         return EXIT_RUNTIME;
     }
 
@@ -38,44 +59,12 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     };
     let raw = extract_agent_text(&jsonl).unwrap_or_default();
     if raw.trim().is_empty() {
-        match log_schema_failure(
-            &format!("{}_replay", rec.tool),
-            "empty_agent_message",
-            &raw,
-            &rec.schema,
-            &rec.prompt,
-            Vec::new(),
-        ) {
-            Ok(qid) => eprintln!(
-                "{}",
-                format_error("replay", &format!("empty response; quarantine_id={qid}"))
-            ),
-            Err(e) => eprintln!(
-                "{}",
-                format_error("replay", &format!("failed to log schema failure: {e}"))
-            ),
-        }
+        log_replay_schema_failure(&rec, "empty_agent_message", &raw);
         return EXIT_RUNTIME;
     }
 
     if serde_json::from_str::<Value>(&raw).is_err() {
-        match log_schema_failure(
-            &format!("{}_replay", rec.tool),
-            "invalid_json",
-            &raw,
-            &rec.schema,
-            &rec.prompt,
-            Vec::new(),
-        ) {
-            Ok(qid) => eprintln!(
-                "{}",
-                format_error("replay", &format!("invalid JSON; quarantine_id={qid}"))
-            ),
-            Err(e) => eprintln!(
-                "{}",
-                format_error("replay", &format!("failed to log schema failure: {e}"))
-            ),
-        }
+        log_replay_schema_failure(&rec, "invalid_json", &raw);
         eprintln!("{}", format_error("replay", "raw response follows:"));
         eprintln!("{raw}");
         return EXIT_RUNTIME;

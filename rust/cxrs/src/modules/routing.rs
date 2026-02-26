@@ -8,6 +8,99 @@ use crate::execmeta::toolchain_version_string;
 use crate::paths::{repo_root_hint, resolve_log_file, resolve_state_file};
 use crate::runtime::{llm_backend, llm_model};
 
+const ROUTE_NAMES: &[&str] = &[
+    "help",
+    "version",
+    "where",
+    "routes",
+    "logs",
+    "ci",
+    "task",
+    "diag",
+    "parity",
+    "doctor",
+    "state",
+    "llm",
+    "policy",
+    "bench",
+    "metrics",
+    "prompt",
+    "roles",
+    "fanout",
+    "promptlint",
+    "cx",
+    "cxj",
+    "cxo",
+    "cxol",
+    "cxcopy",
+    "fix",
+    "budget",
+    "log-tail",
+    "health",
+    "rtk-status",
+    "log-on",
+    "log-off",
+    "alert-show",
+    "alert-on",
+    "alert-off",
+    "chunk",
+    "cx-compat",
+    "profile",
+    "alert",
+    "optimize",
+    "worklog",
+    "trace",
+    "next",
+    "fix-run",
+    "diffsum",
+    "diffsum-staged",
+    "commitjson",
+    "commitmsg",
+    "replay",
+    "quarantine",
+    "supports",
+    "cxversion",
+    "cxdoctor",
+    "cxwhere",
+    "cxdiag",
+    "cxparity",
+    "cxlogs",
+    "cxmetrics",
+    "cxprofile",
+    "cxtrace",
+    "cxalert",
+    "cxoptimize",
+    "cxworklog",
+    "cxpolicy",
+    "cxstate",
+    "cxllm",
+    "cxbench",
+    "cxprompt",
+    "cxroles",
+    "cxfanout",
+    "cxpromptlint",
+    "cxnext",
+    "cxfix",
+    "cxdiffsum",
+    "cxdiffsum_staged",
+    "cxcommitjson",
+    "cxcommitmsg",
+    "cxbudget",
+    "cxlog_tail",
+    "cxhealth",
+    "cxrtk",
+    "cxlog_on",
+    "cxlog_off",
+    "cxalert_show",
+    "cxalert_on",
+    "cxalert_off",
+    "cxchunk",
+    "cxfix_run",
+    "cxreplay",
+    "cxquarantine",
+    "cxtask",
+];
+
 pub fn bash_type_of_function(repo: &Path, name: &str) -> Option<String> {
     let cx_sh = repo.join("cx.sh");
     let cmd = format!(
@@ -34,99 +127,7 @@ pub fn route_handler_for(name: &str) -> Option<String> {
 }
 
 pub fn rust_route_names() -> Vec<String> {
-    let names = vec![
-        "help",
-        "version",
-        "where",
-        "routes",
-        "logs",
-        "ci",
-        "task",
-        "diag",
-        "parity",
-        "doctor",
-        "state",
-        "llm",
-        "policy",
-        "bench",
-        "metrics",
-        "prompt",
-        "roles",
-        "fanout",
-        "promptlint",
-        "cx",
-        "cxj",
-        "cxo",
-        "cxol",
-        "cxcopy",
-        "fix",
-        "budget",
-        "log-tail",
-        "health",
-        "rtk-status",
-        "log-on",
-        "log-off",
-        "alert-show",
-        "alert-on",
-        "alert-off",
-        "chunk",
-        "cx-compat",
-        "profile",
-        "alert",
-        "optimize",
-        "worklog",
-        "trace",
-        "next",
-        "fix-run",
-        "diffsum",
-        "diffsum-staged",
-        "commitjson",
-        "commitmsg",
-        "replay",
-        "quarantine",
-        "supports",
-        "cxversion",
-        "cxdoctor",
-        "cxwhere",
-        "cxdiag",
-        "cxparity",
-        "cxlogs",
-        "cxmetrics",
-        "cxprofile",
-        "cxtrace",
-        "cxalert",
-        "cxoptimize",
-        "cxworklog",
-        "cxpolicy",
-        "cxstate",
-        "cxllm",
-        "cxbench",
-        "cxprompt",
-        "cxroles",
-        "cxfanout",
-        "cxpromptlint",
-        "cxnext",
-        "cxfix",
-        "cxdiffsum",
-        "cxdiffsum_staged",
-        "cxcommitjson",
-        "cxcommitmsg",
-        "cxbudget",
-        "cxlog_tail",
-        "cxhealth",
-        "cxrtk",
-        "cxlog_on",
-        "cxlog_off",
-        "cxalert_show",
-        "cxalert_on",
-        "cxalert_off",
-        "cxchunk",
-        "cxfix_run",
-        "cxreplay",
-        "cxquarantine",
-        "cxtask",
-    ];
-    let mut out: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
+    let mut out: Vec<String> = ROUTE_NAMES.iter().map(|s| (*s).to_string()).collect();
     out.sort();
     out.dedup();
     out
@@ -177,8 +178,7 @@ pub fn cmd_routes(args: &[String]) -> i32 {
     }
 }
 
-pub fn print_where(cmds: &[String], app_version: &str) -> i32 {
-    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
+fn print_where_header(repo: &Path, app_version: &str) {
     let exe = env::current_exe()
         .ok()
         .map(|p| p.display().to_string())
@@ -197,6 +197,7 @@ pub fn print_where(cmds: &[String], app_version: &str) -> i32 {
     let model = llm_model();
     let repo_root = repo.display().to_string();
     let bash_sourceable = repo.join("lib").join("cx.sh").is_file();
+
     println!("== cxwhere ==");
     println!("bin_cx: {bin_cx}");
     println!("cxrs_path: {exe}");
@@ -212,23 +213,33 @@ pub fn print_where(cmds: &[String], app_version: &str) -> i32 {
         "active_model: {}",
         if model.is_empty() { "<unset>" } else { &model }
     );
-    if !cmds.is_empty() {
-        println!("routes:");
-        for cmd in cmds {
-            if let Some(handler) = route_handler_for(cmd) {
-                println!("- {cmd}: route=rust handler={handler}");
-                continue;
+}
+
+fn print_where_routes(repo: &Path, cmds: &[String]) {
+    if cmds.is_empty() {
+        return;
+    }
+    println!("routes:");
+    for cmd in cmds {
+        if let Some(handler) = route_handler_for(cmd) {
+            println!("- {cmd}: route=rust handler={handler}");
+            continue;
+        }
+        if let Some(type_out) = bash_type_of_function(repo, cmd) {
+            println!("- {cmd}: route=bash function={cmd}");
+            for line in type_out.lines() {
+                println!("  {line}");
             }
-            if let Some(type_out) = bash_type_of_function(&repo, cmd) {
-                println!("- {cmd}: route=bash function={cmd}");
-                for line in type_out.lines() {
-                    println!("  {line}");
-                }
-            } else {
-                println!("- {cmd}: route=unknown");
-            }
+        } else {
+            println!("- {cmd}: route=unknown");
         }
     }
+}
+
+pub fn print_where(cmds: &[String], app_version: &str) -> i32 {
+    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
+    print_where_header(&repo, app_version);
+    print_where_routes(&repo, cmds);
     0
 }
 

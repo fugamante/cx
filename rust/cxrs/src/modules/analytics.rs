@@ -305,18 +305,7 @@ fn print_alert_header(
     }
 }
 
-pub fn print_alert(n: usize) -> i32 {
-    let (log_file, runs) = match load_runs_for("alert", n) {
-        Ok(v) => v,
-        Err(code) => return code,
-    };
-    if runs.is_empty() {
-        print_alert_empty(n, &log_file);
-        return 0;
-    }
-
-    let max_ms = env_u64("CXALERT_MAX_MS", 12000);
-    let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
+fn collect_alert_stats(runs: &[RunEntry], max_ms: u64, max_eff: u64) -> (usize, usize, u64, u64) {
     let slow_violations = runs
         .iter()
         .filter(|r| r.duration_ms.unwrap_or(0) > max_ms)
@@ -330,6 +319,23 @@ pub fn print_alert(n: usize) -> i32 {
         .iter()
         .map(|r| r.cached_input_tokens.unwrap_or(0))
         .sum();
+    (slow_violations, token_violations, sum_in, sum_cached)
+}
+
+pub fn print_alert(n: usize) -> i32 {
+    let (log_file, runs) = match load_runs_for("alert", n) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    if runs.is_empty() {
+        print_alert_empty(n, &log_file);
+        return 0;
+    }
+
+    let max_ms = env_u64("CXALERT_MAX_MS", 12000);
+    let max_eff = env_u64("CXALERT_MAX_EFF_IN", 8000);
+    let (slow_violations, token_violations, sum_in, sum_cached) =
+        collect_alert_stats(&runs, max_ms, max_eff);
 
     print_alert_header(
         n,

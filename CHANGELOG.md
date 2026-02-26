@@ -83,6 +83,11 @@ All notable changes to this project are documented in this file.
 - Extracted native command dispatcher (`run` match logic) into `src/native_cmd.rs` with `handler(ctx, args, deps)`.
 - Extracted command-name classifiers (`is_native_name`, `is_compat_name`) into `src/command_names.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
+- Continued refactor pass to remove remaining quality-gate violations across Rust modules:
+  - decomposed large handlers in `bench_parity`, `structured_fixrun`, `prompting`, `doctor`, `taskrun`, `logs_read`, `logs_migrate`, `runlog`, and `structured_replay`
+  - introduced `src/modules/bench_parity_support.rs` and rewired `bench_parity` to use helper-only support paths
+  - simplified command-name and analytics/reporting helpers to reduce function complexity while preserving behavior
+  - retained deterministic schema handling and run-log contract while reducing function size and duplication
 
 ### Fixed
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).
@@ -91,3 +96,6 @@ All notable changes to this project are documented in this file.
 ### Notes
 - Refactor focus is Rust-first canonicalization: Bash remains compatibility/bootstrap.
 - Current work preserved CLI behavior while reducing monolithic surface area and improving testability.
+- Latest refactor state passes:
+  - `cargo test -q -- --test-threads=1`
+  - `tools/quality_gate.py --src src --max-file-lines 400 --max-fn-lines 50 --allow-fn execute_task`

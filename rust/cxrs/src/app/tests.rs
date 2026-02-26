@@ -80,38 +80,41 @@ fn schema_failure_writes_quarantine_and_logs() {
     .expect("schema failure log");
     assert!(!qid.is_empty());
 
-    let qfile = dir
-        .path()
+    assert_quarantine_and_logs(dir.path(), &qid);
+
+    env::set_current_dir(prev).expect("restore cwd");
+}
+
+fn read_last_json_line(path: &std::path::Path, label: &str) -> Value {
+    let content = fs::read_to_string(path).expect(label);
+    serde_json::from_str(content.lines().last().expect("jsonl line")).expect("valid json line")
+}
+
+fn assert_quarantine_and_logs(root: &std::path::Path, qid: &str) {
+    let qfile = root
         .join(".codex")
         .join("quarantine")
         .join(format!("{qid}.json"));
     assert!(qfile.exists());
 
-    let sf_log = dir
-        .path()
+    let sf_log = root
         .join(".codex")
         .join("cxlogs")
         .join("schema_failures.jsonl");
-    let sf = fs::read_to_string(&sf_log).expect("read schema fail log");
-    let last_sf: Value =
-        serde_json::from_str(sf.lines().last().expect("sf line")).expect("sf json");
+    let last_sf = read_last_json_line(&sf_log, "read schema fail log");
     assert_eq!(
         last_sf.get("quarantine_id").and_then(Value::as_str),
-        Some(qid.as_str())
+        Some(qid)
     );
 
-    let runs_log = dir.path().join(".codex").join("cxlogs").join("runs.jsonl");
-    let runs = fs::read_to_string(&runs_log).expect("read runs");
-    let last_run: Value =
-        serde_json::from_str(runs.lines().last().expect("run line")).expect("run json");
+    let runs_log = root.join(".codex").join("cxlogs").join("runs.jsonl");
+    let last_run = read_last_json_line(&runs_log, "read runs");
     assert_eq!(
         last_run.get("quarantine_id").and_then(Value::as_str),
-        Some(qid.as_str())
+        Some(qid)
     );
     assert_eq!(
         last_run.get("schema_valid").and_then(Value::as_bool),
         Some(false)
     );
-
-    env::set_current_dir(prev).expect("restore cwd");
 }

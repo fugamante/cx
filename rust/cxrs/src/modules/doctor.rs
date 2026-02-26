@@ -21,14 +21,10 @@ fn bin_in_path(bin: &str) -> bool {
     })
 }
 
-pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
-    let backend = llm_backend();
-    let llm_bin = llm_bin_name();
+fn check_required_bins(backend: &str, llm_bin: &str) -> usize {
     let required = ["git", "jq"];
     let optional = ["rtk"];
-    let mut missing_required = 0;
-
-    println!("== cxrs doctor ==");
+    let mut missing_required = 0usize;
     for bin in required {
         if bin_in_path(bin) {
             println!("OK: {bin}");
@@ -60,20 +56,16 @@ pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
     if bin_in_path("rtk") && !rtk_is_usable() {
         println!("WARN: rtk version unsupported by configured range; raw fallback will be used.");
     }
-    if missing_required > 0 {
-        println!("FAIL: install required binaries before using cxrs.");
-        return 1;
-    }
+    missing_required
+}
 
+fn probe_json_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), i32> {
     println!();
     println!("== llm json pipeline ({backend}) ==");
-    let probe = match run_llm_jsonl("ping") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("FAIL: {backend} json pipeline failed: {e}");
-            return 1;
-        }
-    };
+    let probe = run_llm_jsonl("ping").map_err(|e| {
+        eprintln!("FAIL: {backend} json pipeline failed: {e}");
+        1
+    })?;
     let mut agent_count = 0u64;
     let mut reasoning_count = 0u64;
     for line in probe.lines() {
@@ -98,24 +90,27 @@ pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
     println!("reasoning events:     {reasoning_count}");
     if agent_count < 1 {
         eprintln!("FAIL: expected >=1 agent_message event");
-        return 1;
+        return Err(1);
     }
+    Ok(())
+}
 
+fn probe_text_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), i32> {
     println!();
     println!("== _codex_text equivalent ==");
-    let probe2 = match run_llm_jsonl("2+2? (just the number)") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("FAIL: {backend} text probe failed: {e}");
-            return 1;
-        }
-    };
+    let probe2 = run_llm_jsonl("2+2? (just the number)").map_err(|e| {
+        eprintln!("FAIL: {backend} text probe failed: {e}");
+        1
+    })?;
     let txt = extract_agent_text(&probe2).unwrap_or_default();
     println!("output: {txt}");
     if txt.trim() != "4" {
         println!("WARN: expected '4', got '{}'", txt.trim());
     }
+    Ok(())
+}
 
+fn print_git_context() {
     println!();
     println!("== git context (optional) ==");
     match Command::new("git")
@@ -138,6 +133,24 @@ pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
         }
         _ => println!("in git repo: no (skip git-based checks)"),
     }
+}
+
+pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
+    let backend = llm_backend();
+    let llm_bin = llm_bin_name();
+    println!("== cxrs doctor ==");
+    let missing_required = check_required_bins(&backend, llm_bin);
+    if missing_required > 0 {
+        println!("FAIL: install required binaries before using cxrs.");
+        return 1;
+    }
+    if let Err(code) = probe_json_pipeline(&backend, run_llm_jsonl) {
+        return code;
+    }
+    if let Err(code) = probe_text_pipeline(&backend, run_llm_jsonl) {
+        return code;
+    }
+    print_git_context();
 
     println!();
     println!("PASS: core pipeline looks healthy.");

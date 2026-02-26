@@ -9,6 +9,8 @@ mod analytics_worklog;
 mod app;
 #[path = "modules/bench_parity.rs"]
 mod bench_parity;
+#[path = "modules/bench_parity_support.rs"]
+mod bench_parity_support;
 #[path = "modules/capture.rs"]
 mod capture;
 #[path = "modules/cmdctx.rs"]

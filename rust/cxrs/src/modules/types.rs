@@ -188,7 +188,7 @@ pub struct LoadedSchema {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ExecutionLog {
     pub execution_id: String,
     pub timestamp: String,

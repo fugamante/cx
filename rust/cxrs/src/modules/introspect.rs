@@ -23,61 +23,50 @@ fn bin_in_path(bin: &str) -> bool {
     env::split_paths(&path).any(|dir| dir.join(bin).is_file())
 }
 
-pub fn print_version(app_name: &str, app_version: &str) {
-    let cwd = env::current_dir()
-        .ok()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
-    let cfg = app_config();
-    let source = env::var("CX_SOURCE_LOCATION").unwrap_or_else(|_| "standalone:cxrs".to_string());
-    let log_file = resolve_log_file()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved>".to_string());
-    let state_file = resolve_state_file()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved>".to_string());
-    let mode = cfg.cx_mode.clone();
-    let schema_relaxed = if cfg.schema_relaxed { "1" } else { "0" }.to_string();
-    let execution_path = env::var("CX_EXECUTION_PATH").unwrap_or_else(|_| "rust".to_string());
-    let backend = llm_backend();
-    let model = llm_model();
-    let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let capture_provider = cfg.capture_provider.clone();
-    let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
-    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
-    let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
-    let rtk_available = bin_in_path("rtk");
-    let rtk_usable = rtk_is_usable();
-    let budget_chars = cfg.budget_chars.to_string();
-    let budget_lines = cfg.budget_lines.to_string();
-    let clip_mode = cfg.clip_mode.clone();
-    let quarantine_dir = resolve_quarantine_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved>".to_string());
-    let state = read_state_value();
-    let cc = state
+fn state_pref(path: &str) -> String {
+    read_state_value()
         .as_ref()
-        .and_then(|v| value_at_path(v, "preferences.conventional_commits"))
+        .and_then(|v| value_at_path(v, path))
         .map(value_to_display)
-        .unwrap_or_else(|| "n/a".to_string());
-    let pr_fmt = state
-        .as_ref()
-        .and_then(|v| value_at_path(v, "preferences.pr_summary_format"))
-        .map(value_to_display)
-        .unwrap_or_else(|| "n/a".to_string());
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn print_version_header(
+    app_name: &str,
+    app_version: &str,
+    cwd: &str,
+    execution_path: &str,
+    source: &str,
+) {
     println!("name: {app_name}");
     println!("version: {}", toolchain_version_string(app_version));
     println!("cwd: {cwd}");
     println!("execution_path: {execution_path}");
     println!("source: {source}");
+}
+
+fn print_version_paths(log_file: &str, state_file: &str, quarantine_dir: &str) {
     println!("log_file: {log_file}");
     println!("state_file: {state_file}");
     println!("quarantine_dir: {quarantine_dir}");
+}
+
+fn print_version_runtime(mode: &str, backend: &str, active_model: &str, schema_relaxed: &str) {
     println!("mode: {mode}");
     println!("llm_backend: {backend}");
     println!("llm_model: {active_model}");
     println!("backend_resolution: backend={backend} model={active_model}");
     println!("schema_relaxed: {schema_relaxed}");
+}
+
+fn print_version_capture(
+    capture_provider: &str,
+    native_reduce: &str,
+    rtk_available: bool,
+    rtk_min: &str,
+    rtk_max: &str,
+    rtk_usable: bool,
+) {
     println!("capture_provider: {capture_provider}");
     println!("native_reduce: {native_reduce}");
     println!("rtk_available: {rtk_available}");
@@ -87,15 +76,69 @@ pub fn print_version(app_name: &str, app_version: &str) {
         if rtk_max.is_empty() {
             "<unset>"
         } else {
-            &rtk_max
+            rtk_max
         }
     );
     println!("rtk_usable: {rtk_usable}");
-    println!("budget_chars: {budget_chars}");
-    println!("budget_lines: {budget_lines}");
-    println!("clip_mode: {clip_mode}");
-    println!("state.preferences.conventional_commits: {cc}");
-    println!("state.preferences.pr_summary_format: {pr_fmt}");
+}
+
+fn print_version_preferences() {
+    println!(
+        "state.preferences.conventional_commits: {}",
+        state_pref("preferences.conventional_commits")
+    );
+    println!(
+        "state.preferences.pr_summary_format: {}",
+        state_pref("preferences.pr_summary_format")
+    );
+}
+
+pub fn print_version(app_name: &str, app_version: &str) {
+    let cwd = env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+    let cfg = app_config();
+    let source = env::var("CX_SOURCE_LOCATION").unwrap_or_else(|_| "standalone:cxrs".to_string());
+    let execution_path = env::var("CX_EXECUTION_PATH").unwrap_or_else(|_| "rust".to_string());
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let state_file = resolve_state_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let quarantine_dir = resolve_quarantine_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let backend = llm_backend();
+    let model = llm_model();
+    let active_model = if model.is_empty() { "<unset>" } else { &model };
+
+    print_version_header(app_name, app_version, &cwd, &execution_path, &source);
+    print_version_paths(&log_file, &state_file, &quarantine_dir);
+    print_version_runtime(
+        &cfg.cx_mode,
+        &backend,
+        active_model,
+        if cfg.schema_relaxed { "1" } else { "0" },
+    );
+
+    let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
+    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
+    let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
+    print_version_capture(
+        &cfg.capture_provider,
+        &native_reduce,
+        bin_in_path("rtk"),
+        &rtk_min,
+        &rtk_max,
+        rtk_is_usable(),
+    );
+
+    println!("budget_chars: {}", cfg.budget_chars);
+    println!("budget_lines: {}", cfg.budget_lines);
+    println!("clip_mode: {}", cfg.clip_mode);
+    print_version_preferences();
 }
 
 pub fn cmd_core(app_version: &str) -> i32 {

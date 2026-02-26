@@ -8,6 +8,36 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static RUNS_PARSE_WARNED: AtomicBool = AtomicBool::new(false);
+const REQUIRED_STRICT_FIELDS: [&str; 23] = [
+    "execution_id",
+    "timestamp",
+    "command",
+    "backend_used",
+    "capture_provider",
+    "execution_mode",
+    "duration_ms",
+    "schema_enforced",
+    "schema_valid",
+    "quarantine_id",
+    "task_id",
+    "system_output_len_raw",
+    "system_output_len_processed",
+    "system_output_len_clipped",
+    "system_output_lines_raw",
+    "system_output_lines_processed",
+    "system_output_lines_clipped",
+    "input_tokens",
+    "cached_input_tokens",
+    "effective_input_tokens",
+    "output_tokens",
+    "policy_blocked",
+    "policy_reason",
+];
+const REQUIRED_LEGACY_ANY_OF: [(&str, &str); 3] = [
+    ("ts", "timestamp"),
+    ("tool", "command"),
+    ("repo_root", "repo_root"),
+];
 
 #[derive(Debug, Default, Clone)]
 pub struct LogValidateOutcome {
@@ -30,37 +60,6 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
     let file = File::open(log_file)
         .map_err(|e| CxError::io(format!("cannot open {}", log_file.display()), e))?;
     let reader = BufReader::new(file);
-    let required_strict = [
-        "execution_id",
-        "timestamp",
-        "command",
-        "backend_used",
-        "capture_provider",
-        "execution_mode",
-        "duration_ms",
-        "schema_enforced",
-        "schema_valid",
-        "quarantine_id",
-        "task_id",
-        "system_output_len_raw",
-        "system_output_len_processed",
-        "system_output_len_clipped",
-        "system_output_lines_raw",
-        "system_output_lines_processed",
-        "system_output_lines_clipped",
-        "input_tokens",
-        "cached_input_tokens",
-        "effective_input_tokens",
-        "output_tokens",
-        "policy_blocked",
-        "policy_reason",
-    ];
-    let required_legacy_any_of = [
-        ("ts", "timestamp"),
-        ("tool", "command"),
-        ("repo_root", "repo_root"),
-    ];
-
     let mut out = LogValidateOutcome {
         legacy_ok,
         ..Default::default()
@@ -97,48 +96,67 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
                 continue;
             }
         };
-        let Some(obj) = parsed.as_object() else {
-            out.corrupted_lines.insert(line_no);
-            out.issues
-                .push(format!("line {line_no}: json is not an object"));
-            continue;
-        };
-        if legacy_ok {
-            let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
-            if is_modern {
-                for k in required_strict {
-                    if !obj.contains_key(k) {
-                        out.corrupted_lines.insert(line_no);
-                        out.issues
-                            .push(format!("line {line_no}: missing required field '{k}'"));
-                    }
-                }
-            } else {
-                let mut ok = true;
-                for (legacy_k, modern_k) in required_legacy_any_of {
-                    if !(obj.contains_key(legacy_k) || obj.contains_key(modern_k)) {
-                        ok = false;
-                        out.corrupted_lines.insert(line_no);
-                        out.issues.push(format!(
-                            "line {line_no}: missing legacy field '{legacy_k}' (or '{modern_k}')"
-                        ));
-                    }
-                }
-                if ok {
-                    out.legacy_lines += 1;
-                }
-            }
-        } else {
-            for k in required_strict {
-                if !obj.contains_key(k) {
-                    out.corrupted_lines.insert(line_no);
-                    out.issues
-                        .push(format!("line {line_no}: missing required field '{k}'"));
-                }
-            }
-        }
+        validate_row_fields(&parsed, line_no, legacy_ok, &mut out);
     }
     Ok(out)
+}
+
+fn validate_row_fields(
+    parsed: &Value,
+    line_no: usize,
+    legacy_ok: bool,
+    out: &mut LogValidateOutcome,
+) {
+    let Some(obj) = parsed.as_object() else {
+        out.corrupted_lines.insert(line_no);
+        out.issues
+            .push(format!("line {line_no}: json is not an object"));
+        return;
+    };
+    if legacy_ok {
+        validate_legacy_or_modern_row(obj, line_no, out);
+    } else {
+        validate_required_fields(obj, line_no, out);
+    }
+}
+
+fn validate_legacy_or_modern_row(
+    obj: &serde_json::Map<String, Value>,
+    line_no: usize,
+    out: &mut LogValidateOutcome,
+) {
+    let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
+    if is_modern {
+        validate_required_fields(obj, line_no, out);
+        return;
+    }
+    let mut legacy_ok = true;
+    for (legacy_k, modern_k) in REQUIRED_LEGACY_ANY_OF {
+        if !(obj.contains_key(legacy_k) || obj.contains_key(modern_k)) {
+            legacy_ok = false;
+            out.corrupted_lines.insert(line_no);
+            out.issues.push(format!(
+                "line {line_no}: missing legacy field '{legacy_k}' (or '{modern_k}')"
+            ));
+        }
+    }
+    if legacy_ok {
+        out.legacy_lines += 1;
+    }
+}
+
+fn validate_required_fields(
+    obj: &serde_json::Map<String, Value>,
+    line_no: usize,
+    out: &mut LogValidateOutcome,
+) {
+    for k in REQUIRED_STRICT_FIELDS {
+        if !obj.contains_key(k) {
+            out.corrupted_lines.insert(line_no);
+            out.issues
+                .push(format!("line {line_no}: missing required field '{k}'"));
+        }
+    }
 }
 
 pub fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String> {

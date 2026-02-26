@@ -67,164 +67,174 @@ pub fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
     0
 }
 
-pub fn cmd_llm(app_name: &str, args: &[String]) -> i32 {
-    let print_usage = || {
-        eprintln!(
-            "Usage: {app_name} llm <show|use <codex|ollama> [model]|unset <backend|model|all>|set-backend <codex|ollama>|set-model <model>|clear-model>"
-        );
-    };
-    let sub = args.first().map(String::as_str).unwrap_or("show");
-    match sub {
-        "show" => {
-            let backend = llm_backend();
-            let model = llm_model();
-            let ollama_pref = ollama_model_preference();
-            println!("llm_backend: {backend}");
-            println!(
-                "active_model: {}",
-                if model.is_empty() { "<unset>" } else { &model }
-            );
-            println!(
-                "ollama_model: {}",
-                if ollama_pref.is_empty() {
-                    "<unset>"
-                } else {
-                    &ollama_pref
-                }
-            );
-            0
+fn print_llm_usage(app_name: &str) {
+    eprintln!(
+        "Usage: {app_name} llm <show|use <codex|ollama> [model]|unset <backend|model|all>|set-backend <codex|ollama>|set-model <model>|clear-model>"
+    );
+}
+
+fn llm_show() -> i32 {
+    let backend = llm_backend();
+    let model = llm_model();
+    let ollama_pref = ollama_model_preference();
+    println!("llm_backend: {backend}");
+    println!(
+        "active_model: {}",
+        if model.is_empty() { "<unset>" } else { &model }
+    );
+    println!(
+        "ollama_model: {}",
+        if ollama_pref.is_empty() {
+            "<unset>"
+        } else {
+            &ollama_pref
         }
-        "use" => {
-            let Some(target) = args.get(1).map(|s| s.to_lowercase()) else {
-                print_usage();
-                return 2;
-            };
-            if target != "codex" && target != "ollama" {
-                print_usage();
+    );
+    0
+}
+
+fn llm_use(app_name: &str, args: &[String]) -> i32 {
+    let Some(target) = args.get(1).map(|s| s.to_lowercase()) else {
+        print_llm_usage(app_name);
+        return 2;
+    };
+    if target != "codex" && target != "ollama" {
+        print_llm_usage(app_name);
+        return 2;
+    }
+    if let Err(e) = set_state_path("preferences.llm_backend", Value::String(target.clone())) {
+        eprintln!("cxrs llm use: {e}");
+        return 1;
+    }
+    if target == "ollama" {
+        if let Some(model) = args.get(2) {
+            let m = model.trim();
+            if m.is_empty() {
+                print_llm_usage(app_name);
                 return 2;
             }
-            if let Err(e) = set_state_path("preferences.llm_backend", Value::String(target.clone()))
+            if let Err(e) = set_state_path("preferences.ollama_model", Value::String(m.to_string()))
             {
                 eprintln!("cxrs llm use: {e}");
                 return 1;
             }
-            if target == "ollama" {
-                if let Some(model) = args.get(2) {
-                    let m = model.trim();
-                    if m.is_empty() {
-                        print_usage();
-                        return 2;
-                    }
-                    if let Err(e) =
-                        set_state_path("preferences.ollama_model", Value::String(m.to_string()))
-                    {
-                        eprintln!("cxrs llm use: {e}");
-                        return 1;
-                    }
-                }
-                println!("ok");
-                println!("llm_backend: ollama");
-                let pref = ollama_model_preference();
-                println!(
-                    "ollama_model: {}",
-                    if pref.is_empty() { "<unset>" } else { &pref }
-                );
-                return 0;
-            }
-            println!("ok");
-            println!("llm_backend: codex");
-            0
         }
-        "unset" => {
-            let target = args.get(1).map(String::as_str).unwrap_or("all");
-            match target {
-                "backend" => {
-                    if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                        eprintln!("cxrs llm unset backend: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("llm_backend: <unset>");
-                    0
-                }
-                "model" => {
-                    if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                        eprintln!("cxrs llm unset model: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("ollama_model: <unset>");
-                    0
-                }
-                "all" => {
-                    if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                        eprintln!("cxrs llm unset all: {e}");
-                        return 1;
-                    }
-                    if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                        eprintln!("cxrs llm unset all: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("llm_backend: <unset>");
-                    println!("ollama_model: <unset>");
-                    0
-                }
-                _ => {
-                    print_usage();
-                    2
-                }
-            }
-        }
-        "set-backend" => {
-            let Some(v) = args.get(1).map(|s| s.to_lowercase()) else {
-                print_usage();
-                return 2;
-            };
-            if v != "codex" && v != "ollama" {
-                print_usage();
-                return 2;
-            }
-            if let Err(e) = set_state_path("preferences.llm_backend", Value::String(v.clone())) {
-                eprintln!("cxrs llm set-backend: {e}");
+        println!("ok");
+        println!("llm_backend: ollama");
+        let pref = ollama_model_preference();
+        println!(
+            "ollama_model: {}",
+            if pref.is_empty() { "<unset>" } else { &pref }
+        );
+        return 0;
+    }
+    println!("ok");
+    println!("llm_backend: codex");
+    0
+}
+
+fn llm_unset(app_name: &str, args: &[String]) -> i32 {
+    let target = args.get(1).map(String::as_str).unwrap_or("all");
+    match target {
+        "backend" => {
+            if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
+                eprintln!("cxrs llm unset backend: {e}");
                 return 1;
             }
             println!("ok");
-            println!("llm_backend: {v}");
+            println!("llm_backend: <unset>");
             0
         }
-        "set-model" => {
-            let Some(model) = args.get(1) else {
-                print_usage();
-                return 2;
-            };
-            if model.trim().is_empty() {
-                print_usage();
-                return 2;
-            }
-            if let Err(e) = set_state_path(
-                "preferences.ollama_model",
-                Value::String(model.trim().to_string()),
-            ) {
-                eprintln!("cxrs llm set-model: {e}");
-                return 1;
-            }
-            println!("ok");
-            println!("ollama_model: {}", model.trim());
-            0
-        }
-        "clear-model" => {
+        "model" => {
             if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                eprintln!("cxrs llm clear-model: {e}");
+                eprintln!("cxrs llm unset model: {e}");
                 return 1;
             }
             println!("ok");
             println!("ollama_model: <unset>");
             0
         }
+        "all" => {
+            if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
+                eprintln!("cxrs llm unset all: {e}");
+                return 1;
+            }
+            if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
+                eprintln!("cxrs llm unset all: {e}");
+                return 1;
+            }
+            println!("ok");
+            println!("llm_backend: <unset>");
+            println!("ollama_model: <unset>");
+            0
+        }
+        _ => {
+            print_llm_usage(app_name);
+            2
+        }
+    }
+}
+
+fn llm_set_backend(app_name: &str, args: &[String]) -> i32 {
+    let Some(v) = args.get(1).map(|s| s.to_lowercase()) else {
+        print_llm_usage(app_name);
+        return 2;
+    };
+    if v != "codex" && v != "ollama" {
+        print_llm_usage(app_name);
+        return 2;
+    }
+    if let Err(e) = set_state_path("preferences.llm_backend", Value::String(v.clone())) {
+        eprintln!("cxrs llm set-backend: {e}");
+        return 1;
+    }
+    println!("ok");
+    println!("llm_backend: {v}");
+    0
+}
+
+fn llm_set_model(app_name: &str, args: &[String]) -> i32 {
+    let Some(model) = args.get(1) else {
+        print_llm_usage(app_name);
+        return 2;
+    };
+    if model.trim().is_empty() {
+        print_llm_usage(app_name);
+        return 2;
+    }
+    if let Err(e) = set_state_path(
+        "preferences.ollama_model",
+        Value::String(model.trim().to_string()),
+    ) {
+        eprintln!("cxrs llm set-model: {e}");
+        return 1;
+    }
+    println!("ok");
+    println!("ollama_model: {}", model.trim());
+    0
+}
+
+fn llm_clear_model() -> i32 {
+    if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
+        eprintln!("cxrs llm clear-model: {e}");
+        return 1;
+    }
+    println!("ok");
+    println!("ollama_model: <unset>");
+    0
+}
+
+pub fn cmd_llm(app_name: &str, args: &[String]) -> i32 {
+    match args.first().map(String::as_str).unwrap_or("show") {
+        "show" => llm_show(),
+        "use" => llm_use(app_name, args),
+        "unset" => llm_unset(app_name, args),
+        "set-backend" => llm_set_backend(app_name, args),
+        "set-model" => llm_set_model(app_name, args),
+        "clear-model" => llm_clear_model(),
         other => {
             eprintln!("{app_name} llm: unknown subcommand '{other}'");
-            print_usage();
+            print_llm_usage(app_name);
             2
         }
     }

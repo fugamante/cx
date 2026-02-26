@@ -82,27 +82,60 @@ fn print_diffsum_human(v: &Value) {
     }
 }
 
-fn generate_commitjson_value(execute_task: ExecuteTaskFn) -> Result<Value, String> {
-    let (diff_out, status, capture_stats) = run_system_command_capture(&[
-        "git".to_string(),
-        "diff".to_string(),
-        "--staged".to_string(),
-        "--no-color".to_string(),
-    ])?;
+fn state_bool(path: &str, default: bool) -> bool {
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, path))
+        .and_then(Value::as_bool)
+        .unwrap_or(default)
+}
+
+fn state_string(path: &str, default: &str) -> String {
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, path))
+        .and_then(Value::as_str)
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn capture_git_diff(
+    cmd: &[String],
+    empty_msg: &str,
+) -> Result<(String, crate::types::CaptureStats), String> {
+    let (diff_out, status, capture_stats) = run_system_command_capture(cmd)?;
     if status != 0 {
-        return Err(format!(
-            "git diff --staged failed with exit status {status}: {diff_out}"
-        ));
+        return Err(format!("git diff failed with status {status}"));
     }
     if diff_out.trim().is_empty() {
-        return Err("no staged changes. run: git add -p".to_string());
+        return Err(empty_msg.to_string());
     }
+    Ok((diff_out, capture_stats))
+}
 
-    let conventional = read_state_value()
-        .as_ref()
-        .and_then(|v| value_at_path(v, "preferences.conventional_commits"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+fn parse_schema_json(result: &ExecutionResult) -> Result<Value, String> {
+    if result.schema_valid == Some(false) {
+        return Err(format!(
+            "schema validation failed; quarantine_id={}; raw={}",
+            result.quarantine_id.clone().unwrap_or_default(),
+            result.stdout
+        ));
+    }
+    serde_json::from_str(&result.stdout).map_err(|e| format!("invalid JSON: {e}"))
+}
+
+fn generate_commitjson_value(execute_task: ExecuteTaskFn) -> Result<Value, String> {
+    let (diff_out, capture_stats) = capture_git_diff(
+        &[
+            "git".to_string(),
+            "diff".to_string(),
+            "--staged".to_string(),
+            "--no-color".to_string(),
+        ],
+        "no staged changes. run: git add -p",
+    )?;
+
+    let conventional = state_bool("preferences.conventional_commits", true);
     let style_hint = if conventional {
         "Use concise conventional-commit style subject."
     } else {
@@ -121,15 +154,7 @@ fn generate_commitjson_value(execute_task: ExecuteTaskFn) -> Result<Value, Strin
         logging_enabled: true,
         capture_override: Some(capture_stats),
     })?;
-    let mut v: Value = if result.schema_valid == Some(false) {
-        let qid = result.quarantine_id.unwrap_or_default();
-        return Err(format!(
-            "schema validation failed; quarantine_id={qid}; raw={}",
-            result.stdout
-        ));
-    } else {
-        serde_json::from_str(&result.stdout).map_err(|e| format!("invalid JSON: {e}"))?
-    };
+    let mut v = parse_schema_json(&result)?;
     if v.get("scope").is_none() {
         if let Some(obj) = v.as_object_mut() {
             obj.insert("scope".to_string(), Value::Null);
@@ -157,23 +182,14 @@ fn generate_diffsum_value(
             "--no-color".to_string(),
         ]
     };
-    let (diff_out, status, capture_stats) = run_system_command_capture(&git_cmd)?;
-    if status != 0 {
-        return Err(format!("git diff failed with status {status}"));
-    }
-    if diff_out.trim().is_empty() {
-        if staged {
-            return Err("no staged changes.".to_string());
-        }
-        return Err("no unstaged changes.".to_string());
-    }
+    let empty_msg = if staged {
+        "no staged changes."
+    } else {
+        "no unstaged changes."
+    };
+    let (diff_out, capture_stats) = capture_git_diff(&git_cmd, empty_msg)?;
 
-    let pr_fmt = read_state_value()
-        .as_ref()
-        .and_then(|v| value_at_path(v, "preferences.pr_summary_format"))
-        .and_then(Value::as_str)
-        .unwrap_or("standard")
-        .to_string();
+    let pr_fmt = state_string("preferences.pr_summary_format", "standard");
     let schema = load_schema("diffsum")?;
     let diff_label = if staged { "STAGED DIFF" } else { "DIFF" };
     let task_input = format!(
@@ -188,65 +204,35 @@ fn generate_diffsum_value(
         logging_enabled: true,
         capture_override: Some(capture_stats),
     })?;
-    if result.schema_valid == Some(false) {
-        return Err(format!(
-            "schema validation failed; quarantine_id={}; raw={}",
-            result.quarantine_id.unwrap_or_default(),
-            result.stdout
-        ));
-    }
-    serde_json::from_str(&result.stdout).map_err(|e| format!("invalid JSON: {e}"))
+    parse_schema_json(&result)
 }
 
-pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
-    let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{}", format_error("next", &e));
-            return EXIT_RUNTIME;
-        }
-    };
-
-    let schema = match load_schema("next") {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("{}", format_error("next", &e));
-            return EXIT_RUNTIME;
-        }
-    };
+fn run_next_schema(command: &[String], execute_task: ExecuteTaskFn) -> Result<Value, String> {
+    let (captured, exit_status, capture_stats) = run_system_command_capture(command)?;
+    let schema = load_schema("next")?;
     let task_input = format!(
         "Based on the terminal command output below, propose the NEXT shell commands to run.\nReturn 1-6 commands in execution order.\n\nExecuted command:\n{}\nExit status: {}\n\nTERMINAL OUTPUT:\n{}",
         command.join(" "),
         exit_status,
         captured
     );
-    let result = match execute_task(TaskSpec {
+    let result = execute_task(TaskSpec {
         command_name: "cxrs_next".to_string(),
         input: TaskInput::Prompt(task_input.clone()),
         output_kind: LlmOutputKind::SchemaJson,
         schema: Some(schema.clone()),
-        schema_task_input: Some(task_input.clone()),
+        schema_task_input: Some(task_input),
         logging_enabled: true,
         capture_override: Some(capture_stats),
-    }) {
+    })?;
+    parse_schema_json(&result)
+}
+
+pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
+    let schema_value = match run_next_schema(command, execute_task) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{}", format_error("next", &e));
-            return EXIT_RUNTIME;
-        }
-    };
-    if result.schema_valid == Some(false) {
-        if let Some(qid) = result.quarantine_id.as_deref() {
-            eprintln!("cxrs next: schema failure; quarantine_id={qid}");
-        }
-        eprintln!("cxrs next: raw response follows:");
-        eprintln!("{}", result.stdout);
-        return EXIT_RUNTIME;
-    }
-    let schema_value: Value = match serde_json::from_str(&result.stdout) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs next: invalid JSON after schema run: {e}");
             return EXIT_RUNTIME;
         }
     };

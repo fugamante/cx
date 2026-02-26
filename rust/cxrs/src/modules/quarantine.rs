@@ -88,6 +88,33 @@ pub fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
     serde_json::from_str(&s).map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))
 }
 
+fn read_quarantine_rows(qdir: &std::path::Path, n: usize) -> Vec<QuarantineRecord> {
+    let mut rows: Vec<QuarantineRecord> = Vec::new();
+    let Ok(rd) = fs::read_dir(qdir) else {
+        return rows;
+    };
+    for ent in rd.flatten() {
+        let path = ent.path();
+        if path.extension().and_then(|v| v.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(s) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if s.trim().is_empty() {
+            continue;
+        }
+        if let Ok(rec) = serde_json::from_str::<QuarantineRecord>(&s) {
+            rows.push(rec);
+        }
+    }
+    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
+    if rows.len() > n {
+        rows.truncate(n);
+    }
+    rows
+}
+
 pub fn cmd_quarantine_list(n: usize) -> i32 {
     let Some(qdir) = resolve_quarantine_dir() else {
         eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
@@ -100,39 +127,7 @@ pub fn cmd_quarantine_list(n: usize) -> i32 {
         return 0;
     }
 
-    let mut rows: Vec<QuarantineRecord> = Vec::new();
-    let rd = match fs::read_dir(&qdir) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs quarantine list: cannot read {}: {e}", qdir.display());
-            return 1;
-        }
-    };
-
-    for ent in rd.flatten() {
-        let path = ent.path();
-        if path.extension().and_then(|v| v.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(mut s) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if s.trim().is_empty() {
-            continue;
-        }
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        if let Ok(rec) = serde_json::from_str::<QuarantineRecord>(&s) {
-            rows.push(rec);
-        }
-    }
-
-    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
-    if rows.len() > n {
-        rows.truncate(n);
-    }
-
+    let rows = read_quarantine_rows(&qdir, n);
     println!("== cxrs quarantine list ==");
     println!("entries: {}", rows.len());
     for rec in rows {

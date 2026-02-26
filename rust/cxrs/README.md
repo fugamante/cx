@@ -33,6 +33,7 @@ Current scope:
 - strict `diffsum` and `diffsum-staged` PR-summary generators
 - strict `fix-run` remediation suggestions with dangerous-command blocking
 - LLM backend routing: `codex` (default) or `ollama` (local alternative)
+- quality gate currently clean (`file_violations=0`, `function_violations=0`)
 
 This crate is authoritative runtime behavior for `cx`.
 Bash remains compatibility/bootstrap fallback.
@@ -56,6 +57,7 @@ Primary toggles:
 - `execute_llm_command(command, LlmMode, run_task)`
 - wrappers `cmd_cx`, `cmd_cxj`, `cmd_cxo`, `cmd_cxol` are thin adapters over this core path
 - `SchemaJson` mode is intentionally guarded for structured-command handlers only
+- `bench`/`parity` support helpers are separated into `src/modules/bench_parity_support.rs` to keep command handlers focused and below function-size targets
 
 ## Build
 

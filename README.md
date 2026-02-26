@@ -15,6 +15,11 @@
 
 This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
 
+Current status:
+- quality gate clean: `file_violations=0`, `function_violations=0`
+- test suite passing in serial mode (`cargo test -q -- --test-threads=1`)
+- command modules now consistently split into handler + internal helpers for lower coupling and easier review
+
 Current refactor highlights:
 
 - `src/app/mod.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)

@@ -33,15 +33,8 @@ fn rtk_version_string() -> String {
     }
 }
 
-pub fn cmd_diag(app_version: &str) -> i32 {
-    let ts = utc_now_iso();
-    let version = toolchain_version_string(app_version);
-    let backend = llm_backend();
-    let model = llm_model();
-    let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let cfg = app_config();
-    let provider = cfg.capture_provider.clone();
-    let resolved_provider = match provider.as_str() {
+fn resolved_provider(cfg_provider: &str) -> &'static str {
+    match cfg_provider {
         "rtk" => "rtk",
         "native" => "native",
         _ => {
@@ -53,30 +46,25 @@ pub fn cmd_diag(app_version: &str) -> i32 {
                 "native"
             }
         }
-    };
-    let mode = cfg.cx_mode.clone();
-    let budget_chars = cfg.budget_chars.to_string();
-    let budget_lines = cfg.budget_lines.to_string();
-    let clip_mode = cfg.clip_mode.clone();
-    let clip_footer = if cfg.clip_footer { "1" } else { "0" }.to_string();
-    let log_file = resolve_log_file()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved>".to_string());
-    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
-    let schema_dir = repo.join(".codex").join("schemas");
-    let schema_count = if schema_dir.is_dir() {
-        fs::read_dir(&schema_dir)
-            .ok()
-            .map(|iter| {
-                iter.filter_map(Result::ok)
-                    .filter(|e| e.path().is_file())
-                    .count()
-            })
-            .unwrap_or(0)
-    } else {
-        0
-    };
-    let last_run_id = resolve_log_file()
+    }
+}
+
+fn schema_count(schema_dir: &Path) -> usize {
+    if !schema_dir.is_dir() {
+        return 0;
+    }
+    fs::read_dir(schema_dir)
+        .ok()
+        .map(|iter| {
+            iter.filter_map(Result::ok)
+                .filter(|e| e.path().is_file())
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn last_run_id() -> String {
+    resolve_log_file()
         .and_then(|p| {
             let len = file_len(&p);
             last_appended_json_value(&p, len.saturating_sub(8192))
@@ -91,7 +79,47 @@ pub fn cmd_diag(app_version: &str) -> i32 {
                         .map(|s| s.to_string())
                 })
         })
-        .unwrap_or_else(|| "<none>".to_string());
+        .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
+    let backend = llm_backend();
+    let model = llm_model();
+    let active_model = if model.is_empty() { "<unset>" } else { &model };
+    println!("== cxdiag ==");
+    println!("timestamp: {}", utc_now_iso());
+    println!("version: {}", toolchain_version_string(app_version));
+    println!("mode: {}", cfg.cx_mode);
+    println!("backend: {backend}");
+    println!("active_model: {active_model}");
+}
+
+pub fn cmd_diag(app_version: &str) -> i32 {
+    let cfg = app_config();
+    let provider = cfg.capture_provider.clone();
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
+    let schema_dir = repo.join(".codex").join("schemas");
+
+    print_diag_header(app_version, &cfg);
+    println!("capture_provider_config: {provider}");
+    println!(
+        "capture_provider_resolved: {}",
+        resolved_provider(&provider)
+    );
+    println!("rtk_available: {}", bin_in_path("rtk"));
+    println!("rtk_version: {}", rtk_version_string());
+    println!("budget_chars: {}", cfg.budget_chars);
+    println!("budget_lines: {}", cfg.budget_lines);
+    println!("clip_mode: {}", cfg.clip_mode);
+    println!("clip_footer: {}", if cfg.clip_footer { "1" } else { "0" });
+    println!("log_file: {log_file}");
+    println!("last_run_id: {}", last_run_id());
+    println!("schema_registry_dir: {}", schema_dir.display());
+    println!("schema_registry_files: {}", schema_count(&schema_dir));
+
     let sample_cmd = "cxo git status";
     let rust_handles = route_handler_for("cxo");
     let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
@@ -102,25 +130,6 @@ pub fn cmd_diag(app_version: &str) -> i32 {
     } else {
         "no rust route and no bash fallback".to_string()
     };
-
-    println!("== cxdiag ==");
-    println!("timestamp: {ts}");
-    println!("version: {version}");
-    println!("mode: {mode}");
-    println!("backend: {backend}");
-    println!("active_model: {active_model}");
-    println!("capture_provider_config: {provider}");
-    println!("capture_provider_resolved: {resolved_provider}");
-    println!("rtk_available: {}", bin_in_path("rtk"));
-    println!("rtk_version: {}", rtk_version_string());
-    println!("budget_chars: {budget_chars}");
-    println!("budget_lines: {budget_lines}");
-    println!("clip_mode: {clip_mode}");
-    println!("clip_footer: {clip_footer}");
-    println!("log_file: {log_file}");
-    println!("last_run_id: {last_run_id}");
-    println!("schema_registry_dir: {}", schema_dir.display());
-    println!("schema_registry_files: {schema_count}");
     println!(
         "routing_trace: sample='{}' route={} reason={}",
         sample_cmd,

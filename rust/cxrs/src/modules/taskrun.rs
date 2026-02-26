@@ -44,95 +44,30 @@ fn parse_words(input: &str) -> Vec<String> {
         .collect()
 }
 
-fn run_task_objective(
+fn command_status_or_usage(run: fn(&[String]) -> i32, args: &[String]) -> i32 {
+    if args.is_empty() { 2 } else { run(args) }
+}
+
+fn task_prompt(task: &TaskRecord) -> String {
+    if task.context_ref.trim().is_empty() {
+        return format!(
+            "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
+            task.objective
+        );
+    }
+    format!(
+        "Task Objective:\n{}\n\nContext Ref:\n{}\n\nRespond with concise execution notes and next actions.",
+        task.objective, task.context_ref
+    )
+}
+
+fn run_task_prompt(
     runner: &TaskRunner,
     task: &TaskRecord,
 ) -> Result<(i32, Option<String>), String> {
-    let words = parse_words(&task.objective);
-    if let Some(cmd0) = words.first().map(String::as_str) {
-        let args: Vec<String> = words.iter().skip(1).cloned().collect();
-        let status = match cmd0 {
-            "cxcommitjson" | "commitjson" => (runner.cmd_commitjson)(),
-            "cxcommitmsg" | "commitmsg" => (runner.cmd_commitmsg)(),
-            "cxdiffsum" | "diffsum" => (runner.cmd_diffsum)(false),
-            "cxdiffsum_staged" | "diffsum-staged" => (runner.cmd_diffsum)(true),
-            "cxnext" | "next" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_next)(&args)
-                }
-            }
-            "cxfix_run" | "fix-run" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_fix_run)(&args)
-                }
-            }
-            "cxfix" | "fix" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_fix)(&args)
-                }
-            }
-            "cx" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_cx)(&args)
-                }
-            }
-            "cxj" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_cxj)(&args)
-                }
-            }
-            "cxo" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    (runner.cmd_cxo)(&args)
-                }
-            }
-            _ => {
-                let prompt = if task.context_ref.trim().is_empty() {
-                    format!(
-                        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
-                        task.objective
-                    )
-                } else {
-                    format!(
-                        "Task Objective:\n{}\n\nContext Ref:\n{}\n\nRespond with concise execution notes and next actions.",
-                        task.objective, task.context_ref
-                    )
-                };
-                let res = (runner.execute_task)(TaskSpec {
-                    command_name: "cxtask_run".to_string(),
-                    input: TaskInput::Prompt(prompt),
-                    output_kind: LlmOutputKind::AgentText,
-                    schema: None,
-                    schema_task_input: None,
-                    logging_enabled: true,
-                    capture_override: None,
-                })?;
-                println!("{}", res.stdout);
-                return Ok((0, Some(res.execution_id)));
-            }
-        };
-        return Ok((status, None));
-    }
-
-    let prompt = format!(
-        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
-        task.objective
-    );
     let res = (runner.execute_task)(TaskSpec {
         command_name: "cxtask_run".to_string(),
-        input: TaskInput::Prompt(prompt),
+        input: TaskInput::Prompt(task_prompt(task)),
         output_kind: LlmOutputKind::AgentText,
         schema: None,
         schema_task_input: None,
@@ -141,6 +76,129 @@ fn run_task_objective(
     })?;
     println!("{}", res.stdout);
     Ok((0, Some(res.execution_id)))
+}
+
+fn dispatch_task_command(
+    runner: &TaskRunner,
+    cmd0: &str,
+    args: &[String],
+    task: &TaskRecord,
+) -> Result<(i32, Option<String>), String> {
+    let status = match cmd0 {
+        "cxcommitjson" | "commitjson" => (runner.cmd_commitjson)(),
+        "cxcommitmsg" | "commitmsg" => (runner.cmd_commitmsg)(),
+        "cxdiffsum" | "diffsum" => (runner.cmd_diffsum)(false),
+        "cxdiffsum_staged" | "diffsum-staged" => (runner.cmd_diffsum)(true),
+        "cxnext" | "next" => command_status_or_usage(runner.cmd_next, args),
+        "cxfix_run" | "fix-run" => command_status_or_usage(runner.cmd_fix_run, args),
+        "cxfix" | "fix" => command_status_or_usage(runner.cmd_fix, args),
+        "cx" => command_status_or_usage(runner.cmd_cx, args),
+        "cxj" => command_status_or_usage(runner.cmd_cxj, args),
+        "cxo" => command_status_or_usage(runner.cmd_cxo, args),
+        _ => return run_task_prompt(runner, task),
+    };
+    Ok((status, None))
+}
+
+fn run_task_objective(
+    runner: &TaskRunner,
+    task: &TaskRecord,
+) -> Result<(i32, Option<String>), String> {
+    let words = parse_words(&task.objective);
+    let Some(cmd0) = words.first().map(String::as_str) else {
+        return run_task_prompt(runner, task);
+    };
+    let args: Vec<String> = words.iter().skip(1).cloned().collect();
+    dispatch_task_command(runner, cmd0, &args, task)
+}
+
+fn apply_task_env(
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let prev_mode = env::var("CX_MODE").ok();
+    let prev_backend = env::var("CX_LLM_BACKEND").ok();
+    if let Some(m) = mode_override {
+        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
+        unsafe { env::set_var("CX_MODE", m) };
+    }
+    if let Some(b) = backend_override {
+        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
+        unsafe { env::set_var("CX_LLM_BACKEND", b) };
+    }
+    (prev_mode, prev_backend)
+}
+
+fn restore_task_env(prev_mode: Option<String>, prev_backend: Option<String>) {
+    match prev_mode {
+        Some(v) => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::set_var("CX_MODE", v) }
+        }
+        None => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::remove_var("CX_MODE") }
+        }
+    }
+    match prev_backend {
+        Some(v) => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::set_var("CX_LLM_BACKEND", v) }
+        }
+        None => {
+            // SAFETY: restoring process env after scoped override.
+            unsafe { env::remove_var("CX_LLM_BACKEND") }
+        }
+    }
+}
+
+fn set_runtime_task_state(runner: &TaskRunner, id: &str, parent_id: Option<&String>) {
+    let _ = (runner.set_state_path)("runtime.current_task_id", Value::String(id.to_string()));
+    let _ = (runner.set_state_path)(
+        "runtime.current_task_parent_id",
+        match parent_id {
+            Some(v) => Value::String(v.clone()),
+            None => Value::Null,
+        },
+    );
+}
+
+fn restore_runtime_task_state(
+    runner: &TaskRunner,
+    prev_task_id: Option<String>,
+    prev_parent_id: Option<String>,
+) {
+    let _ = (runner.set_state_path)(
+        "runtime.current_task_id",
+        prev_task_id.map_or(Value::Null, Value::String),
+    );
+    let _ = (runner.set_state_path)(
+        "runtime.current_task_parent_id",
+        prev_parent_id.map_or(Value::Null, Value::String),
+    );
+}
+
+fn finalize_task_status(
+    runner: &TaskRunner,
+    id: &str,
+    status_code: i32,
+) -> Result<(), TaskRunError> {
+    let mut tasks = (runner.read_tasks)().map_err(TaskRunError::Critical)?;
+    let idx = tasks
+        .iter()
+        .position(|t| t.id == id)
+        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task disappeared: {id}")))?;
+    tasks[idx].status = if status_code == 0 {
+        "complete".to_string()
+    } else {
+        "failed".to_string()
+    };
+    tasks[idx].updated_at = (runner.utc_now_iso)();
+    (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
+    if (runner.current_task_id)().as_deref() == Some(id) {
+        let _ = (runner.set_state_path)("runtime.current_task_id", Value::Null);
+    }
+    Ok(())
 }
 
 pub fn run_task_by_id(
@@ -162,83 +220,21 @@ pub fn run_task_by_id(
     (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
     let prev_task_id = (runner.current_task_id)();
     let prev_parent_id = (runner.current_task_parent_id)();
-    let _ = (runner.set_state_path)("runtime.current_task_id", Value::String(id.to_string()));
-    let _ = (runner.set_state_path)(
-        "runtime.current_task_parent_id",
-        match tasks[idx].parent_id.as_ref() {
-            Some(v) => Value::String(v.clone()),
-            None => Value::Null,
-        },
-    );
+    set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
 
-    let prev_mode = env::var("CX_MODE").ok();
-    let prev_backend = env::var("CX_LLM_BACKEND").ok();
-    if let Some(m) = mode_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_MODE", m) };
-    }
-    if let Some(b) = backend_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_LLM_BACKEND", b) };
-    }
+    let (prev_mode, prev_backend) = apply_task_env(mode_override, backend_override);
 
     let exec = run_task_objective(runner, &tasks[idx]);
 
-    match prev_mode {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_MODE", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_MODE") }
-        }
-    }
-    match prev_backend {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_LLM_BACKEND", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_LLM_BACKEND") }
-        }
-    }
-    let _ = (runner.set_state_path)(
-        "runtime.current_task_id",
-        match prev_task_id {
-            Some(v) => Value::String(v),
-            None => Value::Null,
-        },
-    );
-    let _ = (runner.set_state_path)(
-        "runtime.current_task_parent_id",
-        match prev_parent_id {
-            Some(v) => Value::String(v),
-            None => Value::Null,
-        },
-    );
+    restore_task_env(prev_mode, prev_backend);
+    restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
 
     let (status_code, execution_id, objective_err) = match exec {
         Ok((c, eid)) => (c, eid, None),
         Err(e) => (1, None, Some(e)),
     };
 
-    let mut tasks = (runner.read_tasks)().map_err(TaskRunError::Critical)?;
-    let idx = tasks
-        .iter()
-        .position(|t| t.id == id)
-        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task disappeared: {id}")))?;
-    tasks[idx].status = if status_code == 0 {
-        "complete".to_string()
-    } else {
-        "failed".to_string()
-    };
-    tasks[idx].updated_at = (runner.utc_now_iso)();
-    (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
-    if (runner.current_task_id)().as_deref() == Some(id) {
-        let _ = (runner.set_state_path)("runtime.current_task_id", Value::Null);
-    }
+    finalize_task_status(runner, id, status_code)?;
     if let Some(e) = objective_err {
         eprintln!("cxrs task run: objective failed for {id}: {e}");
     }
