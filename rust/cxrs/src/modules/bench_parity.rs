@@ -268,7 +268,12 @@ pub fn cmd_parity() -> i32 {
         }
         rows.push(row);
     }
-    let _ = fs::remove_dir_all(&temp_repo);
+    if let Err(e) = fs::remove_dir_all(&temp_repo) {
+        eprintln!(
+            "cxparity: WARN failed to cleanup temp repo {}: {e}",
+            temp_repo.display()
+        );
+    }
 
     print_parity_table(&rows);
     if pass_all { 0 } else { 1 }
@@ -276,6 +281,11 @@ pub fn cmd_parity() -> i32 {
 
 fn parity_error(temp_repo: &std::path::Path, message: &str) -> i32 {
     eprintln!("{message}");
-    let _ = fs::remove_dir_all(temp_repo);
+    if let Err(e) = fs::remove_dir_all(temp_repo) {
+        eprintln!(
+            "cxparity: WARN failed to cleanup temp repo {}: {e}",
+            temp_repo.display()
+        );
+    }
     1
 }
