@@ -4,6 +4,7 @@ use std::io::Read;
 use std::process::Command;
 
 use crate::capture::chunk_text_by_budget;
+use crate::config::app_config;
 use crate::execmeta::utc_now_iso;
 use crate::paths::resolve_tasks_file;
 use crate::state::write_json_atomic;
@@ -271,10 +272,7 @@ pub fn cmd_task_fanout(app_name: &str, objective: &str, from: Option<&str>) -> i
             return 2;
         }
     };
-    let budget = std::env::var("CX_CONTEXT_BUDGET_CHARS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(12000);
+    let budget = app_config().budget_chars;
     let chunks = if diff.trim().is_empty() {
         Vec::new()
     } else {

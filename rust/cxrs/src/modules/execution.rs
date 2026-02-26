@@ -1,7 +1,7 @@
 use serde_json::Value;
-use std::env;
 use std::time::Instant;
 
+use crate::config::app_config;
 use crate::execmeta::make_execution_id;
 use crate::llm::{
     extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
@@ -77,7 +77,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 .to_string();
             let schema_pretty = serde_json::to_string_pretty(&schema.value)
                 .unwrap_or_else(|_| schema.value.to_string());
-            let retry_allowed = env::var("CX_SCHEMA_RELAXED").ok().as_deref() != Some("1");
+            let retry_allowed = !app_config().schema_relaxed;
             let mut attempts: Vec<QuarantineAttempt> = Vec::new();
             let mut final_reason: Option<String> = None;
             let mut last_full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);

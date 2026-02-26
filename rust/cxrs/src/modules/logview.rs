@@ -1,8 +1,8 @@
 use serde_json::Value;
-use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+use crate::config::app_config;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 
@@ -18,22 +18,14 @@ pub fn cmd_budget() -> i32 {
         eprintln!("cxrs: unable to resolve log file");
         return 1;
     };
+    let cfg = app_config();
     println!("== cxbudget ==");
-    println!(
-        "CX_CONTEXT_BUDGET_CHARS={}",
-        env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string())
-    );
-    println!(
-        "CX_CONTEXT_BUDGET_LINES={}",
-        env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string())
-    );
-    println!(
-        "CX_CONTEXT_CLIP_MODE={}",
-        env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string())
-    );
+    println!("CX_CONTEXT_BUDGET_CHARS={}", cfg.budget_chars);
+    println!("CX_CONTEXT_BUDGET_LINES={}", cfg.budget_lines);
+    println!("CX_CONTEXT_CLIP_MODE={}", cfg.clip_mode);
     println!(
         "CX_CONTEXT_CLIP_FOOTER={}",
-        env::var("CX_CONTEXT_CLIP_FOOTER").unwrap_or_else(|_| "1".to_string())
+        if cfg.clip_footer { "1" } else { "0" }
     );
     println!("log_file: {}", log_file.display());
 

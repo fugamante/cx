@@ -2,6 +2,7 @@ use std::env;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::config::app_config;
 use crate::types::CaptureStats;
 
 static RTK_WARNED_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
@@ -94,21 +95,12 @@ pub fn rtk_is_usable() -> bool {
 }
 
 pub fn budget_config_from_env() -> BudgetConfig {
+    let cfg = app_config();
     BudgetConfig {
-        budget_chars: env::var("CX_CONTEXT_BUDGET_CHARS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(12000),
-        budget_lines: env::var("CX_CONTEXT_BUDGET_LINES")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(300),
-        clip_mode: env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string()),
-        clip_footer: env::var("CX_CONTEXT_CLIP_FOOTER")
-            .ok()
-            .and_then(|v| v.parse::<u8>().ok())
-            .unwrap_or(1)
-            == 1,
+        budget_chars: cfg.budget_chars,
+        budget_lines: cfg.budget_lines,
+        clip_mode: cfg.clip_mode.clone(),
+        clip_footer: cfg.clip_footer,
     }
 }
 

@@ -1,6 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::config::app_config;
 use crate::paths::repo_root;
 
 #[derive(Debug, Clone)]
@@ -155,8 +156,9 @@ pub fn cmd_policy(args: &[String], app_name: &str) -> i32 {
     }
 
     if args.first().map(String::as_str) == Some("show") || args.is_empty() {
-        let unsafe_flag = env::var("CX_UNSAFE").ok().as_deref() == Some("1");
-        let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
+        let cfg = app_config();
+        let unsafe_flag = cfg.cx_unsafe;
+        let force = cfg.cxfix_force;
         println!("== cxrs policy show ==");
         println!("Active safety rules:");
         println!("- Block: sudo");

@@ -2,6 +2,7 @@ use std::env;
 
 use crate::capture::budget_config_from_env;
 use crate::capture::rtk_is_usable;
+use crate::config::app_config;
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{resolve_log_file, resolve_quarantine_dir, resolve_state_file};
 use crate::runtime::{llm_backend, llm_model, logging_enabled};
@@ -27,6 +28,7 @@ pub fn print_version(app_name: &str, app_version: &str) {
         .ok()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unknown>".to_string());
+    let cfg = app_config();
     let source = env::var("CX_SOURCE_LOCATION").unwrap_or_else(|_| "standalone:cxrs".to_string());
     let log_file = resolve_log_file()
         .map(|p| p.display().to_string())
@@ -34,21 +36,21 @@ pub fn print_version(app_name: &str, app_version: &str) {
     let state_file = resolve_state_file()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
-    let schema_relaxed = env::var("CX_SCHEMA_RELAXED").unwrap_or_else(|_| "0".to_string());
+    let mode = cfg.cx_mode.clone();
+    let schema_relaxed = if cfg.schema_relaxed { "1" } else { "0" }.to_string();
     let execution_path = env::var("CX_EXECUTION_PATH").unwrap_or_else(|_| "rust".to_string());
     let backend = llm_backend();
     let model = llm_model();
     let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let capture_provider = cfg.capture_provider.clone();
     let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
     let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     let rtk_available = bin_in_path("rtk");
     let rtk_usable = rtk_is_usable();
-    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string());
-    let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string());
-    let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
+    let budget_chars = cfg.budget_chars.to_string();
+    let budget_lines = cfg.budget_lines.to_string();
+    let clip_mode = cfg.clip_mode.clone();
     let quarantine_dir = resolve_quarantine_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
@@ -97,11 +99,12 @@ pub fn print_version(app_name: &str, app_version: &str) {
 }
 
 pub fn cmd_core(app_version: &str) -> i32 {
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
+    let cfg = app_config();
+    let mode = cfg.cx_mode.clone();
     let backend = llm_backend();
     let model = llm_model();
     let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let capture_provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let capture_provider = cfg.capture_provider.clone();
     let rtk_enabled = env::var("CX_RTK_SYSTEM")
         .ok()
         .and_then(|v| v.parse::<u8>().ok())

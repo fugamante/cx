@@ -1,6 +1,7 @@
 use serde_json::json;
 use std::env;
 
+use crate::config::app_config;
 use crate::execmeta::{is_schema_tool, make_execution_id, prompt_preview, utc_now_iso};
 use crate::llm::effective_input_tokens;
 use crate::logs::{append_jsonl, validate_execution_log_row};
@@ -44,7 +45,7 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     let cap = input.capture.cloned().unwrap_or_default();
     let backend = llm_backend();
     let model = llm_model();
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
+    let mode = app_config().cx_mode.clone();
     let exec_id = make_execution_id(input.tool);
     let schema_enforced = is_schema_tool(input.tool);
     let task_id = current_task_id().unwrap_or_default();
@@ -159,7 +160,7 @@ pub fn log_schema_failure(
             if m.is_empty() { None } else { Some(m) }
         },
         capture_provider: None,
-        execution_mode: env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string()),
+        execution_mode: app_config().cx_mode.clone(),
         duration_ms: None,
         schema_enforced: true,
         schema_name: schema_name_for_tool(tool).map(|s| s.to_string()),
