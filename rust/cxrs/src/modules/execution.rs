@@ -9,7 +9,7 @@ use crate::llm::{
 };
 use crate::runlog::log_schema_failure;
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
-use crate::schema::{build_strict_schema_prompt, validate_schema_instance};
+use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
 use crate::types::{
     CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, TaskInput, TaskSpec,
     UsageStats,
@@ -47,6 +47,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
 
     let mut schema_valid: Option<bool> = None;
     let mut quarantine_id: Option<String> = None;
+    let mut schema_prompt_for_log: Option<String> = None;
+    let mut schema_raw_for_log: Option<String> = None;
+    let mut schema_attempt_for_log: Option<u64> = None;
     let mut usage = UsageStats::default();
     let stdout: String;
     let stderr = String::new();
@@ -80,7 +83,11 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             let retry_allowed = !app_config().schema_relaxed;
             let mut attempts: Vec<QuarantineAttempt> = Vec::new();
             let mut final_reason: Option<String> = None;
-            let mut last_full_prompt = build_strict_schema_prompt(&schema_pretty, &task_input);
+            let mut prompt_envelope =
+                build_schema_prompt_envelope(&schema_pretty, &task_input, None);
+            schema_raw_for_log = Some(schema_pretty.clone());
+            schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
+            schema_attempt_for_log = Some(1);
 
             let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), String> {
                 let jsonl = run_llm_jsonl(full_prompt)?;
@@ -96,7 +103,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 validate_schema_instance(schema, raw)
             };
 
-            let (first_raw, first_usage) = run_attempt(&last_full_prompt)?;
+            let (first_raw, first_usage) = run_attempt(&prompt_envelope.full_prompt)?;
             usage = first_usage;
 
             match validate_raw(&first_raw) {
@@ -107,19 +114,21 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 Err(reason_first) => {
                     attempts.push(QuarantineAttempt {
                         reason: reason_first.clone(),
-                        prompt: last_full_prompt.clone(),
-                        prompt_sha256: sha256_hex(&last_full_prompt),
+                        prompt: prompt_envelope.full_prompt.clone(),
+                        prompt_sha256: prompt_envelope.prompt_sha256.clone(),
                         raw_response: first_raw.clone(),
                         raw_sha256: sha256_hex(&first_raw),
                     });
 
                     if retry_allowed {
-                        last_full_prompt = format!(
-                            "{}\n\nThe previous response failed validation with reason: {}.\nReturn STRICT JSON only and satisfy the schema exactly.",
-                            build_strict_schema_prompt(&schema_pretty, &task_input),
-                            reason_first
+                        prompt_envelope = build_schema_prompt_envelope(
+                            &schema_pretty,
+                            &task_input,
+                            Some(&reason_first),
                         );
-                        let (retry_raw, retry_usage) = run_attempt(&last_full_prompt)?;
+                        schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
+                        schema_attempt_for_log = Some(2);
+                        let (retry_raw, retry_usage) = run_attempt(&prompt_envelope.full_prompt)?;
                         usage = retry_usage;
                         match validate_raw(&retry_raw) {
                             Ok(valid) => {
@@ -129,8 +138,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                             Err(reason_retry) => {
                                 attempts.push(QuarantineAttempt {
                                     reason: reason_retry.clone(),
-                                    prompt: last_full_prompt.clone(),
-                                    prompt_sha256: sha256_hex(&last_full_prompt),
+                                    prompt: prompt_envelope.full_prompt.clone(),
+                                    prompt_sha256: prompt_envelope.prompt_sha256.clone(),
                                     raw_response: retry_raw.clone(),
                                     raw_sha256: sha256_hex(&retry_raw),
                                 });
@@ -167,6 +176,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
                             tool: &spec.command_name,
                             prompt: &task_input,
+                            schema_prompt: schema_prompt_for_log.as_deref(),
+                            schema_raw: schema_raw_for_log.as_deref(),
+                            schema_attempt: schema_attempt_for_log,
                             duration_ms: started.elapsed().as_millis() as u64,
                             usage: Some(&usage),
                             capture: Some(&capture_stats),
@@ -198,6 +210,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
         let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
             tool: &spec.command_name,
             prompt: &prompt,
+            schema_prompt: schema_prompt_for_log.as_deref(),
+            schema_raw: schema_raw_for_log.as_deref(),
+            schema_attempt: schema_attempt_for_log,
             duration_ms: started.elapsed().as_millis() as u64,
             usage: Some(&usage),
             capture: Some(&capture_stats),

@@ -16,6 +16,9 @@ use crate::util::sha256_hex;
 pub struct RunLogInput<'a> {
     pub tool: &'a str,
     pub prompt: &'a str,
+    pub schema_prompt: Option<&'a str>,
+    pub schema_raw: Option<&'a str>,
+    pub schema_attempt: Option<u64>,
     pub duration_ms: u64,
     pub usage: Option<&'a UsageStats>,
     pub capture: Option<&'a CaptureStats>,
@@ -139,6 +142,9 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.clip_footer = cap.clip_footer;
     row.rtk_used = cap.rtk_used;
     row.prompt_sha256 = Some(sha256_hex(input.prompt));
+    row.schema_prompt_sha256 = input.schema_prompt.map(sha256_hex);
+    row.schema_sha256 = input.schema_raw.map(sha256_hex);
+    row.schema_attempt = input.schema_attempt;
     row.prompt_preview = Some(prompt_preview(input.prompt, 180));
     row.policy_blocked = input.policy_blocked;
     row.policy_reason = input.policy_reason.map(|s| s.to_string());
@@ -176,6 +182,8 @@ pub fn log_schema_failure(
     row.schema_ok = false;
     row.schema_reason = Some(reason.to_string());
     row.quarantine_id = Some(qid.clone());
+    row.schema_sha256 = Some(sha256_hex(schema));
+    row.schema_prompt_sha256 = Some(sha256_hex(prompt));
 
     finalize_and_append_run(&run_log, row)?;
     Ok(qid)

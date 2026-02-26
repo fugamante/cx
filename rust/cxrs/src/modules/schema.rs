@@ -7,6 +7,13 @@ use std::sync::{Arc, Mutex};
 use crate::config::app_config;
 use crate::paths::resolve_schema_dir;
 use crate::types::{LoadedSchema, SCHEMA_COMPILED_CACHE};
+use crate::util::sha256_hex;
+
+#[derive(Debug, Clone)]
+pub struct SchemaPromptEnvelope {
+    pub full_prompt: String,
+    pub prompt_sha256: String,
+}
 
 fn normalize_schema_name(name: &str) -> String {
     if name.ends_with(".schema.json") {
@@ -99,6 +106,23 @@ pub fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
     format!(
         "You are a structured output generator.\nReturn STRICT JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema-strict mode: deterministic JSON only; reject ambiguity.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
     )
+}
+
+pub fn build_schema_prompt_envelope(
+    schema: &str,
+    task_input: &str,
+    retry_reason: Option<&str>,
+) -> SchemaPromptEnvelope {
+    let mut full_prompt = build_strict_schema_prompt(schema, task_input);
+    if let Some(reason) = retry_reason {
+        full_prompt.push_str("\n\nThe previous response failed validation with reason: ");
+        full_prompt.push_str(reason);
+        full_prompt.push_str("\nReturn STRICT JSON only and satisfy the schema exactly.");
+    }
+    SchemaPromptEnvelope {
+        prompt_sha256: sha256_hex(&full_prompt),
+        full_prompt,
+    }
 }
 
 pub fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Value, String> {

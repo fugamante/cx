@@ -88,6 +88,9 @@ fn log_schema_failure_and_exit(
     let _ = log_codex_run(RunLogInput {
         tool: "cxrs_fix_run",
         prompt: task_input,
+        schema_prompt: None,
+        schema_raw: None,
+        schema_attempt: None,
         duration_ms: result.duration_ms,
         usage: Some(&result.usage),
         capture: Some(&result.capture_stats),
@@ -113,6 +116,9 @@ fn log_fix_run(ctx: &FixRunCtx, policy_blocked: Option<bool>, policy_reason: Opt
     let _ = log_codex_run(RunLogInput {
         tool: "cxrs_fix_run",
         prompt: &ctx.task_input,
+        schema_prompt: None,
+        schema_raw: None,
+        schema_attempt: None,
         duration_ms: ctx.result.duration_ms,
         usage: Some(&ctx.result.usage),
         capture: Some(&ctx.result.capture_stats),
