@@ -59,6 +59,12 @@ All notable changes to this project are documented in this file.
   - `fix-run` policy-block invariant coverage (`policy_blocked=true` + reason present)
 
 ### Changed
+- Replaced string-parsed timeout telemetry with structured timeout propagation:
+  - `rust/cxrs/src/modules/process.rs` now emits `ProcessError::Timeout { label, timeout_secs }`
+  - `rust/cxrs/src/modules/llm.rs` preserves timeout metadata in `LlmRunError`
+  - `rust/cxrs/src/modules/execution.rs` logs timeout fields from structured metadata (no error-text parsing dependency)
+- Expanded CI platform coverage in `.github/workflows/cxrs-compat.yml`:
+  - `cxrs-compat` now runs on both `ubuntu-latest` and `macos-latest`
 - Hardened task execution overrides in `rust/cxrs/src/modules/taskrun.rs`:
   - replaced in-process environment mutation for `--mode`/`--backend` overrides with subprocess-based execution for recognized command objectives
   - eliminated unsafe global env toggling in task-run paths while preserving command routing behavior

@@ -4,10 +4,9 @@ use std::time::Instant;
 use crate::config::app_config;
 use crate::execmeta::make_execution_id;
 use crate::llm::{
-    extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
-    wrap_agent_text_as_jsonl,
+    LlmRunError, extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain,
+    usage_from_jsonl, wrap_agent_text_as_jsonl,
 };
-use crate::process::{is_timeout_error, parse_timeout_secs_from_error};
 use crate::runlog::log_schema_failure;
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
@@ -16,10 +15,6 @@ use crate::types::{
     UsageStats,
 };
 use crate::util::sha256_hex;
-
-fn command_label_from_error(err: &str) -> Option<&str> {
-    err.split(" timed out after ").next().map(str::trim)
-}
 
 fn log_execution_error(
     spec: &TaskSpec,
@@ -30,19 +25,15 @@ fn log_execution_error(
     schema_prompt: Option<&str>,
     schema_raw: Option<&str>,
     schema_attempt: Option<u64>,
-    err: &str,
+    err: &LlmRunError,
     started: &Instant,
 ) {
     if !spec.logging_enabled {
         return;
     }
-    let timed_out = is_timeout_error(err);
-    let timeout_secs = parse_timeout_secs_from_error(err);
-    let command_label = if timed_out {
-        command_label_from_error(err)
-    } else {
-        None
-    };
+    let timed_out = err.timeout.is_some();
+    let timeout_secs = err.timeout.as_ref().map(|v| v.timeout_secs);
+    let command_label = err.timeout.as_ref().map(|v| v.label.as_str());
     let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
         tool: &spec.command_name,
         prompt,
@@ -56,7 +47,7 @@ fn log_execution_error(
         usage: Some(usage),
         capture: Some(capture_stats),
         schema_ok: false,
-        schema_reason: Some(err),
+        schema_reason: Some(err.message.as_str()),
         schema_name,
         quarantine_id: None,
         policy_blocked: None,
@@ -64,20 +55,36 @@ fn log_execution_error(
     });
 }
 
-pub fn run_llm_plain(prompt: &str) -> Result<String, String> {
+fn run_llm_plain_meta(prompt: &str) -> Result<String, LlmRunError> {
     if llm_backend() == "ollama" {
-        run_ollama_plain(prompt, &resolve_ollama_model_for_run()?)
+        run_ollama_plain(prompt, &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
+            message: e,
+            timeout: None,
+        })?)
     } else {
         run_codex_plain(prompt)
     }
 }
 
-pub fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
+fn run_llm_jsonl_meta(prompt: &str) -> Result<String, LlmRunError> {
     if llm_backend() != "ollama" {
         return run_codex_jsonl(prompt);
     }
-    let text = run_ollama_plain(prompt, &resolve_ollama_model_for_run()?)?;
-    wrap_agent_text_as_jsonl(&text)
+    let text = run_ollama_plain(
+        prompt,
+        &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
+            message: e,
+            timeout: None,
+        })?,
+    )?;
+    wrap_agent_text_as_jsonl(&text).map_err(|e| LlmRunError {
+        message: e,
+        timeout: None,
+    })
+}
+
+pub fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
+    run_llm_jsonl_meta(prompt).map_err(|e| e.message)
 }
 
 pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
@@ -108,7 +115,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
 
     match spec.output_kind {
         LlmOutputKind::Plain => {
-            stdout = match run_llm_plain(&prompt) {
+            stdout = match run_llm_plain_meta(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(
@@ -123,12 +130,12 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         &e,
                         &started,
                     );
-                    return Err(e);
+                    return Err(e.message);
                 }
             };
         }
         LlmOutputKind::Jsonl => {
-            let jsonl = match run_llm_jsonl(&prompt) {
+            let jsonl = match run_llm_jsonl_meta(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(
@@ -143,14 +150,14 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         &e,
                         &started,
                     );
-                    return Err(e);
+                    return Err(e.message);
                 }
             };
             usage = usage_from_jsonl(&jsonl);
             stdout = jsonl;
         }
         LlmOutputKind::AgentText => {
-            let jsonl = match run_llm_jsonl(&prompt) {
+            let jsonl = match run_llm_jsonl_meta(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(
@@ -165,7 +172,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         &e,
                         &started,
                     );
-                    return Err(e);
+                    return Err(e.message);
                 }
             };
             usage = usage_from_jsonl(&jsonl);
@@ -192,8 +199,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
             schema_attempt_for_log = Some(1);
 
-            let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), String> {
-                let jsonl = run_llm_jsonl(full_prompt)?;
+            let run_attempt =
+                |full_prompt: &str| -> Result<(String, UsageStats), LlmRunError> {
+                let jsonl = run_llm_jsonl_meta(full_prompt)?;
                 let usage = usage_from_jsonl(&jsonl);
                 let raw = extract_agent_text(&jsonl).unwrap_or_default();
                 Ok((raw, usage))
@@ -221,7 +229,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         &e,
                         &started,
                     );
-                    return Err(e);
+                    return Err(e.message);
                 }
             };
             usage = first_usage;
@@ -264,7 +272,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                                         &e,
                                         &started,
                                     );
-                                    return Err(e);
+                                    return Err(e.message);
                                 }
                             };
                         usage = retry_usage;

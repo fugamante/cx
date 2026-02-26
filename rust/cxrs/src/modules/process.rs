@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::fmt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -7,6 +8,38 @@ use std::time::Duration;
 use wait_timeout::ChildExt;
 
 use crate::config::DEFAULT_CMD_TIMEOUT_SECS;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimeoutInfo {
+    pub label: String,
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug)]
+pub enum ProcessError {
+    Timeout(TimeoutInfo),
+    Message(String),
+}
+
+impl ProcessError {
+    pub fn timeout_info(&self) -> Option<&TimeoutInfo> {
+        match self {
+            Self::Timeout(info) => Some(info),
+            Self::Message(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Timeout(info) => {
+                write!(f, "{} timed out after {}s", info.label, info.timeout_secs)
+            }
+            Self::Message(msg) => write!(f, "{msg}"),
+        }
+    }
+}
 
 fn parse_env_secs(name: &str) -> Option<u64> {
     std::env::var(name)
@@ -41,24 +74,11 @@ fn timeout_duration(label: &str) -> Duration {
     Duration::from_secs(timeout_secs_for_label(label))
 }
 
-fn timeout_error(label: &str) -> String {
-    format!("{label} timed out after {}s", timeout_secs_for_label(label))
-}
-
-pub fn parse_timeout_secs_from_error(err: &str) -> Option<u64> {
-    let marker = " timed out after ";
-    let start = err.find(marker)? + marker.len();
-    let tail = &err[start..];
-    let num: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if num.is_empty() {
-        None
-    } else {
-        num.parse::<u64>().ok()
-    }
-}
-
-pub fn is_timeout_error(err: &str) -> bool {
-    err.contains(" timed out after ")
+fn timeout_error(label: &str) -> ProcessError {
+    ProcessError::Timeout(TimeoutInfo {
+        label: label.to_string(),
+        timeout_secs: timeout_secs_for_label(label),
+    })
 }
 
 fn terminate_pid(pid: u32) {
@@ -71,10 +91,10 @@ fn kill_pid(pid: u32) {
     let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
 }
 
-fn wait_child_status(child: &mut Child, label: &str) -> Result<ExitStatus, String> {
+fn wait_child_status(child: &mut Child, label: &str) -> Result<ExitStatus, ProcessError> {
     match child
         .wait_timeout(timeout_duration(label))
-        .map_err(|e| format!("{label} wait timeout error: {e}"))?
+        .map_err(|e| ProcessError::Message(format!("{label} wait timeout error: {e}")))?
     {
         Some(status) => Ok(status),
         None => {
@@ -85,28 +105,35 @@ fn wait_child_status(child: &mut Child, label: &str) -> Result<ExitStatus, Strin
     }
 }
 
-pub fn run_command_status_with_timeout(
+pub fn run_command_status_with_timeout_meta(
     mut cmd: Command,
     label: &str,
-) -> Result<ExitStatus, String> {
+) -> Result<ExitStatus, ProcessError> {
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("{label} spawn failed: {e}"))?;
+        .map_err(|e| ProcessError::Message(format!("{label} spawn failed: {e}")))?;
     wait_child_status(&mut child, label)
 }
 
-pub fn run_command_output_with_timeout(mut cmd: Command, label: &str) -> Result<Output, String> {
+pub fn run_command_status_with_timeout(cmd: Command, label: &str) -> Result<ExitStatus, String> {
+    run_command_status_with_timeout_meta(cmd, label).map_err(|e| e.to_string())
+}
+
+pub fn run_command_output_with_timeout_meta(
+    mut cmd: Command,
+    label: &str,
+) -> Result<Output, ProcessError> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let child = cmd
         .spawn()
-        .map_err(|e| format!("{label} spawn failed: {e}"))?;
+        .map_err(|e| ProcessError::Message(format!("{label} spawn failed: {e}")))?;
     let pid = child.id();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(child.wait_with_output());
     });
     match rx.recv_timeout(timeout_duration(label)) {
-        Ok(res) => res.map_err(|e| format!("{label} read output failed: {e}")),
+        Ok(res) => res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}"))),
         Err(mpsc::RecvTimeoutError::Timeout) => {
             terminate_pid(pid);
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {
@@ -114,25 +141,31 @@ pub fn run_command_output_with_timeout(mut cmd: Command, label: &str) -> Result<
             }
             Err(timeout_error(label))
         }
-        Err(_) => Err(format!("{label} output worker channel closed unexpectedly")),
+        Err(_) => Err(ProcessError::Message(format!(
+            "{label} output worker channel closed unexpectedly"
+        ))),
     }
 }
 
-pub fn run_command_with_stdin_output_with_timeout(
+pub fn run_command_output_with_timeout(cmd: Command, label: &str) -> Result<Output, String> {
+    run_command_output_with_timeout_meta(cmd, label).map_err(|e| e.to_string())
+}
+
+pub fn run_command_with_stdin_output_with_timeout_meta(
     mut cmd: Command,
     stdin_text: &str,
     label: &str,
-) -> Result<Output, String> {
+) -> Result<Output, ProcessError> {
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("{label} spawn failed: {e}"))?;
+        .map_err(|e| ProcessError::Message(format!("{label} spawn failed: {e}")))?;
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
             .write_all(stdin_text.as_bytes())
-            .map_err(|e| format!("{label} failed writing stdin: {e}"))?;
+            .map_err(|e| ProcessError::Message(format!("{label} failed writing stdin: {e}")))?;
     }
     let _ = child.stdin.take();
     let pid = child.id();
@@ -141,7 +174,7 @@ pub fn run_command_with_stdin_output_with_timeout(
         let _ = tx.send(child.wait_with_output());
     });
     match rx.recv_timeout(timeout_duration(label)) {
-        Ok(res) => res.map_err(|e| format!("{label} read output failed: {e}")),
+        Ok(res) => res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}"))),
         Err(mpsc::RecvTimeoutError::Timeout) => {
             terminate_pid(pid);
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {
@@ -149,29 +182,43 @@ pub fn run_command_with_stdin_output_with_timeout(
             }
             Err(timeout_error(label))
         }
-        Err(_) => Err(format!("{label} output worker channel closed unexpectedly")),
+        Err(_) => Err(ProcessError::Message(format!(
+            "{label} output worker channel closed unexpectedly"
+        ))),
     }
+}
+
+pub fn run_command_with_stdin_output_with_timeout(
+    cmd: Command,
+    stdin_text: &str,
+    label: &str,
+) -> Result<Output, String> {
+    run_command_with_stdin_output_with_timeout_meta(cmd, stdin_text, label)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_timeout_error, parse_timeout_secs_from_error};
+    use super::{ProcessError, TimeoutInfo};
 
     #[test]
-    fn parse_timeout_secs_handles_expected_format() {
-        let msg = "codex exec --json - timed out after 45s";
-        assert_eq!(parse_timeout_secs_from_error(msg), Some(45));
+    fn timeout_error_returns_structured_metadata() {
+        let err = ProcessError::Timeout(TimeoutInfo {
+            label: "timeout-test".to_string(),
+            timeout_secs: 17,
+        });
+        match err {
+            ProcessError::Timeout(info) => {
+                assert_eq!(info.label, "timeout-test");
+                assert_eq!(info.timeout_secs, 17);
+            }
+            ProcessError::Message(msg) => panic!("expected timeout, got message: {msg}"),
+        }
     }
 
     #[test]
-    fn parse_timeout_secs_returns_none_for_non_timeout() {
-        let msg = "codex exec failed with status 1";
-        assert_eq!(parse_timeout_secs_from_error(msg), None);
-    }
-
-    #[test]
-    fn timeout_error_detector_matches_timeout_phrase() {
-        assert!(is_timeout_error("foo timed out after 2s"));
-        assert!(!is_timeout_error("foo failed"));
+    fn process_error_display_for_message() {
+        let msg = ProcessError::Message("boom".to_string());
+        assert_eq!(msg.to_string(), "boom");
     }
 }

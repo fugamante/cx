@@ -1,8 +1,37 @@
 use serde_json::{Value, json};
 use std::process::Command;
 
-use crate::process::run_command_with_stdin_output_with_timeout;
+use crate::process::{run_command_with_stdin_output_with_timeout_meta, TimeoutInfo};
 use crate::types::UsageStats;
+
+#[derive(Clone, Debug)]
+pub struct LlmRunError {
+    pub message: String,
+    pub timeout: Option<TimeoutInfo>,
+}
+
+impl LlmRunError {
+    fn from_process(err: crate::process::ProcessError) -> Self {
+        let timeout = err.timeout_info().cloned();
+        Self {
+            message: err.to_string(),
+            timeout,
+        }
+    }
+
+    fn message(message: String) -> Self {
+        Self {
+            message,
+            timeout: None,
+        }
+    }
+}
+
+impl std::fmt::Display for LlmRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
 
 pub fn usage_from_jsonl(jsonl: &str) -> UsageStats {
     let mut out = UsageStats::default();
@@ -50,34 +79,46 @@ pub fn extract_agent_text(jsonl: &str) -> Option<String> {
     last
 }
 
-pub fn run_codex_jsonl(prompt: &str) -> Result<String, String> {
+pub fn run_codex_jsonl(prompt: &str) -> Result<String, LlmRunError> {
     let mut cmd = Command::new("codex");
     cmd.args(["exec", "--json", "-"]);
-    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "codex exec --json -")?;
+    let out = run_command_with_stdin_output_with_timeout_meta(cmd, prompt, "codex exec --json -")
+        .map_err(LlmRunError::from_process)?;
 
     if !out.status.success() {
-        return Err(format!("codex exited with status {}", out.status));
+        return Err(LlmRunError::message(format!(
+            "codex exited with status {}",
+            out.status
+        )));
     }
 
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub fn run_codex_plain(prompt: &str) -> Result<String, String> {
+pub fn run_codex_plain(prompt: &str) -> Result<String, LlmRunError> {
     let mut cmd = Command::new("codex");
     cmd.args(["exec", "-"]);
-    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "codex exec -")?;
+    let out = run_command_with_stdin_output_with_timeout_meta(cmd, prompt, "codex exec -")
+        .map_err(LlmRunError::from_process)?;
     if !out.status.success() {
-        return Err(format!("codex exited with status {}", out.status));
+        return Err(LlmRunError::message(format!(
+            "codex exited with status {}",
+            out.status
+        )));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, String> {
+pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, LlmRunError> {
     let mut cmd = Command::new("ollama");
     cmd.args(["run", model]);
-    let out = run_command_with_stdin_output_with_timeout(cmd, prompt, "ollama run")?;
+    let out = run_command_with_stdin_output_with_timeout_meta(cmd, prompt, "ollama run")
+        .map_err(LlmRunError::from_process)?;
     if !out.status.success() {
-        return Err(format!("ollama exited with status {}", out.status));
+        return Err(LlmRunError::message(format!(
+            "ollama exited with status {}",
+            out.status
+        )));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
