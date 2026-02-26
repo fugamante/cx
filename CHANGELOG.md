@@ -35,6 +35,7 @@ All notable changes to this project are documented in this file.
   - `src/task_cmds.rs`
   - `src/bench_parity.rs`
   - `src/exec_core.rs`
+  - `src/compat_cmd.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -65,6 +66,7 @@ All notable changes to this project are documented in this file.
 - Extracted task command dispatcher (`task add/list/show/claim/complete/fail/fanout/run/run-all`) into `src/task_cmds.rs`.
 - Extracted `bench` and `parity` command flows into `src/bench_parity.rs`.
 - Extracted execution core (`run_llm_plain`, `run_llm_jsonl`, `execute_task`) into `src/exec_core.rs`.
+- Extracted `cx-compat` command dispatcher into `src/compat_cmd.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

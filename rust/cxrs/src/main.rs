@@ -3,6 +3,7 @@ mod analytics;
 mod app;
 mod bench_parity;
 mod capture;
+mod compat_cmd;
 mod diagnostics;
 mod doctor;
 mod error;

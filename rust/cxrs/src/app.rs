@@ -5,6 +5,7 @@ use crate::agentcmds;
 use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
 use crate::bench_parity;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
+use crate::compat_cmd;
 use crate::diagnostics::cmd_diag;
 use crate::doctor;
 use crate::execmeta::utc_now_iso;
@@ -249,267 +250,101 @@ fn cmd_replay(id: &str) -> i32 {
     structured_cmds::cmd_replay(id, crate::exec_core::run_llm_jsonl)
 }
 
+fn compat_print_version() {
+    introspect_print_version(APP_NAME, APP_VERSION);
+}
+
+fn compat_cmd_where(args: &[String]) -> i32 {
+    print_where(args, APP_VERSION)
+}
+
+fn compat_cmd_diag() -> i32 {
+    cmd_diag(APP_VERSION)
+}
+
+fn compat_cmd_core() -> i32 {
+    introspect_cmd_core(APP_VERSION)
+}
+
+fn compat_cmd_logs(args: &[String]) -> i32 {
+    cmd_logs(APP_NAME, args)
+}
+
+fn compat_cmd_policy(args: &[String]) -> i32 {
+    cmd_policy(args, APP_NAME)
+}
+
+fn compat_cmd_llm(args: &[String]) -> i32 {
+    cmd_llm(APP_NAME, args)
+}
+
+fn compat_cmd_doctor() -> i32 {
+    doctor::print_doctor(crate::exec_core::run_llm_jsonl)
+}
+
+fn compat_cmd_health() -> i32 {
+    doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo)
+}
+
+fn compat_deps() -> compat_cmd::CompatDeps {
+    compat_cmd::CompatDeps {
+        print_help,
+        print_task_help,
+        print_version: compat_print_version,
+        cmd_doctor: compat_cmd_doctor,
+        cmd_where: compat_cmd_where,
+        cmd_routes,
+        cmd_diag: compat_cmd_diag,
+        cmd_parity,
+        cmd_core: compat_cmd_core,
+        cmd_logs: compat_cmd_logs,
+        cmd_task,
+        print_metrics,
+        print_profile,
+        print_trace,
+        print_alert,
+        parse_optimize_args,
+        print_optimize,
+        print_worklog,
+        cmd_cx,
+        cmd_cxj,
+        cmd_cxo,
+        cmd_cxol,
+        cmd_cxcopy,
+        cmd_policy: compat_cmd_policy,
+        cmd_state_show,
+        cmd_state_get,
+        cmd_state_set,
+        cmd_llm: compat_cmd_llm,
+        cmd_bench,
+        cmd_prompt,
+        cmd_roles,
+        cmd_fanout,
+        cmd_promptlint,
+        cmd_next,
+        cmd_fix,
+        cmd_diffsum,
+        cmd_commitjson,
+        cmd_commitmsg,
+        cmd_budget,
+        cmd_log_tail,
+        cmd_health: compat_cmd_health,
+        cmd_rtk_status,
+        cmd_log_on,
+        cmd_log_off,
+        cmd_alert_show,
+        cmd_alert_on,
+        cmd_alert_off,
+        cmd_chunk,
+        cmd_fix_run,
+        cmd_replay,
+        cmd_quarantine_list,
+        cmd_quarantine_show,
+    }
+}
+
 fn cmd_cx_compat(args: &[String]) -> i32 {
-    if args.is_empty() {
-        eprintln!("Usage: {APP_NAME} cx <command> [args...]");
-        return 2;
-    }
-    let sub = args[0].as_str();
-    match sub {
-        "help" => {
-            if args.get(1).map(String::as_str) == Some("task") {
-                print_task_help();
-            } else {
-                print_help();
-            }
-            0
-        }
-        "cxversion" | "version" => {
-            introspect_print_version(APP_NAME, APP_VERSION);
-            0
-        }
-        "cxdoctor" | "doctor" => doctor::print_doctor(crate::exec_core::run_llm_jsonl),
-        "cxwhere" | "where" => print_where(&args[1..], APP_VERSION),
-        "cxroutes" | "routes" => cmd_routes(&args[1..]),
-        "cxdiag" | "diag" => cmd_diag(APP_VERSION),
-        "cxparity" | "parity" => cmd_parity(),
-        "cxcore" | "core" => introspect_cmd_core(APP_VERSION),
-        "cxlogs" | "logs" => cmd_logs(APP_NAME, &args[1..]),
-        "cxtask" | "task" => cmd_task(&args[1..]),
-        "cxmetrics" | "metrics" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_metrics(n)
-        }
-        "cxprofile" | "profile" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_profile(n)
-        }
-        "cxtrace" | "trace" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(1);
-            print_trace(n)
-        }
-        "cxalert" | "alert" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_alert(n)
-        }
-        "cxoptimize" | "optimize" => {
-            let (n, json_out) = match parse_optimize_args(&args[1..], 200) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("{APP_NAME} cx optimize: {e}");
-                    return 2;
-                }
-            };
-            print_optimize(n, json_out)
-        }
-        "cxworklog" | "worklog" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(50);
-            print_worklog(n)
-        }
-        "cx" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cx <command> [args...]");
-                return 2;
-            }
-            cmd_cx(&args[1..])
-        }
-        "cxj" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cxj <command> [args...]");
-                return 2;
-            }
-            cmd_cxj(&args[1..])
-        }
-        "cxo" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cxo <command> [args...]");
-                return 2;
-            }
-            cmd_cxo(&args[1..])
-        }
-        "cxol" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cxol <command> [args...]");
-                return 2;
-            }
-            cmd_cxol(&args[1..])
-        }
-        "cxcopy" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cxcopy <command> [args...]");
-                return 2;
-            }
-            cmd_cxcopy(&args[1..])
-        }
-        "cxpolicy" | "policy" => cmd_policy(&args[1..], APP_NAME),
-        "cxstate" | "state" => match args.get(1).map(String::as_str).unwrap_or("show") {
-            "show" => cmd_state_show(),
-            "get" => {
-                let Some(key) = args.get(2) else {
-                    eprintln!("Usage: {APP_NAME} cx state get <key>");
-                    return 2;
-                };
-                cmd_state_get(key)
-            }
-            "set" => {
-                let Some(key) = args.get(2) else {
-                    eprintln!("Usage: {APP_NAME} cx state set <key> <value>");
-                    return 2;
-                };
-                let Some(value) = args.get(3) else {
-                    eprintln!("Usage: {APP_NAME} cx state set <key> <value>");
-                    return 2;
-                };
-                cmd_state_set(key, value)
-            }
-            other => {
-                eprintln!("{APP_NAME} cx state: unknown subcommand '{other}'");
-                2
-            }
-        },
-        "cxllm" | "llm" => cmd_llm(APP_NAME, &args[1..]),
-        "cxbench" | "bench" => {
-            let Some(runs) = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-            else {
-                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
-                return 2;
-            };
-            let delim = args.iter().position(|v| v == "--");
-            let Some(i) = delim else {
-                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
-                return 2;
-            };
-            if i + 1 >= args.len() {
-                eprintln!("Usage: {APP_NAME} cx bench <runs> -- <command...>");
-                return 2;
-            }
-            cmd_bench(runs, &args[i + 1..])
-        }
-        "cxprompt" | "prompt" => {
-            let Some(mode) = args.get(1) else {
-                eprintln!("Usage: {APP_NAME} cx prompt <mode> <request>");
-                return 2;
-            };
-            if args.len() < 3 {
-                eprintln!("Usage: {APP_NAME} cx prompt <mode> <request>");
-                return 2;
-            }
-            cmd_prompt(mode, &args[2..].join(" "))
-        }
-        "cxroles" | "roles" => cmd_roles(args.get(1).map(String::as_str)),
-        "cxfanout" | "fanout" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cx fanout <objective>");
-                return 2;
-            }
-            cmd_fanout(&args[1..].join(" "))
-        }
-        "cxpromptlint" | "promptlint" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(200);
-            cmd_promptlint(n)
-        }
-        "cxnext" | "next" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cx next <command> [args...]");
-                return 2;
-            }
-            cmd_next(&args[1..])
-        }
-        "cxfix" | "fix" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cx fix <command> [args...]");
-                return 2;
-            }
-            cmd_fix(&args[1..])
-        }
-        "cxdiffsum" | "diffsum" => cmd_diffsum(false),
-        "cxdiffsum_staged" | "diffsum-staged" => cmd_diffsum(true),
-        "cxcommitjson" | "commitjson" => cmd_commitjson(),
-        "cxcommitmsg" | "commitmsg" => cmd_commitmsg(),
-        "cxbudget" | "budget" => cmd_budget(),
-        "cxlog_tail" | "log-tail" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(10);
-            cmd_log_tail(n)
-        }
-        "cxhealth" | "health" => doctor::cmd_health(crate::exec_core::run_llm_jsonl, cmd_cxo),
-        "cxrtk" | "rtk-status" => cmd_rtk_status(),
-        "cxlog_on" | "log-on" => cmd_log_on(),
-        "cxlog_off" | "log-off" => cmd_log_off(),
-        "cxalert_show" | "alert-show" => cmd_alert_show(),
-        "cxalert_on" | "alert-on" => cmd_alert_on(),
-        "cxalert_off" | "alert-off" => cmd_alert_off(),
-        "cxchunk" | "chunk" => cmd_chunk(),
-        "cxfix_run" | "fix-run" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {APP_NAME} cx fix-run <command> [args...]");
-                return 2;
-            }
-            cmd_fix_run(&args[1..])
-        }
-        "cxreplay" | "replay" => {
-            let Some(id) = args.get(1) else {
-                eprintln!("Usage: {APP_NAME} cx replay <quarantine_id>");
-                return 2;
-            };
-            cmd_replay(id)
-        }
-        "cxquarantine" | "quarantine" => match args.get(1).map(String::as_str).unwrap_or("list") {
-            "list" => {
-                let n = args
-                    .get(2)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(20);
-                cmd_quarantine_list(n)
-            }
-            "show" => {
-                let Some(id) = args.get(2) else {
-                    eprintln!("Usage: {APP_NAME} cx quarantine show <quarantine_id>");
-                    return 2;
-                };
-                cmd_quarantine_show(id)
-            }
-            other => {
-                eprintln!("{APP_NAME} cx quarantine: unknown subcommand '{other}'");
-                2
-            }
-        },
-        other => {
-            eprintln!("{APP_NAME} cx: unsupported command '{other}'");
-            2
-        }
-    }
+    compat_cmd::cmd_cx_compat(APP_NAME, args, &compat_deps())
 }
 
 pub(crate) fn is_compat_name(name: &str) -> bool {
