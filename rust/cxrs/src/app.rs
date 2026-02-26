@@ -15,7 +15,7 @@ use crate::capture::{
 };
 use crate::types::{
     CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, QuarantineAttempt, QuarantineRecord,
-    RunEntry, TaskInput, TaskRecord, TaskSpec, UsageStats,
+    RunEntry, TaskInput, TaskSpec, UsageStats,
 };
 use crate::paths::{
     repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
@@ -31,24 +31,12 @@ use crate::state::{ensure_state_value, read_state_value, state_cache_clear, writ
 use crate::tasks::{
     cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status, write_tasks,
 };
+use crate::taskrun::{TaskRunner, run_task_by_id};
 use crate::util::sha256_hex;
 
 const APP_NAME: &str = "cxrs";
 const APP_DESC: &str = "Rust spike for the cx toolchain";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Debug, Clone)]
-enum TaskRunError {
-    Critical(String),
-}
-
-impl std::fmt::Display for TaskRunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TaskRunError::Critical(s) => write!(f, "{s}"),
-        }
-    }
-}
 
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
@@ -773,211 +761,6 @@ fn current_task_parent_id() -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn parse_words(input: &str) -> Vec<String> {
-    input
-        .split_whitespace()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
-}
-
-fn run_task_objective(task: &TaskRecord) -> Result<(i32, Option<String>), String> {
-    let words = parse_words(&task.objective);
-    if let Some(cmd0) = words.first().map(String::as_str) {
-        let args: Vec<String> = words.iter().skip(1).cloned().collect();
-        let status = match cmd0 {
-            "cxcommitjson" | "commitjson" => cmd_commitjson(),
-            "cxcommitmsg" | "commitmsg" => cmd_commitmsg(),
-            "cxdiffsum" | "diffsum" => cmd_diffsum(false),
-            "cxdiffsum_staged" | "diffsum-staged" => cmd_diffsum(true),
-            "cxnext" | "next" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_next(&args)
-                }
-            }
-            "cxfix_run" | "fix-run" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_fix_run(&args)
-                }
-            }
-            "cxfix" | "fix" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_fix(&args)
-                }
-            }
-            "cx" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_cx(&args)
-                }
-            }
-            "cxj" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_cxj(&args)
-                }
-            }
-            "cxo" => {
-                if args.is_empty() {
-                    2
-                } else {
-                    cmd_cxo(&args)
-                }
-            }
-            _ => {
-                let prompt = if task.context_ref.trim().is_empty() {
-                    format!(
-                        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
-                        task.objective
-                    )
-                } else {
-                    format!(
-                        "Task Objective:\n{}\n\nContext Ref:\n{}\n\nRespond with concise execution notes and next actions.",
-                        task.objective, task.context_ref
-                    )
-                };
-                let res = execute_task(TaskSpec {
-                    command_name: "cxtask_run".to_string(),
-                    input: TaskInput::Prompt(prompt),
-                    output_kind: LlmOutputKind::AgentText,
-                    schema: None,
-                    schema_task_input: None,
-                    logging_enabled: true,
-                    capture_override: None,
-                })?;
-                println!("{}", res.stdout);
-                return Ok((0, Some(res.execution_id)));
-            }
-        };
-        return Ok((status, None));
-    }
-
-    let prompt = format!(
-        "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
-        task.objective
-    );
-    let res = execute_task(TaskSpec {
-        command_name: "cxtask_run".to_string(),
-        input: TaskInput::Prompt(prompt),
-        output_kind: LlmOutputKind::AgentText,
-        schema: None,
-        schema_task_input: None,
-        logging_enabled: true,
-        capture_override: None,
-    })?;
-    println!("{}", res.stdout);
-    Ok((0, Some(res.execution_id)))
-}
-
-fn run_task_by_id(
-    id: &str,
-    mode_override: Option<&str>,
-    backend_override: Option<&str>,
-) -> Result<(i32, Option<String>), TaskRunError> {
-    let mut tasks = read_tasks().map_err(TaskRunError::Critical)?;
-    let idx = tasks
-        .iter()
-        .position(|t| t.id == id)
-        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task not found: {id}")))?;
-    if matches!(tasks[idx].status.as_str(), "complete" | "failed") {
-        return Ok((0, None));
-    }
-    tasks[idx].status = "in_progress".to_string();
-    tasks[idx].updated_at = utc_now_iso();
-    write_tasks(&tasks).map_err(TaskRunError::Critical)?;
-    let prev_task_id = current_task_id();
-    let prev_parent_id = current_task_parent_id();
-    let _ = set_state_path("runtime.current_task_id", Value::String(id.to_string()));
-    let _ = set_state_path(
-        "runtime.current_task_parent_id",
-        match tasks[idx].parent_id.as_ref() {
-            Some(v) => Value::String(v.clone()),
-            None => Value::Null,
-        },
-    );
-
-    let prev_mode = env::var("CX_MODE").ok();
-    let prev_backend = env::var("CX_LLM_BACKEND").ok();
-    if let Some(m) = mode_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_MODE", m) };
-    }
-    if let Some(b) = backend_override {
-        // SAFETY: cx task run/run-all are sequential command paths; overrides are restored before return.
-        unsafe { env::set_var("CX_LLM_BACKEND", b) };
-    }
-
-    let exec = run_task_objective(&tasks[idx]);
-
-    match prev_mode {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_MODE", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_MODE") }
-        }
-    }
-    match prev_backend {
-        Some(v) => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::set_var("CX_LLM_BACKEND", v) }
-        }
-        None => {
-            // SAFETY: restoring process env after scoped override.
-            unsafe { env::remove_var("CX_LLM_BACKEND") }
-        }
-    }
-    let _ = set_state_path(
-        "runtime.current_task_id",
-        match prev_task_id {
-            Some(v) => Value::String(v),
-            None => Value::Null,
-        },
-    );
-    let _ = set_state_path(
-        "runtime.current_task_parent_id",
-        match prev_parent_id {
-            Some(v) => Value::String(v),
-            None => Value::Null,
-        },
-    );
-
-    let (status_code, execution_id, objective_err) = match exec {
-        Ok((c, eid)) => (c, eid, None),
-        Err(e) => (1, None, Some(e)),
-    };
-
-    let mut tasks = read_tasks().map_err(TaskRunError::Critical)?;
-    let idx = tasks
-        .iter()
-        .position(|t| t.id == id)
-        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task disappeared: {id}")))?;
-    tasks[idx].status = if status_code == 0 {
-        "complete".to_string()
-    } else {
-        "failed".to_string()
-    };
-    tasks[idx].updated_at = utc_now_iso();
-    write_tasks(&tasks).map_err(TaskRunError::Critical)?;
-    if current_task_id().as_deref() == Some(id) {
-        let _ = set_state_path("runtime.current_task_id", Value::Null);
-    }
-    if let Some(e) = objective_err {
-        eprintln!("cxrs task run: objective failed for {id}: {e}");
-    }
-    Ok((status_code, execution_id))
-}
-
 fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     if let Err(e) = set_task_status(id, new_status) {
         eprintln!("cxrs task: {e}");
@@ -992,6 +775,27 @@ fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     }
     println!("{id}: {new_status}");
     0
+}
+
+fn task_runner() -> TaskRunner {
+    TaskRunner {
+        read_tasks,
+        write_tasks,
+        current_task_id,
+        current_task_parent_id,
+        set_state_path,
+        utc_now_iso,
+        cmd_commitjson,
+        cmd_commitmsg,
+        cmd_diffsum,
+        cmd_next,
+        cmd_fix_run,
+        cmd_fix,
+        cmd_cx,
+        cmd_cxj,
+        cmd_cxo,
+        execute_task,
+    }
 }
 
 fn cmd_task(args: &[String]) -> i32 {
@@ -1116,7 +920,7 @@ fn cmd_task(args: &[String]) -> i32 {
                     }
                 }
             }
-            match run_task_by_id(id, mode_override, backend_override) {
+            match run_task_by_id(&task_runner(), id, mode_override, backend_override) {
                 Ok((code, execution_id)) => {
                     if let Some(eid) = execution_id {
                         println!("task_id: {id}");
@@ -1179,7 +983,7 @@ fn cmd_task(args: &[String]) -> i32 {
             let mut ok = 0usize;
             let mut failed = 0usize;
             for id in pending {
-                match run_task_by_id(&id, None, None) {
+                match run_task_by_id(&task_runner(), &id, None, None) {
                     Ok((code, _)) => {
                         if code == 0 {
                             ok += 1;
