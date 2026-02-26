@@ -49,6 +49,11 @@ All notable changes to this project are documented in this file.
   - `timed_out`
   - `timeout_secs`
   - `command_label`
+- Reliability integration test suite:
+  - `rust/cxrs/tests/reliability_integration.rs`
+  - timeout-failure injection coverage with timeout metadata assertions
+  - schema-failure injection coverage with quarantine/log assertions
+  - replay determinism loop coverage (`replay` repeated runs)
 
 ### Changed
 - Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.
@@ -107,6 +112,8 @@ All notable changes to this project are documented in this file.
   - wired into `.github/workflows/cxrs-compat.yml`.
 - Centralized stderr diagnostics behind `cx_eprintln!` and converted Rust modules away from direct `eprintln!` callsites.
 - Tightened quality gate raw-stderr detection to true raw macro calls (ignores wrapper macro names) and lowered CI baseline to `0`.
+- `replay` command now validates output against the quarantine-stored schema (not just JSON parse), and quarantines/logs invalid replay responses.
+- CI now runs dedicated reliability suite job step (`cargo test --test reliability_integration`).
 
 ### Fixed
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).

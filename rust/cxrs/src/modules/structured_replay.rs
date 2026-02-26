@@ -1,10 +1,12 @@
 use serde_json::Value;
+use std::path::PathBuf;
 
 use crate::error::{EXIT_OK, EXIT_RUNTIME, format_error};
 use crate::llm::extract_agent_text;
 use crate::quarantine::read_quarantine_record;
 use crate::runlog::log_schema_failure;
-use crate::schema::build_strict_schema_prompt;
+use crate::schema::{build_strict_schema_prompt, validate_schema_instance};
+use crate::types::LoadedSchema;
 
 pub type JsonlRunner = fn(&str) -> Result<String, String>;
 
@@ -35,6 +37,37 @@ fn ensure_quarantine_payload(rec: &crate::types::QuarantineRecord) -> Result<(),
     Ok(())
 }
 
+fn replay_schema_from_record(rec: &crate::types::QuarantineRecord) -> Result<LoadedSchema, String> {
+    let value: Value = serde_json::from_str(&rec.schema)
+        .map_err(|e| format!("quarantine schema is invalid JSON: {e}"))?;
+    Ok(LoadedSchema {
+        name: format!("{}_replay.schema.json", rec.tool),
+        path: PathBuf::from(format!("<quarantine:{}>", rec.id)),
+        value,
+        id: None,
+    })
+}
+
+fn replay_raw_response(
+    rec: &crate::types::QuarantineRecord,
+    run_llm_jsonl: JsonlRunner,
+) -> Result<String, String> {
+    let full_prompt = build_strict_schema_prompt(&rec.schema, &rec.prompt);
+    let jsonl = run_llm_jsonl(&full_prompt)?;
+    Ok(extract_agent_text(&jsonl).unwrap_or_default())
+}
+
+fn validate_replay_response(rec: &crate::types::QuarantineRecord, raw: &str) -> Result<(), String> {
+    if raw.trim().is_empty() {
+        return Err("empty_agent_message".to_string());
+    }
+    if serde_json::from_str::<Value>(raw).is_err() {
+        return Err("invalid_json".to_string());
+    }
+    let schema = replay_schema_from_record(rec)?;
+    validate_schema_instance(&schema, raw).map(|_| ())
+}
+
 pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
@@ -49,24 +82,20 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
         return EXIT_RUNTIME;
     }
 
-    let full_prompt = build_strict_schema_prompt(&rec.schema, &rec.prompt);
-    let jsonl = match run_llm_jsonl(&full_prompt) {
+    let raw = match replay_raw_response(&rec, run_llm_jsonl) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{}", format_error("replay", &e));
             return EXIT_RUNTIME;
         }
     };
-    let raw = extract_agent_text(&jsonl).unwrap_or_default();
-    if raw.trim().is_empty() {
-        log_replay_schema_failure(&rec, "empty_agent_message", &raw);
-        return EXIT_RUNTIME;
-    }
-
-    if serde_json::from_str::<Value>(&raw).is_err() {
-        log_replay_schema_failure(&rec, "invalid_json", &raw);
-        crate::cx_eprintln!("{}", format_error("replay", "raw response follows:"));
-        crate::cx_eprintln!("{raw}");
+    if let Err(reason) = validate_replay_response(&rec, &raw) {
+        log_replay_schema_failure(&rec, &reason, &raw);
+        if reason == "invalid_json" {
+            crate::cx_eprintln!("{}", format_error("replay", "raw response follows:"));
+            crate::cx_eprintln!("{raw}");
+        }
+        crate::cx_eprintln!("{}", format_error("replay", &reason));
         return EXIT_RUNTIME;
     }
 

@@ -112,6 +112,13 @@ make compat-check N=50
 make parity-check
 ```
 
+Reliability/failure-injection suite:
+
+```bash
+cd rust/cxrs
+cargo test --test reliability_integration -- --test-threads=1
+```
+
 Current compat coverage:
 - `metrics`
 - `profile`

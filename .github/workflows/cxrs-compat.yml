@@ -41,6 +41,11 @@ jobs:
           cargo check
           cargo test --tests
 
+      - name: Reliability Suite
+        run: |
+          cd rust/cxrs
+          cargo test --test reliability_integration -- --test-threads=1
+
       - name: Quality gate
         run: |
           cd rust/cxrs
