@@ -16,6 +16,7 @@ mod quarantine;
 mod routing;
 mod runlog;
 mod runtime;
+mod runtime_controls;
 mod schema;
 mod state;
 mod taskrun;
