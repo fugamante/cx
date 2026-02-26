@@ -4,13 +4,10 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
+use crate::execmeta::utc_now_iso;
 use crate::paths::resolve_quarantine_dir;
 use crate::types::{QuarantineAttempt, QuarantineRecord};
 use crate::util::sha256_hex;
-
-fn utc_now_iso() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
 
 fn make_quarantine_id(tool: &str) -> String {
     let safe_tool: String = tool
@@ -164,4 +161,3 @@ pub fn cmd_quarantine_show(id: &str) -> i32 {
         }
     }
 }
-

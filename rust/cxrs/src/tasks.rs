@@ -1,10 +1,10 @@
-use chrono::Utc;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::process::Command;
 
 use crate::capture::chunk_text_by_budget;
+use crate::execmeta::utc_now_iso;
 use crate::paths::resolve_tasks_file;
 use crate::state::write_json_atomic;
 use crate::types::TaskRecord;
@@ -52,10 +52,6 @@ pub fn next_task_id(tasks: &[TaskRecord]) -> String {
         }
     }
     format!("task_{:03}", max_id + 1)
-}
-
-fn utc_now_iso() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 pub fn cmd_task_add(app_name: &str, args: &[String]) -> i32 {
