@@ -11,6 +11,32 @@
 - Safety layer for command execution boundaries and policy visibility (`policy show`)
 - Backend model: Codex by default, Ollama optional/user-selectable
 
+## Technical Expose (Rust Refactor Snapshot)
+
+This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
+
+Current refactor highlights:
+
+- `src/app.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)
+- command families extracted into dedicated modules:
+  - `src/introspect.rs` (`version`, `core`)
+  - `src/runtime_controls.rs` (`log-on/off`, `alert-*`, `rtk-status`)
+  - `src/agentcmds.rs` (`cx/cxj/cxo/cxol/cxcopy/fix`)
+  - `src/logview.rs` (`budget`, `log-tail`)
+  - `src/analytics.rs` (`metrics/profile/trace/alert/worklog`)
+  - `src/diagnostics.rs` (`diag`, helpers)
+  - `src/routing.rs` (`where`, `routes`, provenance helpers)
+  - `src/prompting.rs` (`prompt/roles/fanout/promptlint`)
+  - `src/optimize.rs` (`optimize`)
+  - `src/doctor.rs` (`doctor`, `health`)
+  - `src/schema_ops.rs` (`schema list`, `ci validate`)
+  - `src/settings_cmds.rs` (`state *`, `llm *`)
+
+Design intent:
+- keep command UX stable while shrinking coupling and improving testability
+- make error paths explicit and quarantine-backed
+- keep Rust as authoritative behavior for capture, schema, policy, and telemetry contracts
+
 ## Architecture
 
 The runtime pipeline is unified in Rust:
@@ -29,7 +55,9 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 ## Repository Layout
 
 - `bin/cx` - single entrypoint, Rust-first dispatcher
-- `rust/cxrs/src/main.rs` - canonical implementation
+- `rust/cxrs/src/main.rs` - module entrypoint
+- `rust/cxrs/src/app.rs` - command routing/orchestration
+- `rust/cxrs/src/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
 - `lib/cx/*.sh` - compatibility shell layer
 - `.codex/schemas/` - JSON schema registry
 - `.codex/cxlogs/` - run + schema failure logs (runtime)
@@ -138,6 +166,7 @@ Stage II runtime commands:
 
 ```bash
 cd rust/cxrs
+cargo fmt
 cargo check
 cargo test --tests
 

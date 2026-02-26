@@ -1,6 +1,6 @@
 # Rust-First Migration Checklist (cx)
 
-Last updated: 2026-02-22
+Last updated: 2026-02-26
 Scope: entire `cxcodex` project
 
 ## 1) Policy (effective now)
@@ -14,12 +14,17 @@ Scope: entire `cxcodex` project
 ## 2) Branch strategy
 
 - `main`: stable operational branch for incremental Rust-first rollout.
-- `codex/rust-spike`: experimental branch for risky or breaking Rust changes.
+- `codex/rust-refactor`: active extraction branch for modularization and error-path hardening.
 
 Flow:
-1. Build and validate risky work on `codex/rust-spike`.
+1. Build and validate risky work on `codex/rust-refactor`.
 2. Promote to `main` only after parity + smoke checks pass.
 3. Keep branch READMEs branch-specific.
+
+Current branch focus:
+- split `cxrs` command families into domain modules
+- preserve CLI contracts while reducing monolithic coupling
+- keep Rust tests/parity checks green on every extraction slice
 
 ## 3) Feature intake checklist (for every new feature)
 
