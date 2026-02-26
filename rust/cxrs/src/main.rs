@@ -1,6 +1,7 @@
 mod agentcmds;
 mod analytics;
 mod app;
+mod bench_parity;
 mod capture;
 mod diagnostics;
 mod doctor;
