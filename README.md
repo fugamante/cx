@@ -17,22 +17,22 @@ This branch is actively decomposing `cxrs` from a monolithic command file into f
 
 Current refactor highlights:
 
-- `src/app.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)
+- `src/app/mod.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)
 - command families extracted into dedicated modules:
-  - `src/introspect.rs` (`version`, `core`)
-  - `src/runtime_controls.rs` (`log-on/off`, `alert-*`, `rtk-status`)
-  - `src/agentcmds.rs` (`cx/cxj/cxo/cxol/cxcopy/fix`)
-  - `src/logview.rs` (`budget`, `log-tail`)
-  - `src/analytics.rs` (`metrics/profile/trace/alert/worklog`)
-  - `src/diagnostics.rs` (`diag`, helpers)
-  - `src/routing.rs` (`where`, `routes`, provenance helpers)
-  - `src/prompting.rs` (`prompt/roles/fanout/promptlint`)
-  - `src/optimize.rs` (`optimize`)
-  - `src/doctor.rs` (`doctor`, `health`)
-  - `src/schema_ops.rs` (`schema list`, `ci validate`)
-  - `src/settings_cmds.rs` (`state *`, `llm *`)
-  - `src/structured_cmds.rs` (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`)
-  - `src/task_cmds.rs` (`task add/list/show/claim/complete/fail/fanout/run/run-all`)
+  - `src/modules/introspect.rs` (`version`, `core`)
+  - `src/modules/runtime_controls.rs` (`log-on/off`, `alert-*`, `rtk-status`)
+  - `src/modules/agentcmds.rs` (`cx/cxj/cxo/cxol/cxcopy/fix`)
+  - `src/modules/logview.rs` (`budget`, `log-tail`)
+  - `src/modules/analytics.rs` (`metrics/profile/trace/alert/worklog`)
+  - `src/modules/diagnostics.rs` (`diag`, helpers)
+  - `src/modules/routing.rs` (`where`, `routes`, provenance helpers`)
+  - `src/modules/prompting.rs` (`prompt/roles/fanout/promptlint`)
+  - `src/modules/optimize.rs` (`optimize`)
+  - `src/modules/doctor.rs` (`doctor`, `health`)
+  - `src/modules/schema_ops.rs` (`schema list`, `ci validate`)
+  - `src/modules/settings_cmds.rs` (`state *`, `llm *`)
+  - `src/modules/structured_cmds.rs` (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`)
+  - `src/modules/task_cmds.rs` (`task add/list/show/claim/complete/fail/fanout/run/run-all`)
 
 Design intent:
 - keep command UX stable while shrinking coupling and improving testability
@@ -58,8 +58,8 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 
 - `bin/cx` - single entrypoint, Rust-first dispatcher
 - `rust/cxrs/src/main.rs` - module entrypoint
-- `rust/cxrs/src/app.rs` - command routing/orchestration
-- `rust/cxrs/src/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
+- `rust/cxrs/src/app/mod.rs` - command routing/orchestration
+- `rust/cxrs/src/modules/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
 - `lib/cx/*.sh` - compatibility shell layer
 - `.codex/schemas/` - JSON schema registry
 - `.codex/cxlogs/` - run + schema failure logs (runtime)

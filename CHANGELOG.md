@@ -72,6 +72,7 @@ All notable changes to this project are documented in this file.
 - Introduced shared command context type in `src/cmdctx.rs` for handler-style module entrypoints.
 - Renamed execution core module path from `exec_core` to `execution` and rewired call sites.
 - Migrated `task_cmds` and `compat_cmd` to `handler(ctx, args, deps)` style entrypoints.
+- Reorganized source layout: moved orchestrator to `src/app/mod.rs` and consolidated domain modules under `src/modules/`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed
