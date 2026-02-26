@@ -6,6 +6,17 @@ pub const EXIT_OK: i32 = 0;
 pub const EXIT_RUNTIME: i32 = 1;
 pub const EXIT_USAGE: i32 = 2;
 
+#[macro_export]
+macro_rules! cx_eprintln {
+    ($($arg:tt)*) => {
+        {
+            let mut stderr_lock = std::io::stderr().lock();
+            let _ = std::io::Write::write_fmt(&mut stderr_lock, format_args!($($arg)*));
+            let _ = std::io::Write::write_all(&mut stderr_lock, b"\n");
+        }
+    };
+}
+
 #[derive(Debug)]
 pub enum CxError {
     Io {
@@ -88,11 +99,11 @@ pub fn format_error(command: &str, error: &str) -> String {
 }
 
 pub fn print_runtime_error(command: &str, error: &str) -> i32 {
-    eprintln!("{}", format_error(command, error));
+    crate::cx_eprintln!("{}", format_error(command, error));
     EXIT_RUNTIME
 }
 
 pub fn print_usage_error(command: &str, usage: &str) -> i32 {
-    eprintln!("{}", format_error(command, &format!("Usage: {usage}")));
+    crate::cx_eprintln!("{}", format_error(command, &format!("Usage: {usage}")));
     EXIT_USAGE
 }

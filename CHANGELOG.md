@@ -105,6 +105,8 @@ All notable changes to this project are documented in this file.
 - Added quality-gate baseline control to prevent silent growth of raw `eprintln!` usage:
   - `tools/quality_gate.py --max-raw-eprintln <N>`
   - wired into `.github/workflows/cxrs-compat.yml`.
+- Centralized stderr diagnostics behind `cx_eprintln!` and converted Rust modules away from direct `eprintln!` callsites.
+- Tightened quality gate raw-stderr detection to true raw macro calls (ignores wrapper macro names) and lowered CI baseline to `0`.
 
 ### Fixed
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).

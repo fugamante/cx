@@ -155,7 +155,7 @@ pub fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
 
 fn handle_policy_check(args: &[String], app_name: &str) -> i32 {
     if args.len() < 2 {
-        eprintln!("Usage: {app_name} policy check <command...>");
+        crate::cx_eprintln!("Usage: {app_name} policy check <command...>");
         return 2;
     }
     let candidate = args[1..].join(" ");

@@ -10,27 +10,27 @@ fn show_field<T: ToString>(label: &str, value: Option<T>) {
 
 pub fn print_trace(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("cxrs: unable to resolve log file");
         return 1;
     };
     if !log_file.exists() {
-        eprintln!("cxrs trace: no log file at {}", log_file.display());
+        crate::cx_eprintln!("cxrs trace: no log file at {}", log_file.display());
         return 1;
     }
 
     let runs = match load_runs(&log_file, usize::MAX) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs trace: {e}");
+            crate::cx_eprintln!("cxrs trace: {e}");
             return 1;
         }
     };
     if runs.is_empty() {
-        eprintln!("cxrs trace: no runs in {}", log_file.display());
+        crate::cx_eprintln!("cxrs trace: no runs in {}", log_file.display());
         return 1;
     }
     if n == 0 || n > runs.len() {
-        eprintln!(
+        crate::cx_eprintln!(
             "cxrs trace: run index out of range (requested {}, available {})",
             n,
             runs.len()

@@ -180,7 +180,7 @@ pub fn cmd_fix(command: &[String], run_capture: CaptureRunner, run_task: TaskRun
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("fix", &e));
+            crate::cx_eprintln!("{}", format_error("fix", &e));
             return status;
         }
     };

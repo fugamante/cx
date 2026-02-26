@@ -90,7 +90,7 @@ fn handle_state(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
             _ => print_usage_error("state", &format!("{app_name} cx state set <key> <value>")),
         },
         other => {
-            eprintln!("{app_name} cx state: unknown subcommand '{other}'");
+            crate::cx_eprintln!("{app_name} cx state: unknown subcommand '{other}'");
             EXIT_USAGE
         }
     }
@@ -136,7 +136,7 @@ fn handle_optimize(args: &[String], deps: &CompatDeps) -> i32 {
     let (n, json_out) = match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("cx optimize", &e));
+            crate::cx_eprintln!("{}", format_error("cx optimize", &e));
             return EXIT_USAGE;
         }
     };
@@ -161,7 +161,7 @@ fn handle_quarantine(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 
             ),
         },
         other => {
-            eprintln!("{app_name} cx quarantine: unknown subcommand '{other}'");
+            crate::cx_eprintln!("{app_name} cx quarantine: unknown subcommand '{other}'");
             EXIT_USAGE
         }
     }
@@ -347,7 +347,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
         .or_else(|| dispatch_agent_commands(sub, app_name, args, deps))
         .or_else(|| dispatch_runtime_commands(sub, app_name, args, deps))
         .unwrap_or_else(|| {
-            eprintln!(
+            crate::cx_eprintln!(
                 "{}",
                 format_error("cx", &format!("unsupported command '{sub}'"))
             );

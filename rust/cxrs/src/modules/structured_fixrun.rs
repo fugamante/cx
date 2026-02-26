@@ -25,14 +25,14 @@ struct FixRunCtx {
 
 fn load_fix_schema_or_exit() -> Result<crate::types::LoadedSchema, i32> {
     load_schema("fixrun").map_err(|e| {
-        eprintln!("{}", format_error("fix-run", &e));
+        crate::cx_eprintln!("{}", format_error("fix-run", &e));
         EXIT_RUNTIME
     })
 }
 
 fn capture_fix_context(cmdv: &[String]) -> Result<(String, i32, crate::types::CaptureStats), i32> {
     run_system_command_capture(cmdv).map_err(|e| {
-        eprintln!("{}", format_error("fix-run", &e));
+        crate::cx_eprintln!("{}", format_error("fix-run", &e));
         EXIT_RUNTIME
     })
 }
@@ -53,14 +53,14 @@ fn execute_fix_schema_task(
         capture_override: Some(capture_stats),
     })
     .map_err(|e| {
-        eprintln!("{}", format_error("fix-run", &e));
+        crate::cx_eprintln!("{}", format_error("fix-run", &e));
         EXIT_RUNTIME
     })
 }
 
 fn parse_fix_response(raw: &str) -> Result<(String, Vec<String>), i32> {
     let v: Value = serde_json::from_str(raw).map_err(|e| {
-        eprintln!(
+        crate::cx_eprintln!(
             "{}",
             format_error("fix-run", &format!("invalid JSON after schema run: {e}"))
         );
@@ -72,7 +72,7 @@ fn parse_fix_response(raw: &str) -> Result<(String, Vec<String>), i32> {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     let commands = parse_commands_array(raw).map_err(|reason| {
-        eprintln!("{}", format_error("fix-run", &reason));
+        crate::cx_eprintln!("{}", format_error("fix-run", &reason));
         EXIT_RUNTIME
     })?;
     Ok((analysis, commands))
@@ -106,13 +106,13 @@ fn log_schema_failure_and_exit(
         policy_reason: None,
     });
     if let Some(qid) = result.quarantine_id.as_deref() {
-        eprintln!(
+        crate::cx_eprintln!(
             "{}",
             format_error("fix-run", &format!("schema failure; quarantine_id={qid}"))
         );
     }
-    eprintln!("{}", format_error("fix-run", "raw response follows:"));
-    eprintln!("{}", result.stdout);
+    crate::cx_eprintln!("{}", format_error("fix-run", "raw response follows:"));
+    crate::cx_eprintln!("{}", result.stdout);
     Err(EXIT_RUNTIME)
 }
 
@@ -164,7 +164,7 @@ fn parse_fix_run_args(app_name: &str, command: &[String]) -> Result<(bool, Vec<S
         cmdv = cmdv.into_iter().skip(1).collect();
     }
     if cmdv.is_empty() {
-        eprintln!(
+        crate::cx_eprintln!(
             "{}",
             format_error(
                 "fix-run",
@@ -229,19 +229,19 @@ fn execute_fix_commands(
                 if !(force || allow_unsafe) {
                     policy_blocked = true;
                     policy_reasons.push(reason.clone());
-                    eprintln!(
+                    crate::cx_eprintln!(
                         "WARN blocked dangerous command ({reason}); use CXFIX_FORCE=1 or --unsafe: {c}"
                     );
                     continue;
                 }
-                eprintln!("WARN unsafe override active; executing: {c}");
+                crate::cx_eprintln!("WARN unsafe override active; executing: {c}");
             }
         }
         println!("-> {c}");
         let mut shell_cmd = Command::new("bash");
         shell_cmd.args(["-lc", c]);
         if let Err(e) = run_command_status_with_timeout(shell_cmd, "cxfix_run command") {
-            eprintln!(
+            crate::cx_eprintln!(
                 "{}",
                 format_error("fix-run", &format!("failed to execute command: {e}"))
             );

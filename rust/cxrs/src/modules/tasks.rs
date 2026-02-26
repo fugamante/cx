@@ -63,7 +63,7 @@ struct AddArgs {
 
 fn parse_objective_prefix(app_name: &str, args: &[String]) -> Result<(String, usize), i32> {
     if args.is_empty() {
-        eprintln!(
+        crate::cx_eprintln!(
             "Usage: {app_name} task add <objective> [--role <role>] [--parent <id>] [--context <ref>]"
         );
         return Err(2);
@@ -76,7 +76,7 @@ fn parse_objective_prefix(app_name: &str, args: &[String]) -> Result<(String, us
     }
     let objective = obj_parts.join(" ").trim().to_string();
     if objective.is_empty() {
-        eprintln!("cxrs task add: objective cannot be empty");
+        crate::cx_eprintln!("cxrs task add: objective cannot be empty");
         return Err(2);
     }
     Ok((objective, i))
@@ -90,7 +90,7 @@ fn parse_add_flags(args: &[String], mut i: usize) -> Result<(String, Option<Stri
         match args[i].as_str() {
             "--role" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --role requires a value");
+                    crate::cx_eprintln!("cxrs task add: --role requires a value");
                     return Err(2);
                 };
                 role = v.to_lowercase();
@@ -98,7 +98,7 @@ fn parse_add_flags(args: &[String], mut i: usize) -> Result<(String, Option<Stri
             }
             "--parent" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --parent requires a value");
+                    crate::cx_eprintln!("cxrs task add: --parent requires a value");
                     return Err(2);
                 };
                 parent_id = Some(v.to_string());
@@ -106,14 +106,14 @@ fn parse_add_flags(args: &[String], mut i: usize) -> Result<(String, Option<Stri
             }
             "--context" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("cxrs task add: --context requires a value");
+                    crate::cx_eprintln!("cxrs task add: --context requires a value");
                     return Err(2);
                 };
                 context_ref = v.to_string();
                 i += 2;
             }
             other => {
-                eprintln!("cxrs task add: unknown flag '{other}'");
+                crate::cx_eprintln!("cxrs task add: unknown flag '{other}'");
                 return Err(2);
             }
         }
@@ -125,7 +125,7 @@ fn parse_task_add_args(app_name: &str, args: &[String]) -> Result<AddArgs, i32> 
     let (objective, i) = parse_objective_prefix(app_name, args)?;
     let (role, parent_id, context_ref) = parse_add_flags(args, i)?;
     if !task_role_valid(&role) {
-        eprintln!("cxrs task add: invalid role '{role}'");
+        crate::cx_eprintln!("cxrs task add: invalid role '{role}'");
         return Err(2);
     }
     Ok(AddArgs {
@@ -145,7 +145,7 @@ pub fn cmd_task_add(app_name: &str, args: &[String]) -> i32 {
     let mut tasks = match read_tasks() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
@@ -162,7 +162,7 @@ pub fn cmd_task_add(app_name: &str, args: &[String]) -> i32 {
         updated_at: now,
     });
     if let Err(e) = write_tasks(&tasks) {
-        eprintln!("cxrs task add: {e}");
+        crate::cx_eprintln!("cxrs task add: {e}");
         return 1;
     }
     println!("{id}");
@@ -173,7 +173,7 @@ pub fn cmd_task_list(status_filter: Option<&str>) -> i32 {
     let tasks = match read_tasks() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
@@ -204,12 +204,12 @@ pub fn cmd_task_show(id: &str) -> i32 {
     let tasks = match read_tasks() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
     let Some(task) = tasks.into_iter().find(|t| t.id == id) else {
-        eprintln!("cxrs task show: task not found: {id}");
+        crate::cx_eprintln!("cxrs task show: task not found: {id}");
         return 1;
     };
     match serde_json::to_string_pretty(&task) {
@@ -218,7 +218,7 @@ pub fn cmd_task_show(id: &str) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("cxrs task show: render failed: {e}");
+            crate::cx_eprintln!("cxrs task show: render failed: {e}");
             1
         }
     }

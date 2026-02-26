@@ -279,7 +279,7 @@ fn maybe_warn_invalid_lines(log_file: &Path, invalid: usize, sample: Option<Stri
     if RUNS_PARSE_WARNED.swap(true, Ordering::SeqCst) {
         return;
     }
-    eprintln!(
+    crate::cx_eprintln!(
         "cxrs: warning: skipped {} invalid JSON lines in {} (sample: {}). Run 'cx logs validate' for details.",
         invalid,
         log_file.display(),

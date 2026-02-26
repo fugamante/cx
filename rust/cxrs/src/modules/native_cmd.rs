@@ -95,8 +95,8 @@ fn handle_state(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
             _ => print_usage_error("state", &format!("{app_name} state set <key> <value>")),
         },
         other => {
-            eprintln!("{app_name}: unknown state subcommand '{other}'");
-            eprintln!("Usage: {app_name} state <show|get <key>|set <key> <value>>");
+            crate::cx_eprintln!("{app_name}: unknown state subcommand '{other}'");
+            crate::cx_eprintln!("Usage: {app_name} state <show|get <key>|set <key> <value>>");
             EXIT_USAGE
         }
     }
@@ -156,7 +156,7 @@ fn handle_optimize(args: &[String], deps: &NativeDeps) -> i32 {
     let (n, json_out) = match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("optimize", &e));
+            crate::cx_eprintln!("{}", format_error("optimize", &e));
             return EXIT_USAGE;
         }
     };
@@ -181,8 +181,8 @@ fn handle_quarantine(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 
             ),
         },
         other => {
-            eprintln!("{app_name}: unknown quarantine subcommand '{other}'");
-            eprintln!("Usage: {app_name} quarantine <list [N]|show <id>>");
+            crate::cx_eprintln!("{app_name}: unknown quarantine subcommand '{other}'");
+            crate::cx_eprintln!("Usage: {app_name} quarantine <list [N]|show <id>>");
             EXIT_USAGE
         }
     }
@@ -318,11 +318,11 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         .or_else(|| dispatch_runtime_commands(cmd, args, deps))
         .or_else(|| dispatch_structured_commands(cmd, app_name, args, deps))
         .unwrap_or_else(|| {
-            eprintln!(
+            crate::cx_eprintln!(
                 "{}",
                 format_error("native", &format!("unknown command '{cmd}'"))
             );
-            eprintln!("Run '{app_name} help' for usage.");
+            crate::cx_eprintln!("Run '{app_name} help' for usage.");
             EXIT_USAGE
         })
 }

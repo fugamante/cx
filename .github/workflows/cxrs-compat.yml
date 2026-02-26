@@ -44,7 +44,7 @@ jobs:
       - name: Quality gate
         run: |
           cd rust/cxrs
-          python3 tools/quality_gate.py --max-raw-eprintln 162
+          python3 tools/quality_gate.py --max-raw-eprintln 0
 
       - name: Compat check
         run: |

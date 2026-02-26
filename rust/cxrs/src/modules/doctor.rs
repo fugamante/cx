@@ -64,7 +64,7 @@ fn probe_json_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), 
     println!();
     println!("== llm json pipeline ({backend}) ==");
     let probe = run_llm_jsonl("ping").map_err(|e| {
-        eprintln!("FAIL: {backend} json pipeline failed: {e}");
+        crate::cx_eprintln!("FAIL: {backend} json pipeline failed: {e}");
         1
     })?;
     let mut agent_count = 0u64;
@@ -90,7 +90,7 @@ fn probe_json_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), 
     println!("agent_message events: {agent_count}");
     println!("reasoning events:     {reasoning_count}");
     if agent_count < 1 {
-        eprintln!("FAIL: expected >=1 agent_message event");
+        crate::cx_eprintln!("FAIL: expected >=1 agent_message event");
         return Err(1);
     }
     Ok(())
@@ -100,7 +100,7 @@ fn probe_text_pipeline(backend: &str, run_llm_jsonl: JsonlRunner) -> Result<(), 
     println!();
     println!("== _codex_text equivalent ==");
     let probe2 = run_llm_jsonl("2+2? (just the number)").map_err(|e| {
-        eprintln!("FAIL: {backend} text probe failed: {e}");
+        crate::cx_eprintln!("FAIL: {backend} text probe failed: {e}");
         1
     })?;
     let txt = extract_agent_text(&probe2).unwrap_or_default();
@@ -167,7 +167,7 @@ pub fn cmd_health(run_llm_jsonl: JsonlRunner, run_cxo: CxoRunner) -> i32 {
     match run_command_output_with_timeout(version_cmd, &format!("{llm_bin} --version")) {
         Ok(out) => print!("{}", String::from_utf8_lossy(&out.stdout)),
         Err(e) => {
-            eprintln!("cxrs health: {backend} --version failed: {e}");
+            crate::cx_eprintln!("cxrs health: {backend} --version failed: {e}");
             return 1;
         }
     }
@@ -176,7 +176,7 @@ pub fn cmd_health(run_llm_jsonl: JsonlRunner, run_cxo: CxoRunner) -> i32 {
     let jsonl = match run_llm_jsonl("ping") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs health: {backend} json failed: {e}");
+            crate::cx_eprintln!("cxrs health: {backend} json failed: {e}");
             return 1;
         }
     };

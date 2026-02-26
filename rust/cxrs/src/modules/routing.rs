@@ -167,7 +167,7 @@ pub fn cmd_routes(args: &[String]) -> i32 {
                 0
             }
             Err(e) => {
-                eprintln!("cxrs routes: failed to render json: {e}");
+                crate::cx_eprintln!("cxrs routes: failed to render json: {e}");
                 1
             }
         }

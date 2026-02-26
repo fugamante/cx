@@ -232,14 +232,14 @@ pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
     let schema_value = match run_next_schema(command, execute_task) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("next", &e));
+            crate::cx_eprintln!("{}", format_error("next", &e));
             return EXIT_RUNTIME;
         }
     };
     let commands = match parse_commands_array(&schema_value.to_string()) {
         Ok(v) => v,
         Err(reason) => {
-            eprintln!("cxrs next: {reason}");
+            crate::cx_eprintln!("cxrs next: {reason}");
             return EXIT_RUNTIME;
         }
     };
@@ -261,7 +261,7 @@ pub fn cmd_diffsum(staged: bool, execute_task: ExecuteTaskFn) -> i32 {
             EXIT_OK
         }
         Err(e) => {
-            eprintln!(
+            crate::cx_eprintln!(
                 "cxrs {}: {e}",
                 if staged { "diffsum-staged" } else { "diffsum" }
             );
@@ -278,7 +278,7 @@ pub fn cmd_commitjson(execute_task: ExecuteTaskFn) -> i32 {
                 EXIT_OK
             }
             Err(e) => {
-                eprintln!(
+                crate::cx_eprintln!(
                     "{}",
                     format_error("commitjson", &format!("render failure: {e}"))
                 );
@@ -286,7 +286,7 @@ pub fn cmd_commitjson(execute_task: ExecuteTaskFn) -> i32 {
             }
         },
         Err(e) => {
-            eprintln!("{}", format_error("commitjson", &e));
+            crate::cx_eprintln!("{}", format_error("commitjson", &e));
             EXIT_RUNTIME
         }
     }
@@ -296,7 +296,7 @@ pub fn cmd_commitmsg(execute_task: ExecuteTaskFn) -> i32 {
     let v = match generate_commitjson_value(execute_task) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("commitmsg", &e));
+            crate::cx_eprintln!("{}", format_error("commitmsg", &e));
             return EXIT_RUNTIME;
         }
     };

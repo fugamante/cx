@@ -23,7 +23,7 @@ pub struct TaskCmdDeps {
 
 pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     if let Err(e) = set_task_status(id, new_status) {
-        eprintln!("cxrs task: {e}");
+        crate::cx_eprintln!("cxrs task: {e}");
         return 1;
     }
     if new_status == "in_progress" {
@@ -44,18 +44,18 @@ fn parse_status_filter(args: &[String], usage: &str, prefix: &str) -> Result<Str
         match args[i].as_str() {
             "--status" => {
                 let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    eprintln!("{usage}");
+                    crate::cx_eprintln!("{usage}");
                     return Err(2);
                 };
                 if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
-                    eprintln!("{prefix}: invalid status '{v}'");
+                    crate::cx_eprintln!("{prefix}: invalid status '{v}'");
                     return Err(2);
                 }
                 status_filter = v.to_string();
                 i += 2;
             }
             other => {
-                eprintln!("{prefix}: unknown flag '{other}'");
+                crate::cx_eprintln!("{prefix}: unknown flag '{other}'");
                 return Err(2);
             }
         }
@@ -72,18 +72,18 @@ fn handle_list(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         match args[i].as_str() {
             "--status" => {
                 let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    eprintln!("{usage}");
+                    crate::cx_eprintln!("{usage}");
                     return 2;
                 };
                 if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
-                    eprintln!("cxrs task list: invalid status '{v}'");
+                    crate::cx_eprintln!("cxrs task list: invalid status '{v}'");
                     return 2;
                 }
                 status_filter = Some(v);
                 i += 2;
             }
             other => {
-                eprintln!("cxrs task list: unknown flag '{other}'");
+                crate::cx_eprintln!("cxrs task list: unknown flag '{other}'");
                 return 2;
             }
         }
@@ -93,14 +93,14 @@ fn handle_list(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
 
 fn require_id(app_name: &str, args: &[String], cmd: &str) -> Result<String, i32> {
     args.get(1).cloned().ok_or_else(|| {
-        eprintln!("Usage: {app_name} task {cmd} <id>");
+        crate::cx_eprintln!("Usage: {app_name} task {cmd} <id>");
         2
     })
 }
 
 fn handle_fanout(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     if args.len() < 2 {
-        eprintln!("Usage: {app_name} task fanout <objective>");
+        crate::cx_eprintln!("Usage: {app_name} task fanout <objective>");
         return 2;
     }
     let mut objective_parts: Vec<String> = Vec::new();
@@ -109,7 +109,7 @@ fn handle_fanout(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     while i < args.len() {
         if args[i] == "--from" {
             let Some(v) = args.get(i + 1).map(String::as_str) else {
-                eprintln!(
+                crate::cx_eprintln!(
                     "Usage: {app_name} task fanout <objective> [--from staged-diff|worktree|log|file:PATH]"
                 );
                 return 2;
@@ -138,7 +138,7 @@ fn parse_task_run_overrides(
         match args[i].as_str() {
             "--mode" => {
                 let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    eprintln!("{usage}");
+                    crate::cx_eprintln!("{usage}");
                     return Err(2);
                 };
                 mode_override = Some(v.to_string());
@@ -146,14 +146,14 @@ fn parse_task_run_overrides(
             }
             "--backend" => {
                 let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    eprintln!("{usage}");
+                    crate::cx_eprintln!("{usage}");
                     return Err(2);
                 };
                 backend_override = Some(v.to_string());
                 i += 2;
             }
             other => {
-                eprintln!("cxrs task run: unknown flag '{other}'");
+                crate::cx_eprintln!("cxrs task run: unknown flag '{other}'");
                 return Err(2);
             }
         }
@@ -163,7 +163,7 @@ fn parse_task_run_overrides(
 
 fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     let Some(id) = args.get(1).cloned() else {
-        eprintln!(
+        crate::cx_eprintln!(
             "Usage: {app_name} task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]"
         );
         return 2;
@@ -188,7 +188,7 @@ fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             code
         }
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             1
         }
     }
@@ -205,7 +205,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     let tasks = match (deps.read_tasks)() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
@@ -228,11 +228,11 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                     ok += 1;
                 } else {
                     failed += 1;
-                    eprintln!("cxrs task run-all: task failed: {id}");
+                    crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
                 }
             }
             Err(e) => {
-                eprintln!("cxrs task run-all: critical error for {id}: {e}");
+                crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
                 return 1;
             }
         }
@@ -267,7 +267,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &TaskCmdDeps) -> i32 {
         "run" => handle_run(app_name, args, deps),
         "run-all" => handle_run_all(app_name, args, deps),
         _ => {
-            eprintln!(
+            crate::cx_eprintln!(
                 "Usage: {app_name} task <add|list|show|claim|complete|fail|fanout|run|run-all> ..."
             );
             2

@@ -37,7 +37,7 @@ fn role_header(role: &str) -> Option<&'static str> {
 pub fn cmd_roles(role: Option<&str>) -> i32 {
     if let Some(r) = role {
         let Some(header) = role_header(r) else {
-            eprintln!("cxrs roles: unknown role '{r}'");
+            crate::cx_eprintln!("cxrs roles: unknown role '{r}'");
             return 2;
         };
         println!("{header}");
@@ -49,7 +49,7 @@ pub fn cmd_roles(role: Option<&str>) -> i32 {
 pub fn cmd_prompt(mode: &str, request: &str) -> i32 {
     let valid = ["implement", "fix", "test", "doc", "ops"];
     if !valid.contains(&mode) {
-        eprintln!("cxrs prompt: invalid mode '{mode}' (use implement|fix|test|doc|ops)");
+        crate::cx_eprintln!("cxrs prompt: invalid mode '{mode}' (use implement|fix|test|doc|ops)");
         return 2;
     }
     let mode_goal = match mode {
@@ -186,14 +186,14 @@ fn load_promptlint_runs(
     n: usize,
 ) -> Result<(std::path::PathBuf, Vec<crate::types::RunEntry>), i32> {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("cxrs: unable to resolve log file");
         return Err(1);
     };
     if !log_file.exists() {
         return Ok((log_file, Vec::new()));
     }
     let runs = load_runs(&log_file, n).map_err(|e| {
-        eprintln!("cxrs promptlint: {e}");
+        crate::cx_eprintln!("cxrs promptlint: {e}");
         1
     })?;
     Ok((log_file, runs))

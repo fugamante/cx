@@ -68,16 +68,19 @@ pub fn rtk_is_usable() -> bool {
     let ver_raw = rtk_version_raw().unwrap_or_default();
     let Some(cur) = parse_semver_triplet(&ver_raw) else {
         if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
-            eprintln!("cxrs: unable to parse rtk version; falling back to raw command output.");
+            crate::cx_eprintln!(
+                "cxrs: unable to parse rtk version; falling back to raw command output."
+            );
         }
         return false;
     };
     let min = parse_semver_triplet(&min_v).unwrap_or((0, 0, 0));
     if semver_cmp(cur, min) < 0 {
         if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
-            eprintln!(
+            crate::cx_eprintln!(
                 "cxrs: rtk version '{}' is below supported minimum '{}'; falling back to raw command output.",
-                ver_raw, min_v
+                ver_raw,
+                min_v
             );
         }
         return false;
@@ -86,9 +89,10 @@ pub fn rtk_is_usable() -> bool {
         let max = parse_semver_triplet(&max_v).unwrap_or((u64::MAX, u64::MAX, u64::MAX));
         if semver_cmp(cur, max) > 0 {
             if !RTK_WARNED_UNSUPPORTED.swap(true, Ordering::SeqCst) {
-                eprintln!(
+                crate::cx_eprintln!(
                     "cxrs: rtk version '{}' is above supported maximum '{}'; falling back to raw command output.",
-                    ver_raw, max_v
+                    ver_raw,
+                    max_v
                 );
             }
             return false;

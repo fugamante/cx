@@ -28,7 +28,7 @@ fn print_json_value(prefix: &str, v: &Value) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("{prefix}: failed to render JSON: {e}");
+            crate::cx_eprintln!("{prefix}: failed to render JSON: {e}");
             1
         }
     }
@@ -36,7 +36,7 @@ fn print_json_value(prefix: &str, v: &Value) -> i32 {
 
 fn load_runs_for(command: &str, n: usize) -> Result<(std::path::PathBuf, Vec<RunEntry>), i32> {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("cxrs: unable to resolve log file");
         return Err(1);
     };
     if !log_file.exists() {
@@ -45,7 +45,7 @@ fn load_runs_for(command: &str, n: usize) -> Result<(std::path::PathBuf, Vec<Run
     match load_runs(&log_file, n) {
         Ok(v) => Ok((log_file, v)),
         Err(e) => {
-            eprintln!("cxrs {command}: {e}");
+            crate::cx_eprintln!("cxrs {command}: {e}");
             Err(1)
         }
     }

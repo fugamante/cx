@@ -236,7 +236,7 @@ pub fn run_task_by_id(
 
     finalize_task_status(runner, id, status_code)?;
     if let Some(e) = objective_err {
-        eprintln!("cxrs task run: objective failed for {id}: {e}");
+        crate::cx_eprintln!("cxrs task run: objective failed for {id}: {e}");
     }
     Ok((status_code, execution_id))
 }

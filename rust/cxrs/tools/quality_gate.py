@@ -5,6 +5,7 @@ import re
 import sys
 
 PAT_FN = re.compile(r"^\s*(pub\s+)?(async\s+)?fn\s+([A-Za-z0-9_]+)\s*\(")
+PAT_RAW_EPRINTLN = re.compile(r"(?<![A-Za-z0-9_])eprintln!\(")
 
 
 def file_violations(src_root: pathlib.Path, max_lines: int):
@@ -53,7 +54,7 @@ def error_pattern_count(src_root: pathlib.Path):
     count = 0
     for path in sorted(src_root.rglob("*.rs")):
         text = path.read_text(encoding="utf-8")
-        count += text.count("eprintln!(")
+        count += len(PAT_RAW_EPRINTLN.findall(text))
     return count
 
 

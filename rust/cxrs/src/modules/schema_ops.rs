@@ -11,18 +11,18 @@ use crate::schema::list_schemas;
 pub fn cmd_schema(app_name: &str, args: &[String]) -> i32 {
     let sub = args.first().map(String::as_str).unwrap_or("list");
     if sub != "list" {
-        eprintln!("Usage: {app_name} schema list [--json]");
+        crate::cx_eprintln!("Usage: {app_name} schema list [--json]");
         return 2;
     }
     let as_json = args.iter().any(|a| a == "--json");
     let Some(dir) = resolve_schema_dir() else {
-        eprintln!("cxrs schema: unable to resolve schema directory");
+        crate::cx_eprintln!("cxrs schema: unable to resolve schema directory");
         return 1;
     };
     let schemas = match list_schemas() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs schema: {e}");
+            crate::cx_eprintln!("cxrs schema: {e}");
             return 1;
         }
     };
@@ -67,7 +67,7 @@ struct CiArgs {
 fn parse_ci_args(app_name: &str, args: &[String]) -> Result<CiArgs, i32> {
     let sub = args.first().map(String::as_str).unwrap_or("validate");
     if sub != "validate" {
-        eprintln!("Usage: {app_name} ci validate [--strict] [--legacy-ok] [--json]");
+        crate::cx_eprintln!("Usage: {app_name} ci validate [--strict] [--legacy-ok] [--json]");
         return Err(2);
     }
     Ok(CiArgs {
@@ -254,7 +254,7 @@ pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
     };
 
     let Some(root) = repo_root() else {
-        eprintln!("cxrs ci validate: not inside a git repository");
+        crate::cx_eprintln!("cxrs ci validate: not inside a git repository");
         return 2;
     };
 

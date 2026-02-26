@@ -10,7 +10,7 @@ pub fn cmd_state_show() -> i32 {
     let (_state_file, state) = match ensure_state_value() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs state show: {e}");
+            crate::cx_eprintln!("cxrs state show: {e}");
             return 1;
         }
     };
@@ -20,7 +20,7 @@ pub fn cmd_state_show() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("cxrs state show: failed to render JSON: {e}");
+            crate::cx_eprintln!("cxrs state show: failed to render JSON: {e}");
             1
         }
     }
@@ -30,13 +30,13 @@ pub fn cmd_state_get(key: &str) -> i32 {
     let (state_file, state) = match ensure_state_value() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs state get: {e}");
+            crate::cx_eprintln!("cxrs state get: {e}");
             return 1;
         }
     };
     let Some(v) = value_at_path(&state, key) else {
-        eprintln!("cxrs state get: key not found: {key}");
-        eprintln!("state_file: {}", state_file.display());
+        crate::cx_eprintln!("cxrs state get: key not found: {key}");
+        crate::cx_eprintln!("state_file: {}", state_file.display());
         return 1;
     };
     match v {
@@ -50,16 +50,16 @@ pub fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
     let (state_file, mut state) = match ensure_state_value() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs state set: {e}");
+            crate::cx_eprintln!("cxrs state set: {e}");
             return 1;
         }
     };
     if let Err(e) = set_value_at_path(&mut state, key, parse_cli_value(raw_value)) {
-        eprintln!("cxrs state set: {e}");
+        crate::cx_eprintln!("cxrs state set: {e}");
         return 1;
     }
     if let Err(e) = write_json_atomic(&state_file, &state) {
-        eprintln!("cxrs state set: {e}");
+        crate::cx_eprintln!("cxrs state set: {e}");
         return 1;
     }
     state_cache_clear();
@@ -68,7 +68,7 @@ pub fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
 }
 
 fn print_llm_usage(app_name: &str) {
-    eprintln!(
+    crate::cx_eprintln!(
         "Usage: {app_name} llm <show|use <codex|ollama> [model]|unset <backend|model|all>|set-backend <codex|ollama>|set-model <model>|clear-model>"
     );
 }
@@ -103,7 +103,7 @@ fn llm_use(app_name: &str, args: &[String]) -> i32 {
         return 2;
     }
     if let Err(e) = set_state_path("preferences.llm_backend", Value::String(target.clone())) {
-        eprintln!("cxrs llm use: {e}");
+        crate::cx_eprintln!("cxrs llm use: {e}");
         return 1;
     }
     if target == "ollama" {
@@ -115,7 +115,7 @@ fn llm_use(app_name: &str, args: &[String]) -> i32 {
             }
             if let Err(e) = set_state_path("preferences.ollama_model", Value::String(m.to_string()))
             {
-                eprintln!("cxrs llm use: {e}");
+                crate::cx_eprintln!("cxrs llm use: {e}");
                 return 1;
             }
         }
@@ -138,7 +138,7 @@ fn llm_unset(app_name: &str, args: &[String]) -> i32 {
     match target {
         "backend" => {
             if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                eprintln!("cxrs llm unset backend: {e}");
+                crate::cx_eprintln!("cxrs llm unset backend: {e}");
                 return 1;
             }
             println!("ok");
@@ -147,7 +147,7 @@ fn llm_unset(app_name: &str, args: &[String]) -> i32 {
         }
         "model" => {
             if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                eprintln!("cxrs llm unset model: {e}");
+                crate::cx_eprintln!("cxrs llm unset model: {e}");
                 return 1;
             }
             println!("ok");
@@ -156,11 +156,11 @@ fn llm_unset(app_name: &str, args: &[String]) -> i32 {
         }
         "all" => {
             if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                eprintln!("cxrs llm unset all: {e}");
+                crate::cx_eprintln!("cxrs llm unset all: {e}");
                 return 1;
             }
             if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                eprintln!("cxrs llm unset all: {e}");
+                crate::cx_eprintln!("cxrs llm unset all: {e}");
                 return 1;
             }
             println!("ok");
@@ -185,7 +185,7 @@ fn llm_set_backend(app_name: &str, args: &[String]) -> i32 {
         return 2;
     }
     if let Err(e) = set_state_path("preferences.llm_backend", Value::String(v.clone())) {
-        eprintln!("cxrs llm set-backend: {e}");
+        crate::cx_eprintln!("cxrs llm set-backend: {e}");
         return 1;
     }
     println!("ok");
@@ -206,7 +206,7 @@ fn llm_set_model(app_name: &str, args: &[String]) -> i32 {
         "preferences.ollama_model",
         Value::String(model.trim().to_string()),
     ) {
-        eprintln!("cxrs llm set-model: {e}");
+        crate::cx_eprintln!("cxrs llm set-model: {e}");
         return 1;
     }
     println!("ok");
@@ -216,7 +216,7 @@ fn llm_set_model(app_name: &str, args: &[String]) -> i32 {
 
 fn llm_clear_model() -> i32 {
     if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-        eprintln!("cxrs llm clear-model: {e}");
+        crate::cx_eprintln!("cxrs llm clear-model: {e}");
         return 1;
     }
     println!("ok");
@@ -233,7 +233,7 @@ pub fn cmd_llm(app_name: &str, args: &[String]) -> i32 {
         "set-model" => llm_set_model(app_name, args),
         "clear-model" => llm_clear_model(),
         other => {
-            eprintln!("{app_name} llm: unknown subcommand '{other}'");
+            crate::cx_eprintln!("{app_name} llm: unknown subcommand '{other}'");
             print_llm_usage(app_name);
             2
         }

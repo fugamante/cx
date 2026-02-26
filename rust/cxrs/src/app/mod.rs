@@ -152,7 +152,7 @@ fn cmd_parity() -> i32 {
 fn cmd_chunk() -> i32 {
     let mut buf = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
-        eprintln!("cxrs chunk: failed to read stdin: {e}");
+        crate::cx_eprintln!("cxrs chunk: failed to read stdin: {e}");
         return 1;
     }
     let budget = app_config().budget_chars;

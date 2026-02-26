@@ -61,7 +61,7 @@ fn print_runs(runs: &[RunEntry]) {
 
 pub fn print_worklog(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("cxrs: unable to resolve log file");
         return 1;
     };
     if !log_file.exists() {
@@ -71,7 +71,7 @@ pub fn print_worklog(n: usize) -> i32 {
     let runs = match load_runs(&log_file, n) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs worklog: {e}");
+            crate::cx_eprintln!("cxrs worklog: {e}");
             return 1;
         }
     };

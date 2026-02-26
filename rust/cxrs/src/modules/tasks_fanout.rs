@@ -31,7 +31,7 @@ fn collect_source_text(source: &str) -> Result<String, i32> {
             return Ok(fs::read_to_string(p).unwrap_or_default());
         }
         _ => {
-            eprintln!("cxrs task fanout: unsupported --from source '{source}'");
+            crate::cx_eprintln!("cxrs task fanout: unsupported --from source '{source}'");
             return Err(2);
         }
     };
@@ -169,13 +169,13 @@ fn print_fanout_table(parent_id: &str, created: Vec<TaskRecord>) {
 pub fn cmd_task_fanout(app_name: &str, objective: &str, from: Option<&str>) -> i32 {
     let obj = objective.trim();
     if obj.is_empty() {
-        eprintln!("Usage: {app_name} task fanout <objective>");
+        crate::cx_eprintln!("Usage: {app_name} task fanout <objective>");
         return 2;
     }
     let mut tasks = match read_tasks() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
@@ -201,7 +201,7 @@ pub fn cmd_task_fanout(app_name: &str, objective: &str, from: Option<&str>) -> i
     );
 
     if let Err(e) = write_tasks(&tasks) {
-        eprintln!("cxrs task fanout: {e}");
+        crate::cx_eprintln!("cxrs task fanout: {e}");
         return 1;
     }
     print_fanout_table(&parent_id, created);

@@ -117,7 +117,7 @@ fn read_quarantine_rows(qdir: &std::path::Path, n: usize) -> Vec<QuarantineRecor
 
 pub fn cmd_quarantine_list(n: usize) -> i32 {
     let Some(qdir) = resolve_quarantine_dir() else {
-        eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
+        crate::cx_eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
         return 1;
     };
     if !qdir.exists() {
@@ -141,7 +141,7 @@ pub fn cmd_quarantine_show(id: &str) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs quarantine show: {e}");
+            crate::cx_eprintln!("cxrs quarantine show: {e}");
             return 1;
         }
     };
@@ -151,7 +151,7 @@ pub fn cmd_quarantine_show(id: &str) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("cxrs quarantine show: failed to render JSON: {e}");
+            crate::cx_eprintln!("cxrs quarantine show: failed to render JSON: {e}");
             1
         }
     }

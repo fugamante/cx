@@ -2,7 +2,7 @@ use chrono::Utc;
 use std::env;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -43,11 +43,11 @@ fn run_command_for_bench(
 
 fn validate_bench_args(app_name: &str, runs: usize, command: &[String]) -> Result<(), i32> {
     if runs == 0 {
-        eprintln!("cxrs bench: runs must be > 0");
+        crate::cx_eprintln!("cxrs bench: runs must be > 0");
         return Err(2);
     }
     if command.is_empty() {
-        eprintln!("Usage: {app_name} bench <runs> -- <command...>");
+        crate::cx_eprintln!("Usage: {app_name} bench <runs> -- <command...>");
         return Err(2);
     }
     Ok(())
@@ -76,7 +76,7 @@ pub fn cmd_bench(app_name: &str, runs: usize, command: &[String]) -> i32 {
         let code = match run_command_for_bench(command, disable_cx_log, passthru) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("cxrs bench: {e}");
+                crate::cx_eprintln!("cxrs bench: {e}");
                 return 1;
             }
         };
@@ -221,10 +221,48 @@ fn run_bash_case(
 fn resolve_parity_context() -> Result<(PathBuf, std::path::PathBuf, usize), i32> {
     let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
     let exe = env::current_exe().map_err(|e| {
-        eprintln!("cxparity: cannot resolve current executable: {e}");
+        crate::cx_eprintln!("cxparity: cannot resolve current executable: {e}");
         1
     })?;
     Ok((repo, exe, app_config().budget_chars))
+}
+
+fn parity_rows(
+    overlap: Vec<(&'static str, Vec<&'static str>, Option<Vec<&'static str>>)>,
+    repo: &Path,
+    exe: &Path,
+    temp_repo: &Path,
+    temp_log_file: &Path,
+    budget_chars: usize,
+) -> (Vec<ParityRow>, bool) {
+    let mut rows: Vec<ParityRow> = Vec::new();
+    let mut pass_all = true;
+    for (cmd, args, schema_keys) in overlap {
+        let row = evaluate_parity_case(
+            repo,
+            exe,
+            temp_repo,
+            temp_log_file,
+            budget_chars,
+            cmd,
+            &args,
+            &schema_keys,
+        );
+        if !(row.rust_ok && row.bash_ok && row.json_ok && row.logs_ok && row.budget_ok) {
+            pass_all = false;
+            crate::cx_eprintln!(
+                "cxparity: FAIL {} rust_ok={} bash_ok={} json_ok={} logs_ok={} budget_ok={}",
+                row.cmd,
+                row.rust_ok,
+                row.bash_ok,
+                row.json_ok,
+                row.logs_ok,
+                row.budget_ok
+            );
+        }
+        rows.push(row);
+    }
+    (rows, pass_all)
 }
 
 pub fn cmd_parity() -> i32 {
@@ -235,7 +273,7 @@ pub fn cmd_parity() -> i32 {
     let temp_repo = match setup_temp_repo() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            crate::cx_eprintln!("{e}");
             return 1;
         }
     };
@@ -245,30 +283,16 @@ pub fn cmd_parity() -> i32 {
         return parity_error(&temp_repo, "cxparity: no overlap commands found");
     }
 
-    let mut rows: Vec<ParityRow> = Vec::new();
-    let mut pass_all = true;
-    for (cmd, args, schema_keys) in overlap {
-        let row = evaluate_parity_case(
-            &repo,
-            &exe,
-            &temp_repo,
-            &temp_log_file,
-            budget_chars,
-            cmd,
-            &args,
-            &schema_keys,
-        );
-        if !(row.rust_ok && row.bash_ok && row.json_ok && row.logs_ok && row.budget_ok) {
-            pass_all = false;
-            eprintln!(
-                "cxparity: FAIL {} rust_ok={} bash_ok={} json_ok={} logs_ok={} budget_ok={}",
-                row.cmd, row.rust_ok, row.bash_ok, row.json_ok, row.logs_ok, row.budget_ok
-            );
-        }
-        rows.push(row);
-    }
+    let (rows, pass_all) = parity_rows(
+        overlap,
+        &repo,
+        &exe,
+        &temp_repo,
+        &temp_log_file,
+        budget_chars,
+    );
     if let Err(e) = fs::remove_dir_all(&temp_repo) {
-        eprintln!(
+        crate::cx_eprintln!(
             "cxparity: WARN failed to cleanup temp repo {}: {e}",
             temp_repo.display()
         );
@@ -279,9 +303,9 @@ pub fn cmd_parity() -> i32 {
 }
 
 fn parity_error(temp_repo: &std::path::Path, message: &str) -> i32 {
-    eprintln!("{message}");
+    crate::cx_eprintln!("{message}");
     if let Err(e) = fs::remove_dir_all(temp_repo) {
-        eprintln!(
+        crate::cx_eprintln!(
             "cxparity: WARN failed to cleanup temp repo {}: {e}",
             temp_repo.display()
         );

@@ -17,7 +17,7 @@ fn parse_migrate_args(app_name: &str, args: &[String]) -> Result<MigrateArgs, i3
         match args[i].as_str() {
             "--out" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("Usage: {app_name} logs migrate [--out PATH] [--in-place]");
+                    crate::cx_eprintln!("Usage: {app_name} logs migrate [--out PATH] [--in-place]");
                     return Err(2);
                 };
                 out_path = Some(PathBuf::from(v));
@@ -28,8 +28,8 @@ fn parse_migrate_args(app_name: &str, args: &[String]) -> Result<MigrateArgs, i3
                 i += 1;
             }
             other => {
-                eprintln!("{app_name} logs migrate: unknown flag '{other}'");
-                eprintln!("Usage: {app_name} logs migrate [--out PATH] [--in-place]");
+                crate::cx_eprintln!("{app_name} logs migrate: unknown flag '{other}'");
+                crate::cx_eprintln!("Usage: {app_name} logs migrate [--out PATH] [--in-place]");
                 return Err(2);
             }
         }
@@ -78,7 +78,7 @@ fn validate_outcome_status(outcome: &LogValidateOutcome) -> i32 {
 fn handle_validate(app_name: &str, args: &[String]) -> i32 {
     let legacy_ok = args.iter().any(|a| a == "--legacy-ok");
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("{app_name} logs validate: unable to resolve log file");
+        crate::cx_eprintln!("{app_name} logs validate: unable to resolve log file");
         return 1;
     };
     if !log_file.exists() {
@@ -91,7 +91,7 @@ fn handle_validate(app_name: &str, args: &[String]) -> i32 {
     let outcome = match validate_runs_jsonl_file(&log_file, legacy_ok) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{app_name} logs validate: {e}");
+            crate::cx_eprintln!("{app_name} logs validate: {e}");
             return 1;
         }
     };
@@ -105,7 +105,7 @@ fn migrate_in_place(app_name: &str, log_file: &Path, target: &Path) -> Result<()
         chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
     ));
     if let Err(e) = fs::copy(log_file, &bak) {
-        eprintln!(
+        crate::cx_eprintln!(
             "{app_name} logs migrate: failed to backup {} -> {}: {e}",
             log_file.display(),
             bak.display()
@@ -113,12 +113,12 @@ fn migrate_in_place(app_name: &str, log_file: &Path, target: &Path) -> Result<()
         return Err(1);
     }
     if let Err(e) = fs::rename(target, log_file) {
-        eprintln!(
+        crate::cx_eprintln!(
             "{app_name} logs migrate: failed to replace {} with {}: {e}",
             log_file.display(),
             target.display()
         );
-        eprintln!("backup: {}", bak.display());
+        crate::cx_eprintln!("backup: {}", bak.display());
         return Err(1);
     }
     println!("backup: {}", bak.display());
@@ -128,11 +128,11 @@ fn migrate_in_place(app_name: &str, log_file: &Path, target: &Path) -> Result<()
 
 fn handle_migrate(app_name: &str, args: &[String]) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        eprintln!("{app_name} logs migrate: unable to resolve log file");
+        crate::cx_eprintln!("{app_name} logs migrate: unable to resolve log file");
         return 1;
     };
     if !log_file.exists() {
-        eprintln!(
+        crate::cx_eprintln!(
             "{app_name} logs migrate: no log file at {}",
             log_file.display()
         );
@@ -155,7 +155,7 @@ fn handle_migrate(app_name: &str, args: &[String]) -> i32 {
     let summary = match migrate_runs_jsonl(&log_file, &target) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{app_name} logs migrate: {e}");
+            crate::cx_eprintln!("{app_name} logs migrate: {e}");
             return 1;
         }
     };
@@ -181,7 +181,9 @@ pub fn cmd_logs(app_name: &str, args: &[String]) -> i32 {
         "validate" => handle_validate(app_name, args),
         "migrate" => handle_migrate(app_name, args),
         other => {
-            eprintln!("Usage: {app_name} logs <validate|migrate> (unknown subcommand: {other})");
+            crate::cx_eprintln!(
+                "Usage: {app_name} logs <validate|migrate> (unknown subcommand: {other})"
+            );
             2
         }
     }

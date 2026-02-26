@@ -79,15 +79,15 @@ pub fn resolve_ollama_model_for_run() -> Result<String, String> {
     }
 
     let models = ollama_list_models();
-    eprintln!("cxrs: no default Ollama model configured.");
+    crate::cx_eprintln!("cxrs: no default Ollama model configured.");
     if models.is_empty() {
-        eprintln!("No local models found from 'ollama list'.");
-        eprintln!("Pull one first (example: ollama pull llama3.1) then set it.");
+        crate::cx_eprintln!("No local models found from 'ollama list'.");
+        crate::cx_eprintln!("Pull one first (example: ollama pull llama3.1) then set it.");
         return Err("ollama model selection aborted".to_string());
     }
-    eprintln!("Select a default model (persisted to .codex/state.json):");
+    crate::cx_eprintln!("Select a default model (persisted to .codex/state.json):");
     for (idx, m) in models.iter().enumerate() {
-        eprintln!("  {}. {}", idx + 1, m);
+        crate::cx_eprintln!("  {}. {}", idx + 1, m);
     }
     eprint!("Enter number or model name: ");
     let _ = io::stderr().flush();
@@ -108,7 +108,7 @@ pub fn resolve_ollama_model_for_run() -> Result<String, String> {
         selected_raw.to_string()
     };
     set_state_path("preferences.ollama_model", Value::String(selected.clone()))?;
-    eprintln!("cxrs: default Ollama model set to '{}'.", selected);
+    crate::cx_eprintln!("cxrs: default Ollama model set to '{}'.", selected);
     Ok(selected)
 }
 

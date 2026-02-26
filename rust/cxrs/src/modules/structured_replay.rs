@@ -17,11 +17,11 @@ fn log_replay_schema_failure(rec: &crate::types::QuarantineRecord, reason: &str,
         &rec.prompt,
         Vec::new(),
     ) {
-        Ok(qid) => eprintln!(
+        Ok(qid) => crate::cx_eprintln!(
             "{}",
             format_error("replay", &format!("{reason}; quarantine_id={qid}"))
         ),
-        Err(e) => eprintln!(
+        Err(e) => crate::cx_eprintln!(
             "{}",
             format_error("replay", &format!("failed to log schema failure: {e}"))
         ),
@@ -39,13 +39,13 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("replay", &e));
+            crate::cx_eprintln!("{}", format_error("replay", &e));
             return EXIT_RUNTIME;
         }
     };
 
     if let Err(e) = ensure_quarantine_payload(&rec) {
-        eprintln!("{}", format_error("replay", &e));
+        crate::cx_eprintln!("{}", format_error("replay", &e));
         return EXIT_RUNTIME;
     }
 
@@ -53,7 +53,7 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     let jsonl = match run_llm_jsonl(&full_prompt) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{}", format_error("replay", &e));
+            crate::cx_eprintln!("{}", format_error("replay", &e));
             return EXIT_RUNTIME;
         }
     };
@@ -65,8 +65,8 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
 
     if serde_json::from_str::<Value>(&raw).is_err() {
         log_replay_schema_failure(&rec, "invalid_json", &raw);
-        eprintln!("{}", format_error("replay", "raw response follows:"));
-        eprintln!("{raw}");
+        crate::cx_eprintln!("{}", format_error("replay", "raw response follows:"));
+        crate::cx_eprintln!("{raw}");
         return EXIT_RUNTIME;
     }
 

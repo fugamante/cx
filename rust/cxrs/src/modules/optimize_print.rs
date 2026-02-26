@@ -145,7 +145,7 @@ pub fn print_optimize(n: usize, json_out: bool) -> i32 {
     let report = match optimize_report(n) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs optimize: {e}");
+            crate::cx_eprintln!("cxrs optimize: {e}");
             return 1;
         }
     };
