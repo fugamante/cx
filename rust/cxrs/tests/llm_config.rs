@@ -21,9 +21,12 @@ impl TempRepo {
         fs::create_dir_all(&root).expect("create temp repo dir");
         fs::create_dir_all(&home).expect("create temp home dir");
 
+        let template_dir = root.join(".git-template");
+        fs::create_dir_all(&template_dir).expect("create git template dir");
         let init = Command::new("git")
             .arg("init")
             .arg("-q")
+            .arg(format!("--template={}", template_dir.display()))
             .current_dir(&root)
             .output()
             .expect("run git init");

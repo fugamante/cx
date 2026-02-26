@@ -29,11 +29,11 @@ fn command_has_write_pattern(lower: &str) -> bool {
         || lower.contains("chown ")
 }
 
-fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
-    let root_s = repo_root.to_string_lossy().to_string();
+fn collect_write_candidates(cmd: &str) -> Vec<String> {
     let tokens: Vec<String> = cmd.split_whitespace().map(normalize_token).collect();
     let mut candidates: Vec<String> = Vec::new();
     let last = tokens.last().cloned().unwrap_or_default();
+
     for i in 0..tokens.len() {
         let t = tokens[i].as_str();
         if (t == ">" || t == ">>" || t == "tee")
@@ -49,14 +49,14 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
         if let Some(path) = t.strip_prefix("of=") {
             candidates.push(path.to_string());
         }
-        if t.starts_with('/') {
+        if t.starts_with('/') || t.starts_with("~/") || t == "~" {
             candidates.push(t.to_string());
         }
-        if t.starts_with("~/") || t == "~" || t.starts_with("$HOME") || t.starts_with("${HOME}") {
+        if t.starts_with("$HOME") || t.starts_with("${HOME}") {
             candidates.push(t.to_string());
         }
     }
-    // For cp/mv/install, treat the last argument as destination.
+
     if tokens
         .iter()
         .any(|t| t == "cp" || t == "mv" || t == "install")
@@ -64,61 +64,58 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
     {
         candidates.push(last);
     }
-    candidates.into_iter().any(|p| {
-        let p = p.trim().to_string();
-        if p.is_empty() {
-            return false;
-        }
-        // Any parent traversal in a write target is treated as unsafe (can escape repo root).
-        if p.contains("..") {
-            return true;
-        }
-        if p.starts_with("~/") || p == "~" || p.starts_with("$HOME") || p.starts_with("${HOME}") {
-            return true;
-        }
-        if !p.starts_with('/') {
-            return false;
-        }
-        if p.starts_with(&(root_s.clone() + "/")) || p == root_s {
-            return false;
-        }
-        true
-    })
+    candidates
 }
 
-pub fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
-    let compact = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
-    let lower = compact.to_lowercase();
-
-    if lower.contains(" sudo ") || lower.starts_with("sudo ") || lower.ends_with(" sudo") {
-        return SafetyDecision::Dangerous("contains sudo".to_string());
+fn path_is_outside_repo(p: &str, repo_root: &Path) -> bool {
+    let root_s = repo_root.to_string_lossy().to_string();
+    let path = p.trim();
+    if path.is_empty() {
+        return false;
     }
-    if lower.contains("rm -rf")
+    if path.contains("..") || path.starts_with("~/") || path == "~" {
+        return true;
+    }
+    if path.starts_with("$HOME") || path.starts_with("${HOME}") {
+        return true;
+    }
+    if !path.starts_with('/') {
+        return false;
+    }
+    !(path == root_s || path.starts_with(&(root_s + "/")))
+}
+
+fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
+    collect_write_candidates(cmd)
+        .into_iter()
+        .any(|p| path_is_outside_repo(&p, repo_root))
+}
+
+fn matches_sudo(lower: &str) -> bool {
+    lower.contains(" sudo ") || lower.starts_with("sudo ") || lower.ends_with(" sudo")
+}
+
+fn matches_rm_rf(lower: &str) -> bool {
+    lower.contains("rm -rf")
         || lower.contains("rm -fr")
         || lower.contains("rm -r -f")
         || lower.contains("rm -f -r")
-    {
-        return SafetyDecision::Dangerous("contains rm -rf pattern".to_string());
-    }
-    if lower.contains("curl ")
+}
+
+fn matches_curl_pipe_shell(lower: &str) -> bool {
+    lower.contains("curl ")
         && lower.contains('|')
         && (lower.contains("| bash") || lower.contains("| sh") || lower.contains("| zsh"))
-    {
-        return SafetyDecision::Dangerous("contains curl pipe shell pattern".to_string());
-    }
-    if (lower.contains("chmod ") || lower.contains("chown "))
+}
+
+fn matches_protected_chmod_chown(lower: &str) -> bool {
+    (lower.contains("chmod ") || lower.contains("chown "))
         && (lower.contains("/system") || lower.contains("/library") || lower.contains("/usr"))
         && !lower.contains("/usr/local")
-    {
-        return SafetyDecision::Dangerous("chmod/chown on protected system path".to_string());
-    }
-    if (lower.contains("chmod ") || lower.contains("chown "))
-        && command_has_write_pattern(&lower)
-        && write_targets_outside_repo(&compact, repo_root)
-    {
-        return SafetyDecision::Dangerous("chmod/chown target outside repo root".to_string());
-    }
-    if (lower.contains("> /system")
+}
+
+fn matches_protected_redirect(lower: &str) -> bool {
+    let writes_protected = lower.contains("> /system")
         || lower.contains(">> /system")
         || lower.contains("> /library")
         || lower.contains(">> /library")
@@ -127,9 +124,27 @@ pub fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
         || (lower.contains("tee ")
             && (lower.contains(" /system")
                 || lower.contains(" /library")
-                || lower.contains(" /usr"))))
-        && !lower.contains("/usr/local")
-    {
+                || lower.contains(" /usr")));
+    writes_protected && !lower.contains("/usr/local")
+}
+
+pub fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
+    let compact = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = compact.to_lowercase();
+
+    if matches_sudo(&lower) {
+        return SafetyDecision::Dangerous("contains sudo".to_string());
+    }
+    if matches_rm_rf(&lower) {
+        return SafetyDecision::Dangerous("contains rm -rf pattern".to_string());
+    }
+    if matches_curl_pipe_shell(&lower) {
+        return SafetyDecision::Dangerous("contains curl pipe shell pattern".to_string());
+    }
+    if matches_protected_chmod_chown(&lower) {
+        return SafetyDecision::Dangerous("chmod/chown on protected system path".to_string());
+    }
+    if matches_protected_redirect(&lower) {
         return SafetyDecision::Dangerous("write redirection to protected system path".to_string());
     }
     if command_has_write_pattern(&lower) && write_targets_outside_repo(&compact, repo_root) {
@@ -138,44 +153,44 @@ pub fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
     SafetyDecision::Safe
 }
 
-pub fn cmd_policy(args: &[String], app_name: &str) -> i32 {
-    if args.first().map(String::as_str) == Some("check") {
-        if args.len() < 2 {
-            eprintln!("Usage: {app_name} policy check <command...>");
-            return 2;
-        }
-        let candidate = args[1..].join(" ");
-        let root = repo_root()
-            .or_else(|| env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        match evaluate_command_safety(&candidate, &root) {
-            SafetyDecision::Safe => println!("safe"),
-            SafetyDecision::Dangerous(reason) => println!("dangerous: {reason}"),
-        }
-        return 0;
+fn handle_policy_check(args: &[String], app_name: &str) -> i32 {
+    if args.len() < 2 {
+        eprintln!("Usage: {app_name} policy check <command...>");
+        return 2;
     }
-
-    if args.first().map(String::as_str) == Some("show") || args.is_empty() {
-        let cfg = app_config();
-        let unsafe_flag = cfg.cx_unsafe;
-        let force = cfg.cxfix_force;
-        println!("== cxrs policy show ==");
-        println!("Active safety rules:");
-        println!("- Block: sudo");
-        println!("- Block: rm -rf family");
-        println!("- Block: curl | bash/sh/zsh");
-        println!("- Block: chmod/chown on /System,/Library,/usr (except /usr/local)");
-        println!("- Block: write operations outside repo root");
-        println!();
-        println!("Unsafe override state:");
-        println!(
-            "--unsafe / CX_UNSAFE=1: {}",
-            if unsafe_flag { "on" } else { "off" }
-        );
-        println!("CXFIX_FORCE=1: {}", if force { "on" } else { "off" });
-        return 0;
+    let candidate = args[1..].join(" ");
+    let root = repo_root()
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    match evaluate_command_safety(&candidate, &root) {
+        SafetyDecision::Safe => println!("safe"),
+        SafetyDecision::Dangerous(reason) => println!("dangerous: {reason}"),
     }
+    0
+}
 
+fn print_policy_show() {
+    let cfg = app_config();
+    println!("== cxrs policy show ==");
+    println!("Active safety rules:");
+    println!("- Block: sudo");
+    println!("- Block: rm -rf family");
+    println!("- Block: curl | bash/sh/zsh");
+    println!("- Block: chmod/chown on /System,/Library,/usr (except /usr/local)");
+    println!("- Block: write operations outside repo root");
+    println!();
+    println!("Unsafe override state:");
+    println!(
+        "--unsafe / CX_UNSAFE=1: {}",
+        if cfg.cx_unsafe { "on" } else { "off" }
+    );
+    println!(
+        "CXFIX_FORCE=1: {}",
+        if cfg.cxfix_force { "on" } else { "off" }
+    );
+}
+
+fn print_policy_help(app_name: &str) {
     println!("== cxrs policy ==");
     println!("Dangerous command patterns blocked by default in fix-run:");
     println!("- sudo (any)");
@@ -192,7 +207,20 @@ pub fn cmd_policy(args: &[String], app_name: &str) -> i32 {
     println!("Examples:");
     println!("- {app_name} policy check \"sudo rm -rf /tmp/foo\"");
     println!("- {app_name} policy check \"chmod 755 /usr/local/bin/tool\"");
-    0
+}
+
+pub fn cmd_policy(args: &[String], app_name: &str) -> i32 {
+    match args.first().map(String::as_str) {
+        Some("check") => handle_policy_check(args, app_name),
+        Some("show") | None => {
+            print_policy_show();
+            0
+        }
+        _ => {
+            print_policy_help(app_name);
+            0
+        }
+    }
 }
 
 #[cfg(test)]
