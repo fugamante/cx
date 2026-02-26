@@ -9,6 +9,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::analytics::parse_ts_epoch;
+use crate::config::app_config;
 use crate::diagnostics::{has_required_log_fields, last_appended_json_value};
 use crate::logs::{file_len, load_runs_appended};
 use crate::paths::{repo_root_hint, resolve_log_file};
@@ -52,8 +53,9 @@ pub fn cmd_bench(app_name: &str, runs: usize, command: &[String]) -> i32 {
         return 2;
     }
 
-    let disable_cx_log = env::var("CXBENCH_LOG").ok().as_deref() == Some("0");
-    let passthru = env::var("CXBENCH_PASSTHRU").ok().as_deref() == Some("1");
+    let cfg = app_config();
+    let disable_cx_log = !cfg.cxbench_log;
+    let passthru = cfg.cxbench_passthru;
     let log_file = resolve_log_file();
     let mut durations: Vec<u64> = Vec::with_capacity(runs);
     let mut eff_totals: Vec<u64> = Vec::new();
@@ -205,10 +207,7 @@ pub fn cmd_parity() -> i32 {
             return 1;
         }
     };
-    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(12000);
+    let budget_chars = app_config().budget_chars;
 
     #[derive(Default)]
     struct Row {

@@ -1,4 +1,5 @@
 use crate::cmdctx::CmdCtx;
+use crate::config::{DEFAULT_OPTIMIZE_WINDOW, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW};
 
 pub struct CompatDeps {
     pub print_help: fn(),
@@ -88,7 +89,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
                 .get(1)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_metrics)(n)
         }
         "cxprofile" | "profile" => {
@@ -96,7 +97,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
                 .get(1)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_profile)(n)
         }
         "cxtrace" | "trace" => {
@@ -112,17 +113,18 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
                 .get(1)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_alert)(n)
         }
         "cxoptimize" | "optimize" => {
-            let (n, json_out) = match (deps.parse_optimize_args)(&args[1..], 200) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("{app_name} cx optimize: {e}");
-                    return 2;
-                }
-            };
+            let (n, json_out) =
+                match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("{app_name} cx optimize: {e}");
+                        return 2;
+                    }
+                };
             (deps.print_optimize)(n, json_out)
         }
         "cxworklog" | "worklog" => {
@@ -130,7 +132,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
                 .get(1)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_worklog)(n)
         }
         "cx" => {
@@ -297,7 +299,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
                     .get(2)
                     .and_then(|v| v.parse::<usize>().ok())
                     .filter(|v| *v > 0)
-                    .unwrap_or(20);
+                    .unwrap_or(DEFAULT_QUARANTINE_LIST);
                 (deps.cmd_quarantine_list)(n)
             }
             "show" => {

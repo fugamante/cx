@@ -1,4 +1,5 @@
 use crate::cmdctx::CmdCtx;
+use crate::config::{DEFAULT_OPTIMIZE_WINDOW, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW};
 
 pub struct NativeDeps {
     pub print_help: fn(),
@@ -153,7 +154,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .get(2)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_metrics)(n)
         }
         "prompt" => {
@@ -181,7 +182,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .get(2)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(200);
+                .unwrap_or(DEFAULT_OPTIMIZE_WINDOW);
             (deps.cmd_promptlint)(n)
         }
         "cx" => {
@@ -253,7 +254,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .get(2)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_profile)(n)
         }
         "alert" => {
@@ -261,17 +262,18 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .get(2)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_alert)(n)
         }
         "optimize" => {
-            let (n, json_out) = match (deps.parse_optimize_args)(&args[2..], 200) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("{app_name} optimize: {e}");
-                    return 2;
-                }
-            };
+            let (n, json_out) =
+                match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("{app_name} optimize: {e}");
+                        return 2;
+                    }
+                };
             (deps.print_optimize)(n, json_out)
         }
         "worklog" => {
@@ -279,7 +281,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .get(2)
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
-                .unwrap_or(50);
+                .unwrap_or(DEFAULT_RUN_WINDOW);
             (deps.print_worklog)(n)
         }
         "trace" => {
@@ -321,7 +323,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                     .get(3)
                     .and_then(|v| v.parse::<usize>().ok())
                     .filter(|v| *v > 0)
-                    .unwrap_or(20);
+                    .unwrap_or(DEFAULT_QUARANTINE_LIST);
                 (deps.cmd_quarantine_list)(n)
             }
             "show" => {

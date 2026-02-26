@@ -1,11 +1,11 @@
 use serde_json::Value;
-use std::env;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::config::app_config;
 use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::logs::file_len;
 use crate::paths::{repo_root_hint, resolve_log_file};
@@ -39,13 +39,14 @@ pub fn cmd_diag(app_version: &str) -> i32 {
     let backend = llm_backend();
     let model = llm_model();
     let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
+    let cfg = app_config();
+    let provider = cfg.capture_provider.clone();
     let resolved_provider = match provider.as_str() {
         "rtk" => "rtk",
         "native" => "native",
         _ => {
             if bin_in_path("rtk")
-                && env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "1".to_string()) == "1"
+                && std::env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "1".to_string()) == "1"
             {
                 "rtk"
             } else {
@@ -53,11 +54,11 @@ pub fn cmd_diag(app_version: &str) -> i32 {
             }
         }
     };
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
-    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string());
-    let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string());
-    let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
-    let clip_footer = env::var("CX_CONTEXT_CLIP_FOOTER").unwrap_or_else(|_| "1".to_string());
+    let mode = cfg.cx_mode.clone();
+    let budget_chars = cfg.budget_chars.to_string();
+    let budget_lines = cfg.budget_lines.to_string();
+    let clip_mode = cfg.clip_mode.clone();
+    let clip_footer = if cfg.clip_footer { "1" } else { "0" }.to_string();
     let log_file = resolve_log_file()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());

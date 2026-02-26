@@ -1,10 +1,10 @@
 use jsonschema::JSONSchema;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::sync::{Arc, Mutex};
 
+use crate::config::app_config;
 use crate::paths::resolve_schema_dir;
 use crate::types::{LoadedSchema, SCHEMA_COMPILED_CACHE};
 
@@ -91,7 +91,7 @@ pub fn schema_name_for_tool(tool: &str) -> Option<&'static str> {
 }
 
 pub fn build_strict_schema_prompt(schema: &str, task_input: &str) -> String {
-    if env::var("CX_SCHEMA_RELAXED").ok().as_deref() == Some("1") {
+    if app_config().schema_relaxed {
         return format!(
             "You are a structured output generator.\nReturn JSON ONLY. No markdown. No prose. No code fences.\nOutput MUST be a single valid JSON object matching the schema.\nSchema:\n{schema}\n\nTask input:\n{task_input}\n"
         );

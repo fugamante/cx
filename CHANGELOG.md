@@ -75,6 +75,7 @@ All notable changes to this project are documented in this file.
 - Migrated `task_cmds` and `compat_cmd` to `handler(ctx, args, deps)` style entrypoints.
 - Reorganized source layout: moved orchestrator to `src/app/mod.rs` and consolidated domain modules under `src/modules/`.
 - Extracted native command dispatcher (`run` match logic) into `src/native_cmd.rs` with `handler(ctx, args, deps)`.
+- Extracted command-name classifiers (`is_native_name`, `is_compat_name`) into `src/command_names.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

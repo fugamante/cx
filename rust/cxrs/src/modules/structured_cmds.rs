@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::capture::run_system_command_capture;
+use crate::config::app_config;
 use crate::llm::extract_agent_text;
 use crate::paths::repo_root;
 use crate::policy::{SafetyDecision, evaluate_command_safety};
@@ -369,9 +370,10 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
     }
     println!("-------------------");
 
-    let should_run = env::var("CXFIX_RUN").ok().as_deref() == Some("1");
-    let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
-    let unsafe_env = env::var("CX_UNSAFE").ok().as_deref() == Some("1");
+    let cfg = app_config();
+    let should_run = cfg.cxfix_run;
+    let force = cfg.cxfix_force;
+    let unsafe_env = cfg.cx_unsafe;
     let allow_unsafe = unsafe_override || unsafe_env;
     if !should_run {
         println!("Not running suggested commands (set CXFIX_RUN=1 to execute).");

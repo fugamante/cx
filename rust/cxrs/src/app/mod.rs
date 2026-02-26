@@ -6,7 +6,12 @@ use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, p
 use crate::bench_parity;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
 use crate::cmdctx::CmdCtx;
+use crate::command_names::{is_compat_name, is_native_name};
 use crate::compat_cmd;
+use crate::config::{
+    APP_DESC, APP_NAME, APP_VERSION, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW, app_config,
+    init_app_config,
+};
 use crate::diagnostics::cmd_diag;
 use crate::doctor;
 use crate::execmeta::utc_now_iso;
@@ -34,10 +39,6 @@ use crate::tasks::{
     cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, write_tasks,
 };
 use crate::types::{ExecutionResult, TaskSpec};
-
-const APP_NAME: &str = "cxrs";
-const APP_DESC: &str = "Rust spike for the cx toolchain";
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_help() {
     println!("{APP_NAME} - {APP_DESC}");
@@ -93,10 +94,19 @@ fn print_help() {
     println!("  fanout <objective> Generate role-tagged parallelizable subtasks");
     println!("  promptlint [N]     Lint prompt/cost patterns from last N runs");
     println!("  cx-compat <cmd...> Compatibility shim for bash-style cx command names");
-    println!("  profile [N]        Summarize last N runs from resolved cx log (default 50)");
-    println!("  alert [N]          Report anomalies from last N runs (default 50)");
+    println!(
+        "  profile [N]        Summarize last N runs from resolved cx log (default {})",
+        DEFAULT_RUN_WINDOW
+    );
+    println!(
+        "  alert [N]          Report anomalies from last N runs (default {})",
+        DEFAULT_RUN_WINDOW
+    );
     println!("  optimize [N] [--json]  Recommend cost/latency improvements from last N runs");
-    println!("  worklog [N]        Emit Markdown worklog from last N runs (default 50)");
+    println!(
+        "  worklog [N]        Emit Markdown worklog from last N runs (default {})",
+        DEFAULT_RUN_WINDOW
+    );
     println!("  trace [N]          Show Nth most-recent run from resolved cx log (default 1)");
     println!("  next <cmd...>      Suggest next shell commands from command output (strict JSON)");
     println!("  diffsum            Summarize unstaged diff (strict schema)");
@@ -105,7 +115,10 @@ fn print_help() {
     println!("  commitjson         Generate strict JSON commit object from staged diff");
     println!("  commitmsg          Generate commit message text from staged diff");
     println!("  replay <id>        Replay quarantined schema run in strict mode");
-    println!("  quarantine list [N]  Show recent quarantine entries (default 20)");
+    println!(
+        "  quarantine list [N]  Show recent quarantine entries (default {})",
+        DEFAULT_QUARANTINE_LIST
+    );
     println!("  quarantine show <id> Show quarantined entry payload");
     println!("  help               Print this help");
 }
@@ -221,10 +234,7 @@ fn cmd_chunk() -> i32 {
         eprintln!("cxrs chunk: failed to read stdin: {e}");
         return 1;
     }
-    let budget = env::var("CX_CONTEXT_BUDGET_CHARS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(12000);
+    let budget = app_config().budget_chars;
     let chunks = chunk_text_by_budget(&buf, budget);
     let total = chunks.len();
     for (i, ch) in chunks.iter().enumerate() {
@@ -464,166 +474,8 @@ fn native_deps() -> native_cmd::NativeDeps {
     }
 }
 
-pub(crate) fn is_compat_name(name: &str) -> bool {
-    matches!(
-        name,
-        "help"
-            | "cxversion"
-            | "version"
-            | "cxdoctor"
-            | "doctor"
-            | "cxwhere"
-            | "where"
-            | "cxroutes"
-            | "routes"
-            | "cxdiag"
-            | "diag"
-            | "cxparity"
-            | "parity"
-            | "cxcore"
-            | "core"
-            | "cxlogs"
-            | "logs"
-            | "cxtask"
-            | "task"
-            | "cxmetrics"
-            | "metrics"
-            | "cxprofile"
-            | "profile"
-            | "cxtrace"
-            | "trace"
-            | "cxalert"
-            | "alert"
-            | "cxoptimize"
-            | "optimize"
-            | "cxworklog"
-            | "worklog"
-            | "cx"
-            | "cxj"
-            | "cxo"
-            | "cxol"
-            | "cxcopy"
-            | "cxpolicy"
-            | "policy"
-            | "cxstate"
-            | "state"
-            | "cxllm"
-            | "llm"
-            | "cxbench"
-            | "bench"
-            | "cxprompt"
-            | "prompt"
-            | "cxroles"
-            | "roles"
-            | "cxfanout"
-            | "fanout"
-            | "cxpromptlint"
-            | "promptlint"
-            | "cxnext"
-            | "next"
-            | "cxfix"
-            | "fix"
-            | "cxdiffsum"
-            | "diffsum"
-            | "cxdiffsum_staged"
-            | "diffsum-staged"
-            | "cxcommitjson"
-            | "commitjson"
-            | "cxcommitmsg"
-            | "commitmsg"
-            | "cxbudget"
-            | "budget"
-            | "cxlog_tail"
-            | "log-tail"
-            | "cxhealth"
-            | "health"
-            | "cxrtk"
-            | "rtk-status"
-            | "cxlog_on"
-            | "log-on"
-            | "cxlog_off"
-            | "log-off"
-            | "cxalert_show"
-            | "alert-show"
-            | "cxalert_on"
-            | "alert-on"
-            | "cxalert_off"
-            | "alert-off"
-            | "cxchunk"
-            | "chunk"
-            | "cxfix_run"
-            | "fix-run"
-            | "cxreplay"
-            | "replay"
-            | "cxquarantine"
-            | "quarantine"
-            | "schema"
-    )
-}
-
-pub(crate) fn is_native_name(name: &str) -> bool {
-    matches!(
-        name,
-        "help"
-            | "-h"
-            | "--help"
-            | "version"
-            | "-V"
-            | "--version"
-            | "where"
-            | "routes"
-            | "diag"
-            | "parity"
-            | "core"
-            | "logs"
-            | "ci"
-            | "task"
-            | "doctor"
-            | "state"
-            | "llm"
-            | "policy"
-            | "bench"
-            | "metrics"
-            | "prompt"
-            | "roles"
-            | "fanout"
-            | "promptlint"
-            | "cx"
-            | "cxj"
-            | "cxo"
-            | "cxol"
-            | "cxcopy"
-            | "fix"
-            | "budget"
-            | "log-tail"
-            | "health"
-            | "rtk-status"
-            | "log-on"
-            | "log-off"
-            | "alert-show"
-            | "alert-on"
-            | "alert-off"
-            | "chunk"
-            | "cx-compat"
-            | "profile"
-            | "alert"
-            | "optimize"
-            | "worklog"
-            | "trace"
-            | "next"
-            | "fix-run"
-            | "diffsum"
-            | "diffsum-staged"
-            | "commitjson"
-            | "commitmsg"
-            | "replay"
-            | "quarantine"
-            | "supports"
-            | "schema"
-    )
-}
-
 pub fn run() -> i32 {
+    init_app_config();
     let args: Vec<String> = env::args().collect();
     native_cmd::handler(&cmd_ctx(), &args, &native_deps())
 }

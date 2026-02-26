@@ -1,60 +1,28 @@
 use serde_json::Value;
-use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
+use crate::config::app_config;
 use crate::state::{read_state_value, set_state_path, value_at_path};
 
 pub fn llm_backend() -> String {
-    let raw = env::var("CX_LLM_BACKEND")
-        .ok()
-        .or_else(|| {
-            read_state_value().and_then(|v| {
-                value_at_path(&v, "preferences.llm_backend")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string())
-            })
-        })
-        .unwrap_or_else(|| "codex".to_string());
-    match raw.to_lowercase().as_str() {
-        "ollama" => "ollama".to_string(),
-        _ => "codex".to_string(),
-    }
+    app_config().llm_backend.clone()
 }
 
 pub fn llm_model() -> String {
     if llm_backend() != "ollama" {
-        return env::var("CX_MODEL").unwrap_or_default();
+        return app_config().codex_model.clone();
     }
-    if let Ok(v) = env::var("CX_OLLAMA_MODEL") {
-        let t = v.trim();
-        if !t.is_empty() {
-            return t.to_string();
-        }
-    }
-    read_state_value()
-        .and_then(|v| {
-            value_at_path(&v, "preferences.ollama_model")
-                .and_then(Value::as_str)
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default()
+    app_config().ollama_model.clone()
 }
 
 pub fn logging_enabled() -> bool {
-    env::var("CXLOG_ENABLED")
-        .ok()
-        .and_then(|v| v.parse::<u8>().ok())
-        .unwrap_or(1)
-        == 1
+    app_config().cxlog_enabled
 }
 
 pub fn ollama_model_preference() -> String {
-    if let Ok(v) = env::var("CX_OLLAMA_MODEL") {
-        let t = v.trim();
-        if !t.is_empty() {
-            return t.to_string();
-        }
+    if !app_config().ollama_model.is_empty() {
+        return app_config().ollama_model.clone();
     }
     read_state_value()
         .and_then(|v| {
