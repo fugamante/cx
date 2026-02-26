@@ -2,6 +2,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub type CxResult<T> = Result<T, CxError>;
+pub const EXIT_OK: i32 = 0;
+pub const EXIT_RUNTIME: i32 = 1;
+pub const EXIT_USAGE: i32 = 2;
 
 #[derive(Debug)]
 pub enum CxError {
@@ -78,4 +81,18 @@ impl std::error::Error for CxError {
             CxError::InvalidData { .. } => None,
         }
     }
+}
+
+pub fn format_error(command: &str, error: &str) -> String {
+    format!("cxrs {command}: {error}")
+}
+
+pub fn print_runtime_error(command: &str, error: &str) -> i32 {
+    eprintln!("{}", format_error(command, error));
+    EXIT_RUNTIME
+}
+
+pub fn print_usage_error(command: &str, usage: &str) -> i32 {
+    eprintln!("{}", format_error(command, &format!("Usage: {usage}")));
+    EXIT_USAGE
 }

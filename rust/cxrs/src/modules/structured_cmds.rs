@@ -5,6 +5,7 @@ use std::process::Command;
 
 use crate::capture::run_system_command_capture;
 use crate::config::app_config;
+use crate::error::{EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, format_error};
 use crate::llm::extract_agent_text;
 use crate::paths::repo_root;
 use crate::policy::{SafetyDecision, evaluate_command_safety};
@@ -209,16 +210,16 @@ pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
     let (captured, exit_status, capture_stats) = match run_system_command_capture(command) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs next: {e}");
-            return 1;
+            eprintln!("{}", format_error("next", &e));
+            return EXIT_RUNTIME;
         }
     };
 
     let schema = match load_schema("next") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs next: {e}");
-            return 1;
+            eprintln!("{}", format_error("next", &e));
+            return EXIT_RUNTIME;
         }
     };
     let task_input = format!(
@@ -238,8 +239,8 @@ pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs next: {e}");
-            return 1;
+            eprintln!("{}", format_error("next", &e));
+            return EXIT_RUNTIME;
         }
     };
     if result.schema_valid == Some(false) {
@@ -248,26 +249,26 @@ pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
         }
         eprintln!("cxrs next: raw response follows:");
         eprintln!("{}", result.stdout);
-        return 1;
+        return EXIT_RUNTIME;
     }
     let schema_value: Value = match serde_json::from_str(&result.stdout) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs next: invalid JSON after schema run: {e}");
-            return 1;
+            return EXIT_RUNTIME;
         }
     };
     let commands = match parse_commands_array(&schema_value.to_string()) {
         Ok(v) => v,
         Err(reason) => {
             eprintln!("cxrs next: {reason}");
-            return 1;
+            return EXIT_RUNTIME;
         }
     };
     for cmd in commands {
         println!("{cmd}");
     }
-    0
+    EXIT_OK
 }
 
 pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTaskFn) -> i32 {
@@ -279,21 +280,21 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
     }
     if cmdv.is_empty() {
         eprintln!("Usage: {app_name} fix-run [--unsafe] <command> [args...]");
-        return 2;
+        return EXIT_USAGE;
     }
     let (captured, exit_status, capture_stats) = match run_system_command_capture(&cmdv) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix-run: {e}");
-            return 1;
+            eprintln!("{}", format_error("fix-run", &e));
+            return EXIT_RUNTIME;
         }
     };
 
     let schema = match load_schema("fixrun") {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix-run: {e}");
-            return 1;
+            eprintln!("{}", format_error("fix-run", &e));
+            return EXIT_RUNTIME;
         }
     };
     let task_input = format!(
@@ -313,8 +314,8 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix-run: {e}");
-            return 1;
+            eprintln!("{}", format_error("fix-run", &e));
+            return EXIT_RUNTIME;
         }
     };
     if result.schema_valid == Some(false) {
@@ -336,13 +337,13 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
         }
         eprintln!("cxrs fix-run: raw response follows:");
         eprintln!("{}", result.stdout);
-        return 1;
+        return EXIT_RUNTIME;
     }
     let v: Value = match serde_json::from_str(&result.stdout) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("cxrs fix-run: invalid JSON after schema run: {e}");
-            return 1;
+            return EXIT_RUNTIME;
         }
     };
     let analysis = v
@@ -354,7 +355,7 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
         Ok(v) => v,
         Err(reason) => {
             eprintln!("cxrs fix-run: {reason}");
-            return 1;
+            return EXIT_RUNTIME;
         }
     };
 
@@ -390,7 +391,11 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
             policy_blocked: None,
             policy_reason: None,
         });
-        return if exit_status == 0 { 0 } else { exit_status };
+        return if exit_status == 0 {
+            EXIT_OK
+        } else {
+            exit_status
+        };
     }
 
     let mut policy_blocked = false;
@@ -439,7 +444,11 @@ pub fn cmd_fix_run(app_name: &str, command: &[String], execute_task: ExecuteTask
         policy_reason: policy_reason_joined.as_deref(),
     });
 
-    if exit_status == 0 { 0 } else { exit_status }
+    if exit_status == 0 {
+        EXIT_OK
+    } else {
+        exit_status
+    }
 }
 
 pub fn cmd_diffsum(staged: bool, execute_task: ExecuteTaskFn) -> i32 {
@@ -451,14 +460,14 @@ pub fn cmd_diffsum(staged: bool, execute_task: ExecuteTaskFn) -> i32 {
     match generate_diffsum_value(tool, staged, execute_task) {
         Ok(v) => {
             print_diffsum_human(&v);
-            0
+            EXIT_OK
         }
         Err(e) => {
             eprintln!(
                 "cxrs {}: {e}",
                 if staged { "diffsum-staged" } else { "diffsum" }
             );
-            1
+            EXIT_RUNTIME
         }
     }
 }
@@ -468,16 +477,19 @@ pub fn cmd_commitjson(execute_task: ExecuteTaskFn) -> i32 {
         Ok(v) => match serde_json::to_string_pretty(&v) {
             Ok(s) => {
                 println!("{s}");
-                0
+                EXIT_OK
             }
             Err(e) => {
-                eprintln!("cxrs commitjson: render failure: {e}");
-                1
+                eprintln!(
+                    "{}",
+                    format_error("commitjson", &format!("render failure: {e}"))
+                );
+                EXIT_RUNTIME
             }
         },
         Err(e) => {
-            eprintln!("cxrs commitjson: {e}");
-            1
+            eprintln!("{}", format_error("commitjson", &e));
+            EXIT_RUNTIME
         }
     }
 }
@@ -486,8 +498,8 @@ pub fn cmd_commitmsg(execute_task: ExecuteTaskFn) -> i32 {
     let v = match generate_commitjson_value(execute_task) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs commitmsg: {e}");
-            return 1;
+            eprintln!("{}", format_error("commitmsg", &e));
+            return EXIT_RUNTIME;
         }
     };
     let subject = v
@@ -530,29 +542,35 @@ pub fn cmd_commitmsg(execute_task: ExecuteTaskFn) -> i32 {
             println!("- {line}");
         }
     }
-    0
+    EXIT_OK
 }
 
 pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs replay: {e}");
-            return 1;
+            eprintln!("{}", format_error("replay", &e));
+            return EXIT_RUNTIME;
         }
     };
 
     if rec.schema.trim().is_empty() || rec.prompt.trim().is_empty() {
-        eprintln!("cxrs replay: quarantine entry is missing schema/prompt payload");
-        return 1;
+        eprintln!(
+            "{}",
+            format_error(
+                "replay",
+                "quarantine entry is missing schema/prompt payload"
+            )
+        );
+        return EXIT_RUNTIME;
     }
 
     let full_prompt = build_strict_schema_prompt(&rec.schema, &rec.prompt);
     let jsonl = match run_llm_jsonl(&full_prompt) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs replay: {e}");
-            return 1;
+            eprintln!("{}", format_error("replay", &e));
+            return EXIT_RUNTIME;
         }
     };
     let raw = extract_agent_text(&jsonl).unwrap_or_default();
@@ -565,10 +583,16 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
             &rec.prompt,
             Vec::new(),
         ) {
-            Ok(qid) => eprintln!("cxrs replay: empty response; quarantine_id={qid}"),
-            Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
+            Ok(qid) => eprintln!(
+                "{}",
+                format_error("replay", &format!("empty response; quarantine_id={qid}"))
+            ),
+            Err(e) => eprintln!(
+                "{}",
+                format_error("replay", &format!("failed to log schema failure: {e}"))
+            ),
         }
-        return 1;
+        return EXIT_RUNTIME;
     }
 
     if serde_json::from_str::<Value>(&raw).is_err() {
@@ -580,14 +604,20 @@ pub fn cmd_replay(id: &str, run_llm_jsonl: JsonlRunner) -> i32 {
             &rec.prompt,
             Vec::new(),
         ) {
-            Ok(qid) => eprintln!("cxrs replay: invalid JSON; quarantine_id={qid}"),
-            Err(e) => eprintln!("cxrs replay: failed to log schema failure: {e}"),
+            Ok(qid) => eprintln!(
+                "{}",
+                format_error("replay", &format!("invalid JSON; quarantine_id={qid}"))
+            ),
+            Err(e) => eprintln!(
+                "{}",
+                format_error("replay", &format!("failed to log schema failure: {e}"))
+            ),
         }
-        eprintln!("cxrs replay: raw response follows:");
+        eprintln!("{}", format_error("replay", "raw response follows:"));
         eprintln!("{raw}");
-        return 1;
+        return EXIT_RUNTIME;
     }
 
     println!("{raw}");
-    0
+    EXIT_OK
 }

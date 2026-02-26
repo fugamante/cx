@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use crate::error::{EXIT_OK, EXIT_RUNTIME, format_error, print_runtime_error};
 use crate::types::{CaptureStats, ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
 
 type TaskRunner = fn(TaskSpec) -> Result<ExecutionResult, String>;
@@ -62,8 +63,7 @@ fn run_and_print(
                 LlmMode::AgentText => "cxo",
                 LlmMode::SchemaJson => "cx-schema",
             };
-            eprintln!("cxrs {name}: {e}");
-            return 1;
+            return print_runtime_error(name, &e);
         }
     };
     if with_newline {
@@ -102,20 +102,17 @@ pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs cxcopy: {e}");
-            return 1;
+            return print_runtime_error("cxcopy", &e);
         }
     };
     let text = result.stdout;
     if text.trim().is_empty() {
-        eprintln!("cxrs cxcopy: nothing to copy");
-        return 1;
+        return print_runtime_error("cxcopy", "nothing to copy");
     }
     let mut pb = match Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs cxcopy: pbcopy unavailable: {e}");
-            return 1;
+            return print_runtime_error("cxcopy", &format!("pbcopy unavailable: {e}"));
         }
     };
     if let Some(stdin) = pb.stdin.as_mut() {
@@ -127,13 +124,13 @@ pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
             result.system_status.unwrap_or(0)
         }
         Ok(s) => {
-            eprintln!("cxrs cxcopy: pbcopy failed with status {}", s);
-            1
+            eprintln!(
+                "{}",
+                format_error("cxcopy", &format!("pbcopy failed with status {s}"))
+            );
+            EXIT_RUNTIME
         }
-        Err(e) => {
-            eprintln!("cxrs cxcopy: pbcopy wait failed: {e}");
-            1
-        }
+        Err(e) => print_runtime_error("cxcopy", &format!("pbcopy wait failed: {e}")),
     }
 }
 
@@ -141,8 +138,7 @@ pub fn cmd_fix(command: &[String], run_capture: CaptureRunner, run_task: TaskRun
     let (captured, status, capture_stats) = match run_capture(command) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix: {e}");
-            return 1;
+            return print_runtime_error("fix", &e);
         }
     };
     let prompt = format!(
@@ -162,10 +158,10 @@ pub fn cmd_fix(command: &[String], run_capture: CaptureRunner, run_task: TaskRun
     }) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("cxrs fix: {e}");
+            eprintln!("{}", format_error("fix", &e));
             return status;
         }
     };
     println!("{}", result.stdout);
-    status
+    if status == 0 { EXIT_OK } else { status }
 }

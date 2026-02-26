@@ -1,5 +1,6 @@
 use crate::cmdctx::CmdCtx;
 use crate::config::{DEFAULT_OPTIMIZE_WINDOW, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW};
+use crate::error::{EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, format_error, print_usage_error};
 
 pub struct NativeDeps {
     pub print_help: fn(),
@@ -71,11 +72,11 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
             } else {
                 (deps.print_help)();
             }
-            0
+            EXIT_OK
         }
         "version" | "-V" | "--version" => {
             (deps.print_version)();
-            0
+            EXIT_OK
         }
         "schema" => (deps.cmd_schema)(&args[2..]),
         "logs" => (deps.cmd_logs)(&args[2..]),
@@ -88,15 +89,14 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "parity" => (deps.cmd_parity)(),
         "supports" => {
             let Some(name) = args.get(2) else {
-                eprintln!("Usage: {app_name} supports <subcommand>");
-                return 2;
+                return print_usage_error("supports", &format!("{app_name} supports <subcommand>"));
             };
             if (deps.is_native_name)(name) || (deps.is_compat_name)(name) {
                 println!("true");
-                0
+                EXIT_OK
             } else {
                 println!("false");
-                1
+                EXIT_RUNTIME
             }
         }
         "doctor" => (deps.cmd_doctor)(),
@@ -105,33 +105,35 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
             "get" => {
                 let Some(key) = args.get(3) else {
                     eprintln!("Usage: {app_name} state get <key>");
-                    return 2;
+                    return EXIT_USAGE;
                 };
                 (deps.cmd_state_get)(key)
             }
             "set" => {
                 let Some(key) = args.get(3) else {
                     eprintln!("Usage: {app_name} state set <key> <value>");
-                    return 2;
+                    return EXIT_USAGE;
                 };
                 let Some(value) = args.get(4) else {
                     eprintln!("Usage: {app_name} state set <key> <value>");
-                    return 2;
+                    return EXIT_USAGE;
                 };
                 (deps.cmd_state_set)(key, value)
             }
             other => {
                 eprintln!("{app_name}: unknown state subcommand '{other}'");
                 eprintln!("Usage: {app_name} state <show|get <key>|set <key> <value>>");
-                2
+                EXIT_USAGE
             }
         },
         "llm" => (deps.cmd_llm)(&args[2..]),
         "policy" => (deps.cmd_policy)(&args[2..]),
         "bench" => {
             if args.len() < 5 {
-                eprintln!("Usage: {app_name} bench <runs> -- <command...>");
-                return 2;
+                return print_usage_error(
+                    "bench",
+                    &format!("{app_name} bench <runs> -- <command...>"),
+                );
             }
             let runs = args
                 .get(2)
@@ -140,12 +142,16 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 .unwrap_or(0);
             let delim = args.iter().position(|v| v == "--");
             let Some(i) = delim else {
-                eprintln!("Usage: {app_name} bench <runs> -- <command...>");
-                return 2;
+                return print_usage_error(
+                    "bench",
+                    &format!("{app_name} bench <runs> -- <command...>"),
+                );
             };
             if i + 1 >= args.len() {
-                eprintln!("Usage: {app_name} bench <runs> -- <command...>");
-                return 2;
+                return print_usage_error(
+                    "bench",
+                    &format!("{app_name} bench <runs> -- <command...>"),
+                );
             }
             (deps.cmd_bench)(runs, &args[i + 1..])
         }
@@ -160,11 +166,11 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "prompt" => {
             let Some(mode) = args.get(2) else {
                 eprintln!("Usage: {app_name} prompt <implement|fix|test|doc|ops> <request>");
-                return 2;
+                return EXIT_USAGE;
             };
             if args.len() < 4 {
                 eprintln!("Usage: {app_name} prompt <implement|fix|test|doc|ops> <request>");
-                return 2;
+                return EXIT_USAGE;
             }
             let request = args[3..].join(" ");
             (deps.cmd_prompt)(mode, &request)
@@ -173,7 +179,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "fanout" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} fanout <objective>");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_fanout)(&args[2..].join(" "))
         }
@@ -188,7 +194,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "cx" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} cx <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             if (deps.is_compat_name)(&args[2]) {
                 (deps.cmd_cx_compat)(&args[2..])
@@ -199,35 +205,35 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "cxj" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} cxj <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_cxj)(&args[2..])
         }
         "cxo" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} cxo <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_cxo)(&args[2..])
         }
         "cxol" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} cxol <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_cxol)(&args[2..])
         }
         "cxcopy" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} cxcopy <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_cxcopy)(&args[2..])
         }
         "fix" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} fix <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_fix)(&args[2..])
         }
@@ -270,8 +276,8 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
                 match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
                     Ok(v) => v,
                     Err(e) => {
-                        eprintln!("{app_name} optimize: {e}");
-                        return 2;
+                        eprintln!("{}", format_error("optimize", &e));
+                        return EXIT_USAGE;
                     }
                 };
             (deps.print_optimize)(n, json_out)
@@ -295,7 +301,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "next" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} next <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_next)(&args[2..])
         }
@@ -304,7 +310,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "fix-run" => {
             if args.len() < 3 {
                 eprintln!("Usage: {app_name} fix-run <command> [args...]");
-                return 2;
+                return EXIT_USAGE;
             }
             (deps.cmd_fix_run)(&args[2..])
         }
@@ -313,7 +319,7 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "replay" => {
             let Some(id) = args.get(2) else {
                 eprintln!("Usage: {app_name} replay <quarantine_id>");
-                return 2;
+                return EXIT_USAGE;
             };
             (deps.cmd_replay)(id)
         }
@@ -329,20 +335,23 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
             "show" => {
                 let Some(id) = args.get(3) else {
                     eprintln!("Usage: {app_name} quarantine show <quarantine_id>");
-                    return 2;
+                    return EXIT_USAGE;
                 };
                 (deps.cmd_quarantine_show)(id)
             }
             other => {
                 eprintln!("{app_name}: unknown quarantine subcommand '{other}'");
                 eprintln!("Usage: {app_name} quarantine <list [N]|show <id>>");
-                2
+                EXIT_USAGE
             }
         },
         _ => {
-            eprintln!("{app_name}: unknown command '{cmd}'");
+            eprintln!(
+                "{}",
+                format_error("native", &format!("unknown command '{cmd}'"))
+            );
             eprintln!("Run '{app_name} help' for usage.");
-            2
+            EXIT_USAGE
         }
     }
 }
