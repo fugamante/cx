@@ -167,13 +167,13 @@ fn handle_quarantine(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 
     }
 }
 
-pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
-    let app_name = ctx.app_name;
-    if args.is_empty() {
-        return print_usage_error("cx", &format!("{app_name} cx <command> [args...]"));
-    }
-    let sub = args[0].as_str();
-    match sub {
+fn dispatch_meta_commands(
+    sub: &str,
+    app_name: &str,
+    args: &[String],
+    deps: &CompatDeps,
+) -> Option<i32> {
+    let out = match sub {
         "help" => {
             if args.get(1).map(String::as_str) == Some("task") {
                 (deps.print_task_help)();
@@ -194,12 +194,59 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
         "cxcore" | "core" => (deps.cmd_core)(),
         "cxlogs" | "logs" => (deps.cmd_logs)(&args[1..]),
         "cxtask" | "task" => (deps.cmd_task)(&args[1..]),
+        "cxpolicy" | "policy" => (deps.cmd_policy)(&args[1..]),
+        "cxstate" | "state" => handle_state(app_name, args, deps),
+        "cxllm" | "llm" => (deps.cmd_llm)(&args[1..]),
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn dispatch_analytics_commands(sub: &str, args: &[String], deps: &CompatDeps) -> Option<i32> {
+    let out = match sub {
         "cxmetrics" | "metrics" => (deps.print_metrics)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
         "cxprofile" | "profile" => (deps.print_profile)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
         "cxtrace" | "trace" => (deps.print_trace)(parse_n(args, 1, 1)),
         "cxalert" | "alert" => (deps.print_alert)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
-        "cxoptimize" | "optimize" => handle_optimize(args, deps),
         "cxworklog" | "worklog" => (deps.print_worklog)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cxoptimize" | "optimize" => handle_optimize(args, deps),
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn dispatch_prompt_commands(
+    sub: &str,
+    app_name: &str,
+    args: &[String],
+    deps: &CompatDeps,
+) -> Option<i32> {
+    let out = match sub {
+        "cxbench" | "bench" => handle_bench(app_name, args, deps),
+        "cxprompt" | "prompt" => handle_prompt(app_name, args, deps),
+        "cxroles" | "roles" => (deps.cmd_roles)(args.get(1).map(String::as_str)),
+        "cxfanout" | "fanout" => {
+            if args.len() < 2 {
+                return Some(print_usage_error(
+                    "fanout",
+                    &format!("{app_name} cx fanout <objective>"),
+                ));
+            }
+            (deps.cmd_fanout)(&args[1..].join(" "))
+        }
+        "cxpromptlint" | "promptlint" => (deps.cmd_promptlint)(parse_n(args, 1, 200)),
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn dispatch_agent_prefixed_shortcuts(
+    sub: &str,
+    app_name: &str,
+    args: &[String],
+    deps: &CompatDeps,
+) -> Option<i32> {
+    let out = match sub {
         "cx" => run_prefixed_cmd(
             args,
             &format!("{app_name} cx <command> [args...]"),
@@ -225,19 +272,21 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
             &format!("{app_name} cxcopy <command> [args...]"),
             deps.cmd_cxcopy,
         ),
-        "cxpolicy" | "policy" => (deps.cmd_policy)(&args[1..]),
-        "cxstate" | "state" => handle_state(app_name, args, deps),
-        "cxllm" | "llm" => (deps.cmd_llm)(&args[1..]),
-        "cxbench" | "bench" => handle_bench(app_name, args, deps),
-        "cxprompt" | "prompt" => handle_prompt(app_name, args, deps),
-        "cxroles" | "roles" => (deps.cmd_roles)(args.get(1).map(String::as_str)),
-        "cxfanout" | "fanout" => {
-            if args.len() < 2 {
-                return print_usage_error("fanout", &format!("{app_name} cx fanout <objective>"));
-            }
-            (deps.cmd_fanout)(&args[1..].join(" "))
-        }
-        "cxpromptlint" | "promptlint" => (deps.cmd_promptlint)(parse_n(args, 1, 200)),
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn dispatch_agent_commands(
+    sub: &str,
+    app_name: &str,
+    args: &[String],
+    deps: &CompatDeps,
+) -> Option<i32> {
+    if let Some(out) = dispatch_agent_prefixed_shortcuts(sub, app_name, args, deps) {
+        return Some(out);
+    }
+    let out = match sub {
         "cxnext" | "next" => run_prefixed_cmd(
             args,
             &format!("{app_name} cx next <command> [args...]"),
@@ -248,10 +297,22 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
             &format!("{app_name} cx fix <command> [args...]"),
             deps.cmd_fix,
         ),
-        "cxdiffsum" | "diffsum" => (deps.cmd_diffsum)(false),
-        "cxdiffsum_staged" | "diffsum-staged" => (deps.cmd_diffsum)(true),
-        "cxcommitjson" | "commitjson" => (deps.cmd_commitjson)(),
-        "cxcommitmsg" | "commitmsg" => (deps.cmd_commitmsg)(),
+        "cxfix_run" | "fix-run" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cx fix-run <command> [args...]"),
+            deps.cmd_fix_run,
+        ),
+        _ => return None,
+    };
+    Some(out)
+}
+fn dispatch_runtime_commands(
+    sub: &str,
+    app_name: &str,
+    args: &[String],
+    deps: &CompatDeps,
+) -> Option<i32> {
+    let out = match sub {
         "cxbudget" | "budget" => (deps.cmd_budget)(),
         "cxlog_tail" | "log-tail" => (deps.cmd_log_tail)(parse_n(args, 1, 10)),
         "cxhealth" | "health" => (deps.cmd_health)(),
@@ -262,19 +323,34 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
         "cxalert_on" | "alert-on" => (deps.cmd_alert_on)(),
         "cxalert_off" | "alert-off" => (deps.cmd_alert_off)(),
         "cxchunk" | "chunk" => (deps.cmd_chunk)(),
-        "cxfix_run" | "fix-run" => run_prefixed_cmd(
-            args,
-            &format!("{app_name} cx fix-run <command> [args...]"),
-            deps.cmd_fix_run,
-        ),
+        "cxdiffsum" | "diffsum" => (deps.cmd_diffsum)(false),
+        "cxdiffsum_staged" | "diffsum-staged" => (deps.cmd_diffsum)(true),
+        "cxcommitjson" | "commitjson" => (deps.cmd_commitjson)(),
+        "cxcommitmsg" | "commitmsg" => (deps.cmd_commitmsg)(),
         "cxreplay" | "replay" => handle_replay(app_name, args, deps),
         "cxquarantine" | "quarantine" => handle_quarantine(app_name, args, deps),
-        other => {
+        _ => return None,
+    };
+    Some(out)
+}
+
+pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
+    let app_name = ctx.app_name;
+    if args.is_empty() {
+        return print_usage_error("cx", &format!("{app_name} cx <command> [args...]"));
+    }
+    let sub = args[0].as_str();
+
+    dispatch_meta_commands(sub, app_name, args, deps)
+        .or_else(|| dispatch_analytics_commands(sub, args, deps))
+        .or_else(|| dispatch_prompt_commands(sub, app_name, args, deps))
+        .or_else(|| dispatch_agent_commands(sub, app_name, args, deps))
+        .or_else(|| dispatch_runtime_commands(sub, app_name, args, deps))
+        .unwrap_or_else(|| {
             eprintln!(
                 "{}",
-                format_error("cx", &format!("unsupported command '{other}'"))
+                format_error("cx", &format!("unsupported command '{sub}'"))
             );
             EXIT_USAGE
-        }
-    }
+        })
 }
