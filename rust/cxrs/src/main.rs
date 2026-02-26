@@ -3,6 +3,7 @@ mod analytics;
 mod app;
 mod capture;
 mod diagnostics;
+mod doctor;
 mod error;
 mod execmeta;
 mod introspect;

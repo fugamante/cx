@@ -28,6 +28,7 @@ All notable changes to this project are documented in this file.
   - `src/agentcmds.rs`
   - `src/runtime_controls.rs`
   - `src/introspect.rs`
+  - `src/doctor.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -51,6 +52,7 @@ All notable changes to this project are documented in this file.
 - Extracted command wrappers (`cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`) from `app.rs` to `src/agentcmds.rs`.
 - Extracted runtime toggle/status commands (`log-on/off`, `alert-*`, `rtk-status`) from `app.rs` to `src/runtime_controls.rs`.
 - Extracted version/core introspection output builders from `app.rs` to `src/introspect.rs`.
+- Extracted non-interactive doctor/health checks from `app.rs` to `src/doctor.rs` and routed compat/native command paths through it.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed
