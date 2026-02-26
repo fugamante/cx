@@ -34,8 +34,28 @@ Current scope:
 - strict `fix-run` remediation suggestions with dangerous-command blocking
 - LLM backend routing: `codex` (default) or `ollama` (local alternative)
 
-This crate is authoritative for runtime behavior on `codex/rust-refactor`.
+This crate is authoritative runtime behavior for `cx`.
 Bash remains compatibility/bootstrap fallback.
+
+## Configuration
+
+Runtime configuration is centralized in `src/modules/config.rs`:
+- startup loads a single `AppConfig` snapshot (no scattered env parsing)
+- modules consume typed defaults and toggles from that snapshot
+- default budgets/windows are versioned in one place (`12000` chars, `300` lines, `50` run window, `200` optimize window, `20` quarantine list)
+
+Primary toggles:
+- `CX_MODE`, `CX_SCHEMA_RELAXED`
+- `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
+- `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
+- `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`
+
+## Command execution path
+
+`src/modules/agentcmds.rs` now uses a shared executor:
+- `execute_llm_command(command, LlmMode, run_task)`
+- wrappers `cmd_cx`, `cmd_cxj`, `cmd_cxo`, `cmd_cxol` are thin adapters over this core path
+- `SchemaJson` mode is intentionally guarded for structured-command handlers only
 
 ## Build
 

@@ -36,3 +36,11 @@ cp -f docs/manuals/99_build/latexmk/CX_MANUAL_MASTER.pdf docs/manuals/01_pdf/CX_
 - Rust (`cxrs`) is canonical runtime behavior.
 - Bash is compatibility/bootstrap only.
 - Manual updates should reflect Rust command/module behavior first, then fallback notes.
+
+## Current documentation focus
+
+- Centralized runtime configuration via `rust/cxrs/src/modules/config.rs` (`AppConfig` startup snapshot).
+- Unified non-schema LLM command execution path via `rust/cxrs/src/modules/agentcmds.rs`:
+  - `execute_llm_command(..., LlmMode)`
+  - thin wrappers for `cx`, `cxj`, `cxo`, `cxol`
+- Structured schema commands remain isolated in dedicated handlers (`structured_cmds`) to preserve strict schema contracts.

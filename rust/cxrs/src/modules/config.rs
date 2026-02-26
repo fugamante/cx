@@ -4,16 +4,22 @@ use std::sync::OnceLock;
 
 use crate::state::{read_state_value, value_at_path};
 
+/// Canonical application identity (used by routing/help/version surfaces).
 pub const APP_NAME: &str = "cxrs";
 pub const APP_DESC: &str = "Rust runtime for the cx toolchain";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Canonical runtime defaults.
 pub const DEFAULT_CONTEXT_BUDGET_CHARS: usize = 12_000;
 pub const DEFAULT_CONTEXT_BUDGET_LINES: usize = 300;
 pub const DEFAULT_RUN_WINDOW: usize = 50;
 pub const DEFAULT_OPTIMIZE_WINDOW: usize = 200;
 pub const DEFAULT_QUARANTINE_LIST: usize = 20;
 
+/// Process-level configuration snapshot.
+///
+/// Loaded once at startup and reused by command modules to avoid scattered,
+/// potentially inconsistent env parsing.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub budget_chars: usize,

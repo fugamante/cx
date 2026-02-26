@@ -18,6 +18,7 @@ This branch is actively decomposing `cxrs` from a monolithic command file into f
 Current refactor highlights:
 
 - `src/app/mod.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)
+- centralized runtime configuration in `src/modules/config.rs` (`AppConfig` loaded once at startup)
 - command families extracted into dedicated modules:
   - `src/modules/introspect.rs` (`version`, `core`)
   - `src/modules/runtime_controls.rs` (`log-on/off`, `alert-*`, `rtk-status`)
@@ -33,11 +34,29 @@ Current refactor highlights:
   - `src/modules/settings_cmds.rs` (`state *`, `llm *`)
   - `src/modules/structured_cmds.rs` (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`)
   - `src/modules/task_cmds.rs` (`task add/list/show/claim/complete/fail/fanout/run/run-all`)
+- consolidated LLM command path in `src/modules/agentcmds.rs` via shared `execute_llm_command(..., LlmMode)`
 
 Design intent:
 - keep command UX stable while shrinking coupling and improving testability
 - make error paths explicit and quarantine-backed
 - keep Rust as authoritative behavior for capture, schema, policy, and telemetry contracts
+
+## Configuration Contract
+
+`cxrs` now snapshots core environment configuration once at startup (`AppConfig`) and reuses it across modules.
+
+Primary fields:
+- budgets: `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
+- backend/model: `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
+- execution mode: `CX_MODE`, `CX_SCHEMA_RELAXED`
+- operational toggles: `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`
+
+Key defaults:
+- context chars: `12000`
+- context lines: `300`
+- run window defaults: `50`
+- optimize window default: `200`
+- quarantine list default: `20`
 
 ## Architecture
 

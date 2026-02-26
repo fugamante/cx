@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `rust/cxrs/src/modules/config.rs`:
+  - centralized `AppConfig` startup snapshot for runtime env/default resolution
+  - centralized app constants (`APP_NAME`, `APP_DESC`, `APP_VERSION`)
+  - centralized defaults (`12000` chars, `300` lines, `50` run window, `200` optimize window, `20` quarantine list)
 - Rust module layout for canonical runtime pieces:
   - `src/types.rs` (`b8aceec`)
   - `src/paths.rs`, `src/state.rs` (`7334426`)
@@ -41,6 +45,8 @@ All notable changes to this project are documented in this file.
   - `src/native_cmd.rs`
 
 ### Changed
+- Refactored command wrappers (`cx`, `cxj`, `cxo`, `cxol`) in `rust/cxrs/src/modules/agentcmds.rs` to use shared `execute_llm_command(command, LlmMode, run_task)` flow while preserving output behavior.
+- Replaced repeated env/default lookups across core modules with `AppConfig` reads (`app`, `capture`, `runtime`, `runlog`, `execution`, `structured_cmds`, `bench_parity`, `diagnostics`, `introspect`, `logview`, `policy`, `tasks`, `schema`, `compat_cmd`, `native_cmd`).
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
 - Hardened execution core contracts:
   - schema retry/quarantine behavior

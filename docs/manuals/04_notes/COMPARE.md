@@ -1,6 +1,7 @@
 # Manual Styles: Critical Comparison
 
 Branch note: on `codex/rust-refactor`, the synthesized master manual must reflect the Rust module architecture and branch migration status, not legacy Bash-first behavior.
+Current emphasis also includes centralized runtime configuration (`AppConfig`) and unified LLM command execution wrappers (`execute_llm_command`).
 
 This repository now contains three deliberately different manuals:
 
