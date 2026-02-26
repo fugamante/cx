@@ -2,6 +2,10 @@
 mod agentcmds;
 #[path = "modules/analytics.rs"]
 mod analytics;
+#[path = "modules/analytics_trace.rs"]
+mod analytics_trace;
+#[path = "modules/analytics_worklog.rs"]
+mod analytics_worklog;
 mod app;
 #[path = "modules/bench_parity.rs"]
 mod bench_parity;

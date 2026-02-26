@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+pub use crate::analytics_trace::print_trace;
+pub use crate::analytics_worklog::print_worklog;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
@@ -9,13 +11,6 @@ pub fn parse_ts_epoch(ts: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|dt| dt.timestamp())
-}
-
-fn show_field<T: ToString>(label: &str, value: Option<T>) {
-    match value {
-        Some(v) => println!("{label}: {}", v.to_string()),
-        None => println!("{label}: n/a"),
-    }
 }
 
 pub fn print_profile(n: usize) -> i32 {
@@ -348,127 +343,6 @@ pub fn print_alert(n: usize) -> i32 {
             println!("- {e} effective tokens | {tool} | {ts}");
         }
     }
-    println!("log_file: {}", log_file.display());
-    0
-}
-
-pub fn print_worklog(n: usize) -> i32 {
-    let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
-        return 1;
-    };
-    if !log_file.exists() {
-        println!("# cxrs Worklog");
-        println!();
-        println!("Window: last {n} runs");
-        println!();
-        println!("No runs found.");
-        println!();
-        println!("_log_file: {}_", log_file.display());
-        return 0;
-    }
-    let runs = match load_runs(&log_file, n) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs worklog: {e}");
-            return 1;
-        }
-    };
-
-    println!("# cxrs Worklog");
-    println!();
-    println!("Window: last {n} runs");
-    println!();
-
-    let mut by_tool: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for r in &runs {
-        let tool = r.tool.clone().unwrap_or_else(|| "unknown".to_string());
-        let entry = by_tool.entry(tool).or_insert((0, 0, 0));
-        entry.0 += 1;
-        entry.1 += r.duration_ms.unwrap_or(0);
-        entry.2 += r.effective_input_tokens.unwrap_or(0);
-    }
-
-    let mut grouped: Vec<(String, u64, u64, u64)> = by_tool
-        .into_iter()
-        .map(|(tool, (count, sum_dur, sum_eff))| {
-            let avg_dur = if count == 0 { 0 } else { sum_dur / count };
-            let avg_eff = if count == 0 { 0 } else { sum_eff / count };
-            (tool, count, avg_dur, avg_eff)
-        })
-        .collect();
-    grouped.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
-
-    println!("## By Tool");
-    println!();
-    println!("| Tool | Runs | Avg Duration (ms) | Avg Effective Tokens |");
-    println!("|---|---:|---:|---:|");
-    for (tool, count, avg_dur, avg_eff) in grouped {
-        println!("| {tool} | {count} | {avg_dur} | {avg_eff} |");
-    }
-    println!();
-
-    println!("## Chronological Runs");
-    println!();
-    for r in &runs {
-        let ts = r.ts.clone().unwrap_or_else(|| "n/a".to_string());
-        let tool = r.tool.clone().unwrap_or_else(|| "unknown".to_string());
-        let dur = r.duration_ms.unwrap_or(0);
-        let eff = r.effective_input_tokens.unwrap_or(0);
-        println!("- {ts} | {tool} | {dur}ms | {eff} effective tokens");
-    }
-    println!();
-    println!("_log_file: {}_", log_file.display());
-    0
-}
-
-pub fn print_trace(n: usize) -> i32 {
-    let Some(log_file) = resolve_log_file() else {
-        eprintln!("cxrs: unable to resolve log file");
-        return 1;
-    };
-    if !log_file.exists() {
-        eprintln!("cxrs trace: no log file at {}", log_file.display());
-        return 1;
-    }
-
-    let runs = match load_runs(&log_file, usize::MAX) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs trace: {e}");
-            return 1;
-        }
-    };
-    if runs.is_empty() {
-        eprintln!("cxrs trace: no runs in {}", log_file.display());
-        return 1;
-    }
-    if n == 0 || n > runs.len() {
-        eprintln!(
-            "cxrs trace: run index out of range (requested {}, available {})",
-            n,
-            runs.len()
-        );
-        return 2;
-    }
-    let idx = runs.len() - n;
-    let run = runs.get(idx).cloned().unwrap_or_default();
-
-    println!("== cxrs trace (run #{n} most recent) ==");
-    show_field("ts", run.ts);
-    show_field("tool", run.tool);
-    show_field("cwd", run.cwd);
-    show_field("duration_ms", run.duration_ms);
-    show_field("input_tokens", run.input_tokens);
-    show_field("cached_input_tokens", run.cached_input_tokens);
-    show_field("effective_input_tokens", run.effective_input_tokens);
-    show_field("output_tokens", run.output_tokens);
-    show_field("scope", run.scope);
-    show_field("repo_root", run.repo_root);
-    show_field("llm_backend", run.llm_backend);
-    show_field("llm_model", run.llm_model);
-    show_field("prompt_sha256", run.prompt_sha256);
-    show_field("prompt_preview", run.prompt_preview);
     println!("log_file: {}", log_file.display());
     0
 }
