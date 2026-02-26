@@ -13,36 +13,35 @@ use crate::capture::{
     budget_config_from_env, chunk_text_by_budget, rtk_is_usable, rtk_version_raw,
     run_system_command_capture,
 };
+use crate::execmeta::{make_execution_id, toolchain_version_string, utc_now_iso};
 use crate::llm::{
-    effective_input_tokens, extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain,
-    usage_from_jsonl, wrap_agent_text_as_jsonl,
+    extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
+    wrap_agent_text_as_jsonl,
 };
 use crate::types::{
-    CaptureStats, ExecutionLog, ExecutionResult, LlmOutputKind, QuarantineAttempt, RunEntry,
-    TaskInput, TaskSpec, UsageStats,
+    CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, RunEntry, TaskInput, TaskSpec,
+    UsageStats,
 };
 use crate::paths::{
-    repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
-    resolve_state_file, repo_root_hint,
+    repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_state_file,
+    repo_root_hint,
 };
 use crate::policy::{SafetyDecision, cmd_policy, evaluate_command_safety};
-use crate::logs::{
-    append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_execution_log_row,
-    validate_runs_jsonl_file,
-};
+use crate::logs::{cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file};
 use crate::quarantine::{
-    cmd_quarantine_list, cmd_quarantine_show, quarantine_store_with_attempts, read_quarantine_record,
+    cmd_quarantine_list, cmd_quarantine_show, read_quarantine_record,
 };
 use crate::runtime::{
     llm_backend, llm_bin_name, llm_model, logging_enabled, ollama_model_preference,
     resolve_ollama_model_for_run,
 };
+use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
 use crate::schema::{
-    build_strict_schema_prompt, list_schemas, load_schema, schema_name_for_tool, validate_schema_instance,
+    build_strict_schema_prompt, list_schemas, load_schema, validate_schema_instance,
 };
 use crate::state::{
-    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value,
-    set_state_path, set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
+    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value, set_state_path,
+    set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
 };
 use crate::tasks::{
     cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status, write_tasks,
@@ -139,266 +138,7 @@ fn print_task_help() {
 // path resolution moved to `paths.rs`
 // schema helpers moved to `schema.rs`
 // ensure_parent_dir moved to `paths.rs`
-
-fn prompt_preview(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
-}
-
-// repo_root_hint moved to `paths.rs`
-
-fn toolchain_version_string() -> String {
-    let mut base = APP_VERSION.to_string();
-    if let Some(root) = repo_root_hint() {
-        let version_file = root.join("VERSION");
-        if let Ok(text) = fs::read_to_string(&version_file) {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                base = trimmed.to_string();
-            }
-        }
-        if let Ok(out) = Command::new("git")
-            .arg("-C")
-            .arg(&root)
-            .args(["rev-parse", "--short", "HEAD"])
-            .output()
-        {
-            if out.status.success() {
-                let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !sha.is_empty() {
-                    return format!("{base}+{sha}");
-                }
-            }
-        }
-    }
-    base
-}
-
-fn make_execution_id(tool: &str) -> String {
-    format!(
-        "{}_{}_{}",
-        Utc::now().format("%Y%m%dT%H%M%SZ"),
-        tool.replace(
-            |c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-',
-            "_"
-        ),
-        std::process::id()
-    )
-}
-
-fn is_schema_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "cxcommitjson"
-            | "cxcommitmsg"
-            | "cxdiffsum"
-            | "cxdiffsum_staged"
-            | "cxnext"
-            | "cxfix_run"
-            | "cxrs_commitjson"
-            | "cxrs_diffsum"
-            | "cxrs_diffsum_staged"
-            | "cxrs_next"
-            | "cxrs_fix_run"
-            | "commitjson"
-            | "commitmsg"
-            | "diffsum"
-            | "diffsum-staged"
-            | "next"
-            | "fix-run"
-    )
-}
-
-struct RunLogInput<'a> {
-    tool: &'a str,
-    prompt: &'a str,
-    duration_ms: u64,
-    usage: Option<&'a UsageStats>,
-    capture: Option<&'a CaptureStats>,
-    schema_ok: bool,
-    schema_reason: Option<&'a str>,
-    schema_name: Option<&'a str>,
-    quarantine_id: Option<&'a str>,
-    policy_blocked: Option<bool>,
-    policy_reason: Option<&'a str>,
-}
-
-fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
-    let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
-    let cwd = env::current_dir()
-        .ok()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let root = repo_root()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let scope = if root.is_empty() { "global" } else { "repo" };
-
-    let input_tokens = input.usage.and_then(|u| u.input_tokens);
-    let cached = input.usage.and_then(|u| u.cached_input_tokens);
-    let output = input.usage.and_then(|u| u.output_tokens);
-    let effective = effective_input_tokens(input_tokens, cached);
-    let cap = input.capture.cloned().unwrap_or_default();
-    let backend = llm_backend();
-    let model = llm_model();
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
-    let exec_id = make_execution_id(input.tool);
-    let schema_enforced = is_schema_tool(input.tool);
-    let task_id = current_task_id().unwrap_or_default();
-    let task_parent_id = current_task_parent_id().unwrap_or_default();
-
-    let ts = utc_now_iso();
-    let row = ExecutionLog {
-        execution_id: exec_id,
-        timestamp: ts.clone(),
-        ts,
-        command: input.tool.to_string(),
-        tool: input.tool.to_string(),
-        cwd,
-        scope: scope.to_string(),
-        repo_root: root,
-        backend_used: backend.clone(),
-        llm_backend: backend,
-        llm_model: if model.is_empty() { None } else { Some(model) },
-        capture_provider: cap.capture_provider.clone(),
-        execution_mode: mode,
-        duration_ms: Some(input.duration_ms),
-        schema_enforced,
-        schema_name: input.schema_name.map(|s| s.to_string()),
-        schema_valid: input.schema_ok,
-        schema_ok: input.schema_ok,
-        schema_reason: input.schema_reason.map(|s| s.to_string()),
-        quarantine_id: input.quarantine_id.map(|s| s.to_string()),
-        task_id: if task_id.is_empty() {
-            None
-        } else {
-            Some(task_id)
-        },
-        task_parent_id: if task_parent_id.is_empty() {
-            None
-        } else {
-            Some(task_parent_id)
-        },
-        input_tokens,
-        cached_input_tokens: cached,
-        effective_input_tokens: effective,
-        output_tokens: output,
-        system_output_len_raw: cap.system_output_len_raw,
-        system_output_len_processed: cap.system_output_len_processed,
-        system_output_len_clipped: cap.system_output_len_clipped,
-        system_output_lines_raw: cap.system_output_lines_raw,
-        system_output_lines_processed: cap.system_output_lines_processed,
-        system_output_lines_clipped: cap.system_output_lines_clipped,
-        clipped: cap.clipped,
-        budget_chars: cap.budget_chars,
-        budget_lines: cap.budget_lines,
-        clip_mode: cap.clip_mode,
-        clip_footer: cap.clip_footer,
-        rtk_used: cap.rtk_used,
-        prompt_sha256: Some(sha256_hex(input.prompt)),
-        prompt_preview: Some(prompt_preview(input.prompt, 180)),
-        policy_blocked: input.policy_blocked,
-        policy_reason: input.policy_reason.map(|s| s.to_string()),
-    };
-    validate_execution_log_row(&row)?;
-    let value = serde_json::to_value(row).map_err(|e| format!("failed serialize run log: {e}"))?;
-    append_jsonl(&run_log, &value)
-}
-
-fn utc_now_iso() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
-fn log_schema_failure(
-    tool: &str,
-    reason: &str,
-    raw: &str,
-    schema: &str,
-    prompt: &str,
-    attempts: Vec<QuarantineAttempt>,
-) -> Result<String, String> {
-    let qid = quarantine_store_with_attempts(tool, reason, raw, schema, prompt, attempts)?;
-
-    let schema_fail_log = resolve_schema_fail_log_file()
-        .ok_or_else(|| "unable to resolve schema_failures log file".to_string())?;
-    let failure_row = json!({
-        "ts": utc_now_iso(),
-        "tool": tool,
-        "reason": reason,
-        "quarantine_id": qid,
-        "raw_sha256": sha256_hex(raw)
-    });
-    append_jsonl(&schema_fail_log, &failure_row)?;
-
-    let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
-    let cwd = env::current_dir()
-        .ok()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let root = repo_root()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let scope = if root.is_empty() { "global" } else { "repo" };
-
-    let ts = utc_now_iso();
-    let task_id = current_task_id();
-    let task_parent_id = current_task_parent_id();
-    let backend = llm_backend();
-    let run_failure = ExecutionLog {
-        execution_id: make_execution_id(tool),
-        timestamp: ts.clone(),
-        ts,
-        command: tool.to_string(),
-        tool: tool.to_string(),
-        cwd,
-        scope: scope.to_string(),
-        repo_root: root,
-        backend_used: backend.clone(),
-        llm_backend: backend,
-        llm_model: {
-            let m = llm_model();
-            if m.is_empty() { None } else { Some(m) }
-        },
-        capture_provider: None,
-        execution_mode: env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string()),
-        duration_ms: None,
-        schema_enforced: true,
-        schema_name: schema_name_for_tool(tool).map(|s| s.to_string()),
-        schema_valid: false,
-        schema_ok: false,
-        schema_reason: Some(reason.to_string()),
-        quarantine_id: Some(qid.clone()),
-        task_id,
-        task_parent_id,
-        input_tokens: None,
-        cached_input_tokens: None,
-        effective_input_tokens: None,
-        output_tokens: None,
-        system_output_len_raw: None,
-        system_output_len_processed: None,
-        system_output_len_clipped: None,
-        system_output_lines_raw: None,
-        system_output_lines_processed: None,
-        system_output_lines_clipped: None,
-        clipped: None,
-        budget_chars: None,
-        budget_lines: None,
-        clip_mode: None,
-        clip_footer: None,
-        rtk_used: None,
-        prompt_sha256: None,
-        prompt_preview: None,
-        policy_blocked: None,
-        policy_reason: None,
-    };
-    validate_execution_log_row(&run_failure)
-        .map_err(|e| format!("schema failure log invalid: {e}"))?;
-    let failure_value =
-        serde_json::to_value(run_failure).map_err(|e| format!("failed serialize run log: {e}"))?;
-    append_jsonl(&run_log, &failure_value)?;
-
-    Ok(qid)
-}
-
+// run logging moved to `runlog.rs`
 // state read/write moved to `state.rs`
 
 fn value_to_display(v: &Value) -> String {
@@ -923,7 +663,7 @@ fn print_version() {
         .map(value_to_display)
         .unwrap_or_else(|| "n/a".to_string());
     println!("name: {APP_NAME}");
-    println!("version: {}", toolchain_version_string());
+    println!("version: {}", toolchain_version_string(APP_VERSION));
     println!("cwd: {cwd}");
     println!("execution_path: {execution_path}");
     println!("source: {source}");
@@ -975,7 +715,7 @@ fn cmd_core() -> i32 {
     let bash_fallback = execution_path.contains("bash");
 
     println!("== cxcore ==");
-    println!("version: {}", toolchain_version_string());
+    println!("version: {}", toolchain_version_string(APP_VERSION));
     println!("execution_path: {execution_path}");
     println!("bash_fallback_used: {bash_fallback}");
     println!("backend: {backend}");
@@ -1522,7 +1262,7 @@ fn print_where(cmds: &[String]) -> i32 {
     println!("== cxwhere ==");
     println!("bin_cx: {bin_cx}");
     println!("cxrs_path: {exe}");
-    println!("cxrs_version: {}", toolchain_version_string());
+    println!("cxrs_version: {}", toolchain_version_string(APP_VERSION));
     println!("bash_lib: {bash_lib}");
     println!("bash_lib_sourceable: {bash_sourceable}");
     println!("repo_root: {repo_root}");
@@ -3410,7 +3150,7 @@ fn rtk_version_string() -> String {
 
 fn cmd_diag() -> i32 {
     let ts = utc_now_iso();
-    let version = toolchain_version_string();
+    let version = toolchain_version_string(APP_VERSION);
     let backend = llm_backend();
     let model = llm_model();
     let active_model = if model.is_empty() { "<unset>" } else { &model };
@@ -5161,6 +4901,7 @@ pub fn run() -> i32 {
 mod tests {
     use super::*;
     use crate::capture::{BudgetConfig, choose_clip_mode, clip_text_with_config, should_use_rtk};
+    use crate::logs::append_jsonl;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
