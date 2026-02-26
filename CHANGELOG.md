@@ -1,0 +1,44 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## [Unreleased]
+
+### Added
+- Rust module layout for canonical runtime pieces:
+  - `src/types.rs` (`b8aceec`)
+  - `src/paths.rs`, `src/state.rs` (`7334426`)
+  - `src/logs.rs` (`557cc81`)
+  - `src/util.rs` (`08db4db`)
+  - `src/schema.rs` (`c1072e6`)
+  - `src/capture.rs` (`dc466d4`)
+  - `src/tasks.rs` (`67be0c5`)
+  - `src/taskrun.rs` (`b9cdf8b`)
+  - `src/llm.rs` (`abbb748`)
+  - `src/quarantine.rs` (`3390c14`)
+  - `src/policy.rs` (`16dc692`)
+  - `src/runtime.rs` (`41ad1c4`)
+  - `src/execmeta.rs`, `src/runlog.rs` (`1380d5c`)
+
+### Changed
+- Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
+- Hardened execution core contracts:
+  - schema retry/quarantine behavior
+  - stable execution log contract
+  - CI validation path (`2600d21`).
+- Routed `logs` command through dedicated logs module and normalized shared helpers (`08db4db`).
+- Hardened log loading/migration error paths with clearer diagnostics (`4106410`).
+- Extracted policy and state-path/task-id helpers from `app.rs` into dedicated modules (`16dc692`).
+- Extracted LLM backend/model runtime resolution from `app.rs` (`41ad1c4`).
+- Reworked run logging call sites to use a structured input object instead of long argument lists (`42c181f`).
+- Centralized execution log row validation in `src/logs.rs` (`c88978b`).
+- Reused shared UTC timestamp helper across modules (`6a288a8`).
+- Applied rustfmt normalization after module extraction (`7f018ec`).
+
+### Fixed
+- Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).
+- Improved deterministic schema-path reliability by consolidating schema helpers and validators (`c1072e6`, `1380d5c`).
+
+### Notes
+- Refactor focus is Rust-first canonicalization: Bash remains compatibility/bootstrap.
+- Current work preserved CLI behavior while reducing monolithic surface area and improving testability.
