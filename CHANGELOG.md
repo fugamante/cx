@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file.
   - `src/prompting.rs`
   - `src/routing.rs`
   - `src/diagnostics.rs`
+  - `src/analytics.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -41,6 +42,7 @@ All notable changes to this project are documented in this file.
 - Extracted prompt engineering commands (`roles`, `prompt`, `fanout`, `promptlint`) from `app.rs` to `src/prompting.rs`.
 - Extracted routing/provenance commands and helpers (`where`, `routes`, bash function resolution) from `app.rs` to `src/routing.rs`.
 - Extracted diagnostics helpers/command (`diag`, last-appended log helpers) from `app.rs` to `src/diagnostics.rs`.
+- Extracted analytics/reporting commands (`profile`, `metrics`, `alert`, `worklog`, `trace`) from `app.rs` to `src/analytics.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

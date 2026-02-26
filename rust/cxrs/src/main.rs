@@ -1,3 +1,4 @@
+mod analytics;
 mod app;
 mod capture;
 mod diagnostics;
