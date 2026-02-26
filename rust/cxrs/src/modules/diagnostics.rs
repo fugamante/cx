@@ -168,7 +168,9 @@ pub fn has_required_log_fields(v: &Value) -> bool {
         "backend_used",
         "capture_provider",
         "execution_mode",
+        "schema_enforced",
         "schema_valid",
+        "duration_ms",
     ];
     required.iter().all(|k| v.get(k).is_some())
 }

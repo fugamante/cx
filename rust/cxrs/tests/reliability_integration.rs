@@ -386,7 +386,10 @@ fn missing_schema_file_fails_structured_command_cleanly() {
         .join("schemas")
         .join("next.schema.json");
     fs::remove_file(&schema_file).expect("remove next schema");
-    repo.write_mock("codex", &mock_codex_jsonl_agent_text("{\"commands\":[\"echo ok\"]}"));
+    repo.write_mock(
+        "codex",
+        &mock_codex_jsonl_agent_text("{\"commands\":[\"echo ok\"]}"),
+    );
 
     let out = repo.run_with_env(&["next", "echo", "hello"], &[]);
     assert!(

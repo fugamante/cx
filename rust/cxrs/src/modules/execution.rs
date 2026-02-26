@@ -57,10 +57,13 @@ fn log_execution_error(
 
 fn run_llm_plain_meta(prompt: &str) -> Result<String, LlmRunError> {
     if llm_backend() == "ollama" {
-        run_ollama_plain(prompt, &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
-            message: e,
-            timeout: None,
-        })?)
+        run_ollama_plain(
+            prompt,
+            &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
+                message: e,
+                timeout: None,
+            })?,
+        )
     } else {
         run_codex_plain(prompt)
     }
@@ -199,8 +202,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
             schema_attempt_for_log = Some(1);
 
-            let run_attempt =
-                |full_prompt: &str| -> Result<(String, UsageStats), LlmRunError> {
+            let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), LlmRunError> {
                 let jsonl = run_llm_jsonl_meta(full_prompt)?;
                 let usage = usage_from_jsonl(&jsonl);
                 let raw = extract_agent_text(&jsonl).unwrap_or_default();

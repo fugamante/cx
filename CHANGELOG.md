@@ -65,6 +65,11 @@ All notable changes to this project are documented in this file.
     - timeout override end-to-end coverage for `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, and `CX_TIMEOUT_SHELL_SECS`
 
 ### Changed
+- Expanded `cxparity` overlap coverage and invariants:
+  - widened shared-command matrix from a minimal subset to include `cx`, `cxj`, `cxol`, `cxcopy`, `cxnext`, `cxdiffsum_staged`, `cxcommitmsg`, and `cxcommitjson`
+  - added deterministic local parity mocks (`codex` + clipboard backend) so parity runs are stable and backend-independent
+  - parity temp repos now receive schema registry fixtures, enabling structured-command checks without ambient machine state
+  - tightened parity log invariant checks via required-field validation (`schema_enforced`, `duration_ms` included)
 - Replaced string-parsed timeout telemetry with structured timeout propagation:
   - `rust/cxrs/src/modules/process.rs` now emits `ProcessError::Timeout { label, timeout_secs }`
   - `rust/cxrs/src/modules/llm.rs` preserves timeout metadata in `LlmRunError`

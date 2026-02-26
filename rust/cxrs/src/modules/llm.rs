@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use std::process::Command;
 
-use crate::process::{run_command_with_stdin_output_with_timeout_meta, TimeoutInfo};
+use crate::process::{TimeoutInfo, run_command_with_stdin_output_with_timeout_meta};
 use crate::types::UsageStats;
 
 #[derive(Clone, Debug)]

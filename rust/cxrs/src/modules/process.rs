@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::fmt;
+use std::io::Write;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -133,7 +133,9 @@ pub fn run_command_output_with_timeout_meta(
         let _ = tx.send(child.wait_with_output());
     });
     match rx.recv_timeout(timeout_duration(label)) {
-        Ok(res) => res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}"))),
+        Ok(res) => {
+            res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}")))
+        }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             terminate_pid(pid);
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {
@@ -174,7 +176,9 @@ pub fn run_command_with_stdin_output_with_timeout_meta(
         let _ = tx.send(child.wait_with_output());
     });
     match rx.recv_timeout(timeout_duration(label)) {
-        Ok(res) => res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}"))),
+        Ok(res) => {
+            res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}")))
+        }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             terminate_pid(pid);
             if rx.recv_timeout(Duration::from_secs(2)).is_err() {

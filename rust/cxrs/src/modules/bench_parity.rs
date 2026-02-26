@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
+use crate::bench_parity_mocks::{setup_parity_mocks, with_parity_env};
 use crate::bench_parity_support::{
     BenchStats, ParityRow, maybe_collect_tokens, print_bench_summary, print_parity_table,
     run_parity_path, setup_temp_repo,
@@ -105,10 +106,17 @@ fn parity_overlap(
     let bash_funcs = bash_function_names(repo);
     let parity_catalog: Vec<(&str, Vec<&str>, Option<Vec<&str>>)> = vec![
         ("cxo", vec!["echo", "hi"], None),
+        ("cx", vec!["echo", "hi"], None),
+        ("cxj", vec!["echo", "hi"], None),
+        ("cxol", vec!["echo", "hi"], None),
+        ("cxcopy", vec!["echo", "hi"], None),
+        ("cxnext", vec!["echo", "hi"], None),
+        ("cxdiffsum_staged", vec![], None),
+        ("cxcommitmsg", vec![], None),
         (
             "cxcommitjson",
             vec![],
-            Some(vec!["subject", "body", "breaking", "tests"]),
+            Some(vec!["subject", "body", "breaking", "scope", "tests"]),
         ),
     ];
     parity_catalog
@@ -128,6 +136,7 @@ fn evaluate_parity_case(
     cmd: &str,
     args: &[&str],
     schema_keys: &Option<Vec<&str>>,
+    mock_dir: &Path,
 ) -> ParityRow {
     let mut row = ParityRow {
         cmd: cmd.to_string(),
@@ -143,6 +152,7 @@ fn evaluate_parity_case(
         cmd,
         args,
         schema_keys,
+        mock_dir,
     );
     run_bash_case(
         &mut row,
@@ -153,6 +163,7 @@ fn evaluate_parity_case(
         cmd,
         args,
         schema_keys,
+        mock_dir,
     );
     row
 }
@@ -166,15 +177,13 @@ fn run_rust_case(
     cmd: &str,
     args: &[&str],
     schema_keys: &Option<Vec<&str>>,
+    mock_dir: &Path,
 ) {
     let before_rust = file_len(temp_log_file);
     let mut rust_cmd = Command::new(exe);
-    rust_cmd
-        .arg("cx-compat")
-        .arg(cmd)
-        .args(args)
-        .current_dir(temp_repo)
-        .env("CX_EXECUTION_PATH", "rust:cxparity");
+    rust_cmd.arg("cx-compat").arg(cmd).args(args);
+    with_parity_env(&mut rust_cmd, mock_dir, temp_repo);
+    rust_cmd.env("CX_EXECUTION_PATH", "rust:cxparity");
     if let Ok(out) = run_command_output_with_timeout(rust_cmd, "cxparity rust case") {
         let (ok, json_ok, logs_ok, budget_ok) =
             run_parity_path(out, temp_log_file, before_rust, budget_chars, schema_keys);
@@ -194,6 +203,7 @@ fn run_bash_case(
     cmd: &str,
     args: &[&str],
     schema_keys: &Option<Vec<&str>>,
+    mock_dir: &Path,
 ) {
     let before_bash = file_len(temp_log_file);
     let bash_cmd = format!(
@@ -203,11 +213,9 @@ fn run_bash_case(
         args.join(" ")
     );
     let mut bash_proc = Command::new("bash");
-    bash_proc
-        .arg("-lc")
-        .arg(bash_cmd)
-        .current_dir(temp_repo)
-        .env("CX_EXECUTION_PATH", "bash:cxparity");
+    bash_proc.arg("-lc").arg(bash_cmd);
+    with_parity_env(&mut bash_proc, mock_dir, temp_repo);
+    bash_proc.env("CX_EXECUTION_PATH", "bash:cxparity");
     if let Ok(out) = run_command_output_with_timeout(bash_proc, "cxparity bash case") {
         let (ok, json_ok, logs_ok, budget_ok) =
             run_parity_path(out, temp_log_file, before_bash, budget_chars, schema_keys);
@@ -234,6 +242,7 @@ fn parity_rows(
     temp_repo: &Path,
     temp_log_file: &Path,
     budget_chars: usize,
+    mock_dir: &Path,
 ) -> (Vec<ParityRow>, bool) {
     let mut rows: Vec<ParityRow> = Vec::new();
     let mut pass_all = true;
@@ -247,6 +256,7 @@ fn parity_rows(
             cmd,
             &args,
             &schema_keys,
+            mock_dir,
         );
         if !(row.rust_ok && row.bash_ok && row.json_ok && row.logs_ok && row.budget_ok) {
             pass_all = false;
@@ -278,6 +288,10 @@ pub fn cmd_parity() -> i32 {
         }
     };
     let temp_log_file = temp_repo.join(".codex").join("cxlogs").join("runs.jsonl");
+    let mock_dir = match setup_parity_mocks(&repo, &temp_repo) {
+        Ok(v) => v,
+        Err(e) => return parity_error(&temp_repo, &e),
+    };
     let overlap = parity_overlap(&repo);
     if overlap.is_empty() {
         return parity_error(&temp_repo, "cxparity: no overlap commands found");
@@ -290,6 +304,7 @@ pub fn cmd_parity() -> i32 {
         &temp_repo,
         &temp_log_file,
         budget_chars,
+        &mock_dir,
     );
     if let Err(e) = fs::remove_dir_all(&temp_repo) {
         crate::cx_eprintln!(
