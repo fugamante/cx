@@ -27,6 +27,7 @@ All notable changes to this project are documented in this file.
   - `src/logview.rs`
   - `src/agentcmds.rs`
   - `src/runtime_controls.rs`
+  - `src/introspect.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -49,6 +50,7 @@ All notable changes to this project are documented in this file.
 - Extracted log presentation commands (`budget`, `log-tail`) from `app.rs` to `src/logview.rs`.
 - Extracted command wrappers (`cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`) from `app.rs` to `src/agentcmds.rs`.
 - Extracted runtime toggle/status commands (`log-on/off`, `alert-*`, `rtk-status`) from `app.rs` to `src/runtime_controls.rs`.
+- Extracted version/core introspection output builders from `app.rs` to `src/introspect.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

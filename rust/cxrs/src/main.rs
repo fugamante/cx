@@ -5,6 +5,7 @@ mod capture;
 mod diagnostics;
 mod error;
 mod execmeta;
+mod introspect;
 mod llm;
 mod logs;
 mod logview;
