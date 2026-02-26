@@ -25,6 +25,7 @@ use crate::paths::{
     repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_schema_fail_log_file,
     resolve_state_file, repo_root_hint,
 };
+use crate::policy::{SafetyDecision, cmd_policy, evaluate_command_safety};
 use crate::logs::{
     append_jsonl, cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file,
 };
@@ -34,7 +35,10 @@ use crate::quarantine::{
 use crate::schema::{
     build_strict_schema_prompt, list_schemas, load_schema, schema_name_for_tool, validate_schema_instance,
 };
-use crate::state::{ensure_state_value, read_state_value, state_cache_clear, write_json_atomic};
+use crate::state::{
+    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value,
+    set_state_path, set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
+};
 use crate::tasks::{
     cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status, write_tasks,
 };
@@ -225,12 +229,6 @@ fn ollama_model_preference() -> String {
                 .map(|s| s.to_string())
         })
         .unwrap_or_default()
-}
-
-fn set_state_path(path: &str, value: Value) -> Result<(), String> {
-    let (state_file, mut state) = ensure_state_value()?;
-    set_value_at_path(&mut state, path, value)?;
-    write_json_atomic(&state_file, &state)
 }
 
 fn is_interactive_tty() -> bool {
@@ -572,96 +570,11 @@ fn log_schema_failure(
 
 // state read/write moved to `state.rs`
 
-fn parse_cli_value(raw: &str) -> Value {
-    if let Ok(v) = serde_json::from_str::<Value>(raw) {
-        return v;
-    }
-    if raw.eq_ignore_ascii_case("true") {
-        return Value::Bool(true);
-    }
-    if raw.eq_ignore_ascii_case("false") {
-        return Value::Bool(false);
-    }
-    if raw.eq_ignore_ascii_case("null") {
-        return Value::Null;
-    }
-    if let Ok(v) = raw.parse::<i64>() {
-        return json!(v);
-    }
-    if let Ok(v) = raw.parse::<f64>() {
-        return json!(v);
-    }
-    Value::String(raw.to_string())
-}
-
-fn value_at_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut cur = root;
-    for seg in path.split('.') {
-        if seg.is_empty() {
-            continue;
-        }
-        cur = cur.get(seg)?;
-    }
-    Some(cur)
-}
-
 fn value_to_display(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         _ => v.to_string(),
     }
-}
-
-fn set_value_at_path(root: &mut Value, path: &str, new_value: Value) -> Result<(), String> {
-    let mut segs: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
-    if segs.is_empty() {
-        return Err("key cannot be empty".to_string());
-    }
-    let last = segs.pop().unwrap_or_default();
-    let mut cur = root;
-    for seg in segs {
-        if !cur.is_object() {
-            *cur = json!({});
-        }
-        let obj = cur
-            .as_object_mut()
-            .ok_or_else(|| "failed to access state object".to_string())?;
-        cur = obj.entry(seg.to_string()).or_insert_with(|| json!({}));
-    }
-    if !cur.is_object() {
-        *cur = json!({});
-    }
-    let obj = cur
-        .as_object_mut()
-        .ok_or_else(|| "failed to access final state object".to_string())?;
-    obj.insert(last.to_string(), new_value);
-    Ok(())
-}
-
-fn current_task_id() -> Option<String> {
-    if let Ok(v) = env::var("CX_TASK_ID") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
-    }
-    read_state_value()
-        .as_ref()
-        .and_then(|v| value_at_path(v, "runtime.current_task_id"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn current_task_parent_id() -> Option<String> {
-    if let Ok(v) = env::var("CX_TASK_PARENT_ID") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
-    }
-    read_state_value()
-        .as_ref()
-        .and_then(|v| value_at_path(v, "runtime.current_task_parent_id"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
 }
 
 fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
@@ -3128,192 +3041,6 @@ fn parse_commands_array(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-#[derive(Debug, Clone)]
-enum SafetyDecision {
-    Safe,
-    Dangerous(String),
-}
-
-fn normalize_token(tok: &str) -> String {
-    tok.trim_matches(|c: char| c == '"' || c == '\'' || c == '`' || c == ';' || c == ',')
-        .to_string()
-}
-
-fn command_has_write_pattern(lower: &str) -> bool {
-    lower.contains(">>")
-        || lower.contains(">")
-        || lower.contains("tee ")
-        || lower.contains("touch ")
-        || lower.contains("mkdir ")
-        || lower.contains("cp ")
-        || lower.contains("mv ")
-        || lower.contains("install ")
-        || lower.contains("dd ")
-        || lower.contains("chmod ")
-        || lower.contains("chown ")
-}
-
-fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
-    let root_s = repo_root.to_string_lossy().to_string();
-    let tokens: Vec<String> = cmd.split_whitespace().map(normalize_token).collect();
-    let mut candidates: Vec<String> = Vec::new();
-    let last = tokens.last().cloned().unwrap_or_default();
-    for i in 0..tokens.len() {
-        let t = tokens[i].as_str();
-        if t == ">" || t == ">>" || t == "tee" {
-            if let Some(next) = tokens.get(i + 1) {
-                candidates.push(next.clone());
-            }
-        }
-        if t == "touch" || t == "mkdir" || t == "chmod" || t == "chown" {
-            if let Some(next) = tokens.get(i + 1) {
-                candidates.push(next.clone());
-            }
-        }
-        if let Some(path) = t.strip_prefix("of=") {
-            candidates.push(path.to_string());
-        }
-        if t.starts_with('/') {
-            candidates.push(t.to_string());
-        }
-        if t.starts_with("~/") || t == "~" || t.starts_with("$HOME") || t.starts_with("${HOME}") {
-            candidates.push(t.to_string());
-        }
-    }
-    // For cp/mv/install, treat the last argument as destination.
-    if tokens.iter().any(|t| t == "cp" || t == "mv" || t == "install") && !last.is_empty() {
-        candidates.push(last);
-    }
-    candidates.into_iter().any(|p| {
-        let p = p.trim().to_string();
-        if p.is_empty() {
-            return false;
-        }
-        // Any parent traversal in a write target is treated as unsafe (can escape repo root).
-        if p.contains("..") {
-            return true;
-        }
-        if p.starts_with("~/") || p == "~" || p.starts_with("$HOME") || p.starts_with("${HOME}") {
-            return true;
-        }
-        if !p.starts_with('/') {
-            return false;
-        }
-        if p.starts_with(&(root_s.clone() + "/")) || p == root_s {
-            return false;
-        }
-        true
-    })
-}
-
-fn evaluate_command_safety(cmd: &str, repo_root: &Path) -> SafetyDecision {
-    let compact = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
-    let lower = compact.to_lowercase();
-
-    if lower.contains(" sudo ") || lower.starts_with("sudo ") || lower.ends_with(" sudo") {
-        return SafetyDecision::Dangerous("contains sudo".to_string());
-    }
-    if lower.contains("rm -rf")
-        || lower.contains("rm -fr")
-        || lower.contains("rm -r -f")
-        || lower.contains("rm -f -r")
-    {
-        return SafetyDecision::Dangerous("contains rm -rf pattern".to_string());
-    }
-    if lower.contains("curl ")
-        && lower.contains('|')
-        && (lower.contains("| bash") || lower.contains("| sh") || lower.contains("| zsh"))
-    {
-        return SafetyDecision::Dangerous("contains curl pipe shell pattern".to_string());
-    }
-    if (lower.contains("chmod ") || lower.contains("chown "))
-        && (lower.contains("/system") || lower.contains("/library") || lower.contains("/usr"))
-        && !lower.contains("/usr/local")
-    {
-        return SafetyDecision::Dangerous("chmod/chown on protected system path".to_string());
-    }
-    if (lower.contains("chmod ") || lower.contains("chown "))
-        && command_has_write_pattern(&lower)
-        && write_targets_outside_repo(&compact, repo_root)
-    {
-        return SafetyDecision::Dangerous("chmod/chown target outside repo root".to_string());
-    }
-    if (lower.contains("> /system")
-        || lower.contains(">> /system")
-        || lower.contains("> /library")
-        || lower.contains(">> /library")
-        || lower.contains("> /usr")
-        || lower.contains(">> /usr")
-        || (lower.contains("tee ")
-            && (lower.contains(" /system")
-                || lower.contains(" /library")
-                || lower.contains(" /usr"))))
-        && !lower.contains("/usr/local")
-    {
-        return SafetyDecision::Dangerous("write redirection to protected system path".to_string());
-    }
-    if command_has_write_pattern(&lower) && write_targets_outside_repo(&compact, repo_root) {
-        return SafetyDecision::Dangerous("write target outside repo root".to_string());
-    }
-    SafetyDecision::Safe
-}
-
-fn cmd_policy(args: &[String]) -> i32 {
-    if args.first().map(String::as_str) == Some("check") {
-        if args.len() < 2 {
-            eprintln!("Usage: {APP_NAME} policy check <command...>");
-            return 2;
-        }
-        let candidate = args[1..].join(" ");
-        let root = repo_root()
-            .or_else(|| env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        match evaluate_command_safety(&candidate, &root) {
-            SafetyDecision::Safe => println!("safe"),
-            SafetyDecision::Dangerous(reason) => println!("dangerous: {reason}"),
-        }
-        return 0;
-    }
-
-    if args.first().map(String::as_str) == Some("show") || args.is_empty() {
-        let unsafe_flag = env::var("CX_UNSAFE").ok().as_deref() == Some("1");
-        let force = env::var("CXFIX_FORCE").ok().as_deref() == Some("1");
-        println!("== cxrs policy show ==");
-        println!("Active safety rules:");
-        println!("- Block: sudo");
-        println!("- Block: rm -rf family");
-        println!("- Block: curl | bash/sh/zsh");
-        println!("- Block: chmod/chown on /System,/Library,/usr (except /usr/local)");
-        println!("- Block: write operations outside repo root");
-        println!();
-        println!("Unsafe override state:");
-        println!(
-            "--unsafe / CX_UNSAFE=1: {}",
-            if unsafe_flag { "on" } else { "off" }
-        );
-        println!("CXFIX_FORCE=1: {}", if force { "on" } else { "off" });
-        return 0;
-    }
-
-    println!("== cxrs policy ==");
-    println!("Dangerous command patterns blocked by default in fix-run:");
-    println!("- sudo (any)");
-    println!("- rm -rf / rm -fr forms");
-    println!("- curl | bash/sh/zsh");
-    println!("- chmod/chown on /System, /Library, /usr (except /usr/local)");
-    println!("- shell redirection/tee writes to /System, /Library, /usr (except /usr/local)");
-    println!();
-    println!("Overrides:");
-    println!("- --unsafe          allow dangerous execution for current command");
-    println!("- CXFIX_RUN=1       execute suggested commands");
-    println!("- CXFIX_FORCE=1     allow dangerous commands");
-    println!();
-    println!("Examples:");
-    println!("- {APP_NAME} policy check \"sudo rm -rf /tmp/foo\"");
-    println!("- {APP_NAME} policy check \"chmod 755 /usr/local/bin/tool\"");
-    0
-}
-
 fn print_roles() -> i32 {
     println!("== cxrs roles ==");
     println!("architect   Define approach, boundaries, and tradeoffs.");
@@ -5003,7 +4730,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
             }
             cmd_cxcopy(&args[1..])
         }
-        "cxpolicy" | "policy" => cmd_policy(&args[1..]),
+        "cxpolicy" | "policy" => cmd_policy(&args[1..], APP_NAME),
         "cxstate" | "state" => match args.get(1).map(String::as_str).unwrap_or("show") {
             "show" => cmd_state_show(),
             "get" => {
@@ -5379,7 +5106,7 @@ pub fn run() -> i32 {
             }
         },
         "llm" => cmd_llm(&args[2..]),
-        "policy" => cmd_policy(&args[2..]),
+        "policy" => cmd_policy(&args[2..], APP_NAME),
         "bench" => {
             if args.len() < 5 {
                 eprintln!("Usage: {APP_NAME} bench <runs> -- <command...>");

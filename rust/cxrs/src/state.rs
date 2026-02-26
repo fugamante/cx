@@ -95,3 +95,113 @@ pub fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+pub fn parse_cli_value(raw: &str) -> Value {
+    if let Ok(v) = serde_json::from_str::<Value>(raw) {
+        return v;
+    }
+    if raw.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if raw.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+    if raw.eq_ignore_ascii_case("null") {
+        return Value::Null;
+    }
+    if let Ok(v) = raw.parse::<i64>() {
+        return json!(v);
+    }
+    if let Ok(v) = raw.parse::<f64>() {
+        return json!(v);
+    }
+    Value::String(raw.to_string())
+}
+
+pub fn value_at_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = root;
+    for seg in path.split('.') {
+        if seg.is_empty() {
+            continue;
+        }
+        cur = cur.get(seg)?;
+    }
+    Some(cur)
+}
+
+pub fn set_value_at_path(root: &mut Value, path: &str, new_value: Value) -> Result<(), String> {
+    let mut segs: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
+    if segs.is_empty() {
+        return Err("key cannot be empty".to_string());
+    }
+    let last = segs.pop().unwrap_or_default();
+    let mut cur = root;
+    for seg in segs {
+        if !cur.is_object() {
+            *cur = json!({});
+        }
+        let obj = cur
+            .as_object_mut()
+            .ok_or_else(|| "failed to access state object".to_string())?;
+        cur = obj.entry(seg.to_string()).or_insert_with(|| json!({}));
+    }
+    if !cur.is_object() {
+        *cur = json!({});
+    }
+    let obj = cur
+        .as_object_mut()
+        .ok_or_else(|| "failed to access final state object".to_string())?;
+    obj.insert(last.to_string(), new_value);
+    Ok(())
+}
+
+pub fn set_state_path(path: &str, value: Value) -> Result<(), String> {
+    let (state_file, mut state) = ensure_state_value()?;
+    set_value_at_path(&mut state, path, value)?;
+    write_json_atomic(&state_file, &state)
+}
+
+pub fn current_task_id() -> Option<String> {
+    if let Ok(v) = std::env::var("CX_TASK_ID") {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "runtime.current_task_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+pub fn current_task_parent_id() -> Option<String> {
+    if let Ok(v) = std::env::var("CX_TASK_PARENT_ID") {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, "runtime.current_task_parent_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cli_value_handles_primitives() {
+        assert_eq!(parse_cli_value("true"), Value::Bool(true));
+        assert_eq!(parse_cli_value("42"), json!(42));
+        assert_eq!(parse_cli_value("3.5"), json!(3.5));
+        assert_eq!(parse_cli_value("null"), Value::Null);
+    }
+
+    #[test]
+    fn set_and_get_nested_path() {
+        let mut v = json!({});
+        set_value_at_path(&mut v, "a.b.c", json!(7)).expect("set nested path");
+        assert_eq!(value_at_path(&v, "a.b.c"), Some(&json!(7)));
+    }
+}
