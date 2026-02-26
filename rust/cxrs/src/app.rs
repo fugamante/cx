@@ -13,6 +13,7 @@ use crate::capture::{
     budget_config_from_env, chunk_text_by_budget, rtk_is_usable, rtk_version_raw,
     run_system_command_capture,
 };
+use crate::diagnostics::{cmd_diag, has_required_log_fields, last_appended_json_value};
 use crate::execmeta::{make_execution_id, toolchain_version_string, utc_now_iso};
 use crate::llm::{
     extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
@@ -27,9 +28,7 @@ use crate::paths::{
 use crate::policy::{SafetyDecision, cmd_policy, evaluate_command_safety};
 use crate::prompting::{cmd_fanout, cmd_prompt, cmd_promptlint, cmd_roles};
 use crate::quarantine::{cmd_quarantine_list, cmd_quarantine_show, read_quarantine_record};
-use crate::routing::{
-    bash_function_names, bash_type_of_function, cmd_routes, print_where, route_handler_for,
-};
+use crate::routing::{bash_function_names, cmd_routes, print_where, route_handler_for};
 use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
 use crate::runtime::{
     llm_backend, llm_bin_name, llm_model, logging_enabled, ollama_model_preference,
@@ -2212,146 +2211,6 @@ fn cmd_log_tail(n: usize) -> i32 {
     0
 }
 
-fn rtk_version_string() -> String {
-    let out = match Command::new("rtk").arg("--version").output() {
-        Ok(v) if v.status.success() => v,
-        _ => return "<unavailable>".to_string(),
-    };
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        "<unavailable>".to_string()
-    } else {
-        s
-    }
-}
-
-fn cmd_diag() -> i32 {
-    let ts = utc_now_iso();
-    let version = toolchain_version_string(APP_VERSION);
-    let backend = llm_backend();
-    let model = llm_model();
-    let active_model = if model.is_empty() { "<unset>" } else { &model };
-    let provider = env::var("CX_CAPTURE_PROVIDER").unwrap_or_else(|_| "auto".to_string());
-    let resolved_provider = match provider.as_str() {
-        "rtk" => "rtk",
-        "native" => "native",
-        _ => {
-            if bin_in_path("rtk")
-                && env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "1".to_string()) == "1"
-            {
-                "rtk"
-            } else {
-                "native"
-            }
-        }
-    };
-    let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
-    let budget_chars = env::var("CX_CONTEXT_BUDGET_CHARS").unwrap_or_else(|_| "12000".to_string());
-    let budget_lines = env::var("CX_CONTEXT_BUDGET_LINES").unwrap_or_else(|_| "300".to_string());
-    let clip_mode = env::var("CX_CONTEXT_CLIP_MODE").unwrap_or_else(|_| "smart".to_string());
-    let clip_footer = env::var("CX_CONTEXT_CLIP_FOOTER").unwrap_or_else(|_| "1".to_string());
-    let log_file = resolve_log_file()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved>".to_string());
-    let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
-    let schema_dir = repo.join(".codex").join("schemas");
-    let schema_count = if schema_dir.is_dir() {
-        fs::read_dir(&schema_dir)
-            .ok()
-            .map(|iter| {
-                iter.filter_map(Result::ok)
-                    .filter(|e| e.path().is_file())
-                    .count()
-            })
-            .unwrap_or(0)
-    } else {
-        0
-    };
-    let last_run_id = resolve_log_file()
-        .and_then(|p| {
-            let len = file_len(&p);
-            last_appended_json_value(&p, len.saturating_sub(8192))
-        })
-        .and_then(|v| {
-            v.get("execution_id")
-                .and_then(Value::as_str)
-                .map(|s| s.to_string())
-                .or_else(|| {
-                    v.get("prompt_sha256")
-                        .and_then(Value::as_str)
-                        .map(|s| s.to_string())
-                })
-        })
-        .unwrap_or_else(|| "<none>".to_string());
-    let sample_cmd = "cxo git status";
-    let rust_handles = route_handler_for("cxo");
-    let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
-    let route_reason = if let Some(h) = rust_handles.as_ref() {
-        format!("rust support found ({h})")
-    } else if bash_handles {
-        "bash fallback function exists".to_string()
-    } else {
-        "no rust route and no bash fallback".to_string()
-    };
-
-    println!("== cxdiag ==");
-    println!("timestamp: {ts}");
-    println!("version: {version}");
-    println!("mode: {mode}");
-    println!("backend: {backend}");
-    println!("active_model: {active_model}");
-    println!("capture_provider_config: {provider}");
-    println!("capture_provider_resolved: {resolved_provider}");
-    println!("rtk_available: {}", bin_in_path("rtk"));
-    println!("rtk_version: {}", rtk_version_string());
-    println!("budget_chars: {budget_chars}");
-    println!("budget_lines: {budget_lines}");
-    println!("clip_mode: {clip_mode}");
-    println!("clip_footer: {clip_footer}");
-    println!("log_file: {log_file}");
-    println!("last_run_id: {last_run_id}");
-    println!("schema_registry_dir: {}", schema_dir.display());
-    println!("schema_registry_files: {schema_count}");
-    println!(
-        "routing_trace: sample='{}' route={} reason={}",
-        sample_cmd,
-        if rust_handles.is_some() {
-            "rust"
-        } else if bash_handles {
-            "bash"
-        } else {
-            "unknown"
-        },
-        route_reason
-    );
-    0
-}
-
-fn last_appended_json_value(log_file: &Path, offset: u64) -> Option<Value> {
-    if !log_file.exists() {
-        return None;
-    }
-    let mut file = File::open(log_file).ok()?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
-    let start = (offset as usize).min(bytes.len());
-    let tail = String::from_utf8_lossy(&bytes[start..]);
-    tail.lines()
-        .rev()
-        .find_map(|line| serde_json::from_str::<Value>(line).ok())
-}
-
-fn has_required_log_fields(v: &Value) -> bool {
-    let required = [
-        "execution_id",
-        "backend_used",
-        "capture_provider",
-        "execution_mode",
-        "schema_valid",
-    ];
-    required.iter().all(|k| v.get(k).is_some())
-}
-
 fn cmd_parity() -> i32 {
     let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
     let exe = match env::current_exe() {
@@ -3268,7 +3127,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
         "cxdoctor" | "doctor" => print_doctor(),
         "cxwhere" | "where" => print_where(&args[1..], APP_VERSION),
         "cxroutes" | "routes" => cmd_routes(&args[1..]),
-        "cxdiag" | "diag" => cmd_diag(),
+        "cxdiag" | "diag" => cmd_diag(APP_VERSION),
         "cxparity" | "parity" => cmd_parity(),
         "cxcore" | "core" => cmd_core(),
         "cxlogs" | "logs" => cmd_logs(APP_NAME, &args[1..]),
@@ -3691,7 +3550,7 @@ pub fn run() -> i32 {
         "task" => cmd_task(&args[2..]),
         "where" => print_where(&args[2..], APP_VERSION),
         "routes" => cmd_routes(&args[2..]),
-        "diag" => cmd_diag(),
+        "diag" => cmd_diag(APP_VERSION),
         "parity" => cmd_parity(),
         "supports" => {
             let Some(name) = args.get(2) else {

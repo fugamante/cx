@@ -1,5 +1,6 @@
 mod app;
 mod capture;
+mod diagnostics;
 mod error;
 mod execmeta;
 mod llm;
