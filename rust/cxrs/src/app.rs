@@ -239,19 +239,21 @@ fn is_schema_tool(tool: &str) -> bool {
     )
 }
 
-fn log_codex_run(
-    tool: &str,
-    prompt: &str,
+struct RunLogInput<'a> {
+    tool: &'a str,
+    prompt: &'a str,
     duration_ms: u64,
-    usage: Option<&UsageStats>,
-    capture: Option<&CaptureStats>,
+    usage: Option<&'a UsageStats>,
+    capture: Option<&'a CaptureStats>,
     schema_ok: bool,
-    schema_reason: Option<&str>,
-    schema_name: Option<&str>,
-    quarantine_id: Option<&str>,
+    schema_reason: Option<&'a str>,
+    schema_name: Option<&'a str>,
+    quarantine_id: Option<&'a str>,
     policy_blocked: Option<bool>,
-    policy_reason: Option<&str>,
-) -> Result<(), String> {
+    policy_reason: Option<&'a str>,
+}
+
+fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
     let cwd = env::current_dir()
         .ok()
@@ -262,16 +264,16 @@ fn log_codex_run(
         .unwrap_or_default();
     let scope = if root.is_empty() { "global" } else { "repo" };
 
-    let input = usage.and_then(|u| u.input_tokens);
-    let cached = usage.and_then(|u| u.cached_input_tokens);
-    let output = usage.and_then(|u| u.output_tokens);
-    let effective = effective_input_tokens(input, cached);
-    let cap = capture.cloned().unwrap_or_default();
+    let input_tokens = input.usage.and_then(|u| u.input_tokens);
+    let cached = input.usage.and_then(|u| u.cached_input_tokens);
+    let output = input.usage.and_then(|u| u.output_tokens);
+    let effective = effective_input_tokens(input_tokens, cached);
+    let cap = input.capture.cloned().unwrap_or_default();
     let backend = llm_backend();
     let model = llm_model();
     let mode = env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string());
-    let exec_id = make_execution_id(tool);
-    let schema_enforced = is_schema_tool(tool);
+    let exec_id = make_execution_id(input.tool);
+    let schema_enforced = is_schema_tool(input.tool);
     let task_id = current_task_id().unwrap_or_default();
     let task_parent_id = current_task_parent_id().unwrap_or_default();
 
@@ -280,8 +282,8 @@ fn log_codex_run(
         execution_id: exec_id,
         timestamp: ts.clone(),
         ts,
-        command: tool.to_string(),
-        tool: tool.to_string(),
+        command: input.tool.to_string(),
+        tool: input.tool.to_string(),
         cwd,
         scope: scope.to_string(),
         repo_root: root,
@@ -290,13 +292,13 @@ fn log_codex_run(
         llm_model: if model.is_empty() { None } else { Some(model) },
         capture_provider: cap.capture_provider.clone(),
         execution_mode: mode,
-        duration_ms: Some(duration_ms),
+        duration_ms: Some(input.duration_ms),
         schema_enforced,
-        schema_name: schema_name.map(|s| s.to_string()),
-        schema_valid: schema_ok,
-        schema_ok,
-        schema_reason: schema_reason.map(|s| s.to_string()),
-        quarantine_id: quarantine_id.map(|s| s.to_string()),
+        schema_name: input.schema_name.map(|s| s.to_string()),
+        schema_valid: input.schema_ok,
+        schema_ok: input.schema_ok,
+        schema_reason: input.schema_reason.map(|s| s.to_string()),
+        quarantine_id: input.quarantine_id.map(|s| s.to_string()),
         task_id: if task_id.is_empty() {
             None
         } else {
@@ -307,7 +309,7 @@ fn log_codex_run(
         } else {
             Some(task_parent_id)
         },
-        input_tokens: input,
+        input_tokens,
         cached_input_tokens: cached,
         effective_input_tokens: effective,
         output_tokens: output,
@@ -323,10 +325,10 @@ fn log_codex_run(
         clip_mode: cap.clip_mode,
         clip_footer: cap.clip_footer,
         rtk_used: cap.rtk_used,
-        prompt_sha256: Some(sha256_hex(prompt)),
-        prompt_preview: Some(prompt_preview(prompt, 180)),
-        policy_blocked,
-        policy_reason: policy_reason.map(|s| s.to_string()),
+        prompt_sha256: Some(sha256_hex(input.prompt)),
+        prompt_preview: Some(prompt_preview(input.prompt, 180)),
+        policy_blocked: input.policy_blocked,
+        policy_reason: input.policy_reason.map(|s| s.to_string()),
     };
     validate_execution_log_row(&row)?;
     let value = serde_json::to_value(row).map_err(|e| format!("failed serialize run log: {e}"))?;
@@ -2640,23 +2642,23 @@ fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             }
             // keep full prompt hash/logging correlation for schema tasks
             if spec.logging_enabled && logging_enabled() {
-                let _ = log_codex_run(
-                    &spec.command_name,
-                    &last_full_prompt,
-                    started.elapsed().as_millis() as u64,
-                    Some(&usage),
-                    Some(&capture_stats),
-                    schema_valid.unwrap_or(false),
-                    if schema_valid == Some(false) {
+                let _ = log_codex_run(RunLogInput {
+                    tool: &spec.command_name,
+                    prompt: &last_full_prompt,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                    usage: Some(&usage),
+                    capture: Some(&capture_stats),
+                    schema_ok: schema_valid.unwrap_or(false),
+                    schema_reason: if schema_valid == Some(false) {
                         final_reason.as_deref().or(Some("schema_validation_failed"))
                     } else {
                         None
                     },
-                    spec.schema.as_ref().map(|s| s.name.as_str()),
-                    quarantine_id.as_deref(),
-                    None,
-                    None,
-                );
+                    schema_name: spec.schema.as_ref().map(|s| s.name.as_str()),
+                    quarantine_id: quarantine_id.as_deref(),
+                    policy_blocked: None,
+                    policy_reason: None,
+                });
             }
             return Ok(ExecutionResult {
                 stdout,
@@ -2674,19 +2676,19 @@ fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
 
     if spec.logging_enabled && logging_enabled() {
         let schema_name = spec.schema.as_ref().map(|s| s.name.as_str());
-        let _ = log_codex_run(
-            &spec.command_name,
-            &prompt,
-            started.elapsed().as_millis() as u64,
-            Some(&usage),
-            Some(&capture_stats),
-            schema_valid.unwrap_or(true),
-            None,
+        let _ = log_codex_run(RunLogInput {
+            tool: &spec.command_name,
+            prompt: &prompt,
+            duration_ms: started.elapsed().as_millis() as u64,
+            usage: Some(&usage),
+            capture: Some(&capture_stats),
+            schema_ok: schema_valid.unwrap_or(true),
+            schema_reason: None,
             schema_name,
-            quarantine_id.as_deref(),
-            None,
-            None,
-        );
+            quarantine_id: quarantine_id.as_deref(),
+            policy_blocked: None,
+            policy_reason: None,
+        });
     }
 
     Ok(ExecutionResult {
@@ -4039,19 +4041,19 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         }
     };
     if result.schema_valid == Some(false) {
-        let _ = log_codex_run(
-            "cxrs_fix_run",
-            &task_input,
-            result.duration_ms,
-            Some(&result.usage),
-            Some(&result.capture_stats),
-            false,
-            Some("schema_validation_failed"),
-            Some(schema.name.as_str()),
-            result.quarantine_id.as_deref(),
-            None,
-            None,
-        );
+        let _ = log_codex_run(RunLogInput {
+            tool: "cxrs_fix_run",
+            prompt: &task_input,
+            duration_ms: result.duration_ms,
+            usage: Some(&result.usage),
+            capture: Some(&result.capture_stats),
+            schema_ok: false,
+            schema_reason: Some("schema_validation_failed"),
+            schema_name: Some(schema.name.as_str()),
+            quarantine_id: result.quarantine_id.as_deref(),
+            policy_blocked: None,
+            policy_reason: None,
+        });
         if let Some(qid) = result.quarantine_id.as_deref() {
             eprintln!("cxrs fix-run: schema failure; quarantine_id={qid}");
         }
@@ -4097,19 +4099,19 @@ fn cmd_fix_run(command: &[String]) -> i32 {
     let allow_unsafe = unsafe_override || unsafe_env;
     if !should_run {
         println!("Not running suggested commands (set CXFIX_RUN=1 to execute).");
-        let _ = log_codex_run(
-            "cxrs_fix_run",
-            &task_input,
-            result.duration_ms,
-            Some(&result.usage),
-            Some(&result.capture_stats),
-            true,
-            None,
-            Some(schema.name.as_str()),
-            None,
-            None,
-            None,
-        );
+        let _ = log_codex_run(RunLogInput {
+            tool: "cxrs_fix_run",
+            prompt: &task_input,
+            duration_ms: result.duration_ms,
+            usage: Some(&result.usage),
+            capture: Some(&result.capture_stats),
+            schema_ok: true,
+            schema_reason: None,
+            schema_name: Some(schema.name.as_str()),
+            quarantine_id: None,
+            policy_blocked: None,
+            policy_reason: None,
+        });
         return if exit_status == 0 { 0 } else { exit_status };
     }
 
@@ -4140,24 +4142,24 @@ fn cmd_fix_run(command: &[String]) -> i32 {
         }
     }
 
-    let _ = log_codex_run(
-        "cxrs_fix_run",
-        &task_input,
-        result.duration_ms,
-        Some(&result.usage),
-        Some(&result.capture_stats),
-        true,
-        None,
-        Some(schema.name.as_str()),
-        None,
-        Some(policy_blocked),
-        if policy_reasons.is_empty() {
-            None
-        } else {
-            Some(policy_reasons.join("; "))
-        }
-        .as_deref(),
-    );
+    let policy_reason_joined = if policy_reasons.is_empty() {
+        None
+    } else {
+        Some(policy_reasons.join("; "))
+    };
+    let _ = log_codex_run(RunLogInput {
+        tool: "cxrs_fix_run",
+        prompt: &task_input,
+        duration_ms: result.duration_ms,
+        usage: Some(&result.usage),
+        capture: Some(&result.capture_stats),
+        schema_ok: true,
+        schema_reason: None,
+        schema_name: Some(schema.name.as_str()),
+        quarantine_id: None,
+        policy_blocked: Some(policy_blocked),
+        policy_reason: policy_reason_joined.as_deref(),
+    });
 
     if exit_status == 0 { 0 } else { exit_status }
 }

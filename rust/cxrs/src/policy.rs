@@ -35,15 +35,13 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
     let last = tokens.last().cloned().unwrap_or_default();
     for i in 0..tokens.len() {
         let t = tokens[i].as_str();
-        if t == ">" || t == ">>" || t == "tee" {
-            if let Some(next) = tokens.get(i + 1) {
-                candidates.push(next.clone());
-            }
+        if (t == ">" || t == ">>" || t == "tee") && let Some(next) = tokens.get(i + 1) {
+            candidates.push(next.clone());
         }
-        if t == "touch" || t == "mkdir" || t == "chmod" || t == "chown" {
-            if let Some(next) = tokens.get(i + 1) {
-                candidates.push(next.clone());
-            }
+        if (t == "touch" || t == "mkdir" || t == "chmod" || t == "chown")
+            && let Some(next) = tokens.get(i + 1)
+        {
+            candidates.push(next.clone());
         }
         if let Some(path) = t.strip_prefix("of=") {
             candidates.push(path.to_string());

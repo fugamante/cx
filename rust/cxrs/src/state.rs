@@ -14,15 +14,14 @@ pub fn state_cache_clear() {
 }
 
 pub fn read_state_value() -> Option<Value> {
-    if std::env::var("CX_NO_CACHE").ok().as_deref() != Some("1") {
-        if let Some(v) = STATE_CACHE
+    if std::env::var("CX_NO_CACHE").ok().as_deref() != Some("1")
+        && let Some(v) = STATE_CACHE
             .get_or_init(|| Mutex::new(None))
             .lock()
             .ok()
             .and_then(|g| g.clone())
-        {
-            return Some(v);
-        }
+    {
+        return Some(v);
     }
     let state_file = resolve_state_file()?;
     if !state_file.exists() {
@@ -31,10 +30,10 @@ pub fn read_state_value() -> Option<Value> {
     let mut s = String::new();
     File::open(state_file).ok()?.read_to_string(&mut s).ok()?;
     let parsed = serde_json::from_str::<Value>(&s).ok()?;
-    if std::env::var("CX_NO_CACHE").ok().as_deref() != Some("1") {
-        if let Ok(mut g) = STATE_CACHE.get_or_init(|| Mutex::new(None)).lock() {
-            *g = Some(parsed.clone());
-        }
+    if std::env::var("CX_NO_CACHE").ok().as_deref() != Some("1")
+        && let Ok(mut g) = STATE_CACHE.get_or_init(|| Mutex::new(None)).lock()
+    {
+        *g = Some(parsed.clone());
     }
     Some(parsed)
 }
@@ -161,10 +160,10 @@ pub fn set_state_path(path: &str, value: Value) -> Result<(), String> {
 }
 
 pub fn current_task_id() -> Option<String> {
-    if let Ok(v) = std::env::var("CX_TASK_ID") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
+    if let Ok(v) = std::env::var("CX_TASK_ID")
+        && !v.trim().is_empty()
+    {
+        return Some(v);
     }
     read_state_value()
         .as_ref()
@@ -174,10 +173,10 @@ pub fn current_task_id() -> Option<String> {
 }
 
 pub fn current_task_parent_id() -> Option<String> {
-    if let Ok(v) = std::env::var("CX_TASK_PARENT_ID") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
+    if let Ok(v) = std::env::var("CX_TASK_PARENT_ID")
+        && !v.trim().is_empty()
+    {
+        return Some(v);
     }
     read_state_value()
         .as_ref()
