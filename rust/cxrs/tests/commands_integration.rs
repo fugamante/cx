@@ -4,6 +4,15 @@ use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
 
+fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
+    for line in s.lines() {
+        if let Some(rest) = line.strip_prefix(label) {
+            return rest.trim().parse::<u64>().ok();
+        }
+    }
+    None
+}
+
 #[test]
 fn task_lifecycle_add_claim_complete() {
     let repo = TempRepo::new("cxrs-it");
@@ -223,6 +232,40 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
     let sev_out = stdout_str(&severity_only);
     assert!(sev_out.contains("severity:"), "{sev_out}");
     assert!(!sev_out.contains("field_population"), "{sev_out}");
+
+    let validate = repo.run(&["logs", "validate"]);
+    assert_eq!(
+        validate.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        stdout_str(&validate),
+        stderr_str(&validate)
+    );
+    let validate_out = stdout_str(&validate);
+    let issue_count = parse_labeled_u64(&validate_out, "issue_count:")
+        .expect("issue_count in logs validate output");
+
+    let telemetry_json = repo.run(&["telemetry", "1", "--json"]);
+    assert!(
+        telemetry_json.status.success(),
+        "stderr={}",
+        stderr_str(&telemetry_json)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&telemetry_json)).expect("telemetry json");
+    let required = v
+        .get("required_fields")
+        .and_then(Value::as_u64)
+        .expect("required_fields");
+    let strict_violations = v
+        .get("strict_violations")
+        .and_then(Value::as_u64)
+        .expect("strict_violations");
+
+    assert_eq!(
+        issue_count, strict_violations,
+        "logs validate and telemetry strict violation counts diverged"
+    );
+    assert_eq!(required, 26, "unexpected strict contract field count");
 }
 
 #[cfg(target_os = "macos")]

@@ -126,12 +126,10 @@ fn validate_logs(
     errors: &mut Vec<String>,
     warnings: &mut Vec<String>,
 ) -> Option<PathBuf> {
-    let log_file = resolve_log_file();
-    if log_file.is_none() {
+    let Some(log_file) = resolve_log_file() else {
         errors.push("unable to resolve log file".to_string());
         return None;
-    }
-    let log_file = log_file.expect("checked is_some");
+    };
     if !log_file.exists() {
         warnings.push(format!("no log file at {}", log_file.display()));
         return Some(log_file);

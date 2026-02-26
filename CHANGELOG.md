@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `rust/cxrs/src/modules/log_contract.rs`:
+  - single shared strict telemetry contract field list used by both log validation and telemetry stats.
+- capture/analytics module decomposition:
+  - `rust/cxrs/src/modules/capture_budget.rs`
+  - `rust/cxrs/src/modules/capture_reduce.rs`
+  - `rust/cxrs/src/modules/capture_rtk.rs`
+  - `rust/cxrs/src/modules/capture_system.rs`
+  - `rust/cxrs/src/modules/analytics_shared.rs`
+  - `rust/cxrs/src/modules/analytics_profile_metrics.rs`
+  - `rust/cxrs/src/modules/analytics_alert.rs`
+- contract consistency test coverage:
+  - `logs validate` and `telemetry --json` strict violation counts are asserted in `rust/cxrs/tests/commands_integration.rs`.
 - `rust/cxrs/src/modules/execution_logging.rs`:
   - extracted execution error-log payload/writer from `execution.rs` to keep execution core lean and reusable.
 - `rust/cxrs/src/modules/logs_stats.rs`:
@@ -87,6 +99,15 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `.github/workflows/cxrs-compat.yml` trigger scope widened:
+  - now includes changes under `bin/**`, `lib/**`, `test/**`, and `cx.sh`.
+- `.github/workflows/cxrs-compat.yml` now runs shell-level regression scripts (`test/*.sh`) in CI.
+- `rust/cxrs/src/modules/schema_ops.rs`:
+  - removed `expect(...)` on resolved log file path in runtime validation flow.
+- `rust/cxrs/src/modules/policy.rs`:
+  - removed `expect(...)` in path safety evaluation flow.
+- `rust/cxrs/src/modules/capture.rs` and `rust/cxrs/src/modules/analytics.rs`:
+  - now operate as thin facades with logic delegated to dedicated submodules.
 - `.github/workflows/cxrs-compat.yml` now enforces:
   - `cargo clippy --all-targets -- -D warnings` in the Rust check gate.
 - `rust/cxrs/src/modules/logs_cmd.rs` reduced scope:

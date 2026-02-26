@@ -1,37 +1,9 @@
-use crate::paths::resolve_log_file;
+use crate::log_contract::REQUIRED_STRICT_FIELDS;
 use crate::logs::load_values;
+use crate::paths::resolve_log_file;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::Path;
-
-const REQUIRED_STRICT_FIELDS: [&str; 26] = [
-    "execution_id",
-    "timestamp",
-    "command",
-    "backend_used",
-    "capture_provider",
-    "execution_mode",
-    "duration_ms",
-    "schema_enforced",
-    "schema_valid",
-    "quarantine_id",
-    "task_id",
-    "system_output_len_raw",
-    "system_output_len_processed",
-    "system_output_len_clipped",
-    "system_output_lines_raw",
-    "system_output_lines_processed",
-    "system_output_lines_clipped",
-    "input_tokens",
-    "cached_input_tokens",
-    "effective_input_tokens",
-    "output_tokens",
-    "policy_blocked",
-    "policy_reason",
-    "timed_out",
-    "timeout_secs",
-    "command_label",
-];
 
 struct StatsArgs {
     n: usize,

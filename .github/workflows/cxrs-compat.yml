@@ -6,12 +6,20 @@ on:
       - main
     paths:
       - rust/cxrs/**
+      - bin/**
+      - lib/**
+      - test/**
+      - cx.sh
       - .github/workflows/cxrs-compat.yml
   pull_request:
     branches:
       - main
     paths:
       - rust/cxrs/**
+      - bin/**
+      - lib/**
+      - test/**
+      - cx.sh
       - .github/workflows/cxrs-compat.yml
   workflow_dispatch:
 
@@ -76,3 +84,11 @@ jobs:
         run: |
           cd rust/cxrs
           ./scripts/compat_check.sh 50
+
+      - name: Shell Regression Suite
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          for t in test/*.sh; do
+            bash "$t"
+          done

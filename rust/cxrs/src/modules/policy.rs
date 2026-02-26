@@ -79,10 +79,9 @@ fn path_is_outside_repo(p: &str, repo_root: &Path) -> bool {
 
     let root_abs = canonical_or_owned(repo_root);
     let candidate = resolve_candidate_path(path, repo_root);
-    if candidate.is_none() {
+    let Some(candidate) = candidate else {
         return true;
-    }
-    let candidate = candidate.expect("checked some");
+    };
     if candidate.exists() {
         let canon = canonical_or_owned(&candidate);
         return !canon_starts_with(&canon, &root_abs);

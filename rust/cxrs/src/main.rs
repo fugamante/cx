@@ -41,6 +41,8 @@ mod help;
 mod introspect;
 #[path = "modules/llm.rs"]
 mod llm;
+#[path = "modules/log_contract.rs"]
+mod log_contract;
 #[path = "modules/logs.rs"]
 mod logs;
 #[path = "modules/logs_stats.rs"]
