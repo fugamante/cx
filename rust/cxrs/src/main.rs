@@ -1,4 +1,5 @@
 mod app;
+mod capture;
 mod error;
 mod logs;
 mod paths;
