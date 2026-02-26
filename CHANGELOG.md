@@ -29,6 +29,7 @@ All notable changes to this project are documented in this file.
   - `src/runtime_controls.rs`
   - `src/introspect.rs`
   - `src/doctor.rs`
+  - `src/schema_ops.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -53,6 +54,7 @@ All notable changes to this project are documented in this file.
 - Extracted runtime toggle/status commands (`log-on/off`, `alert-*`, `rtk-status`) from `app.rs` to `src/runtime_controls.rs`.
 - Extracted version/core introspection output builders from `app.rs` to `src/introspect.rs`.
 - Extracted non-interactive doctor/health checks from `app.rs` to `src/doctor.rs` and routed compat/native command paths through it.
+- Extracted `schema list` and `ci validate` command handlers into `src/schema_ops.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

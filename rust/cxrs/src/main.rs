@@ -20,6 +20,7 @@ mod runlog;
 mod runtime;
 mod runtime_controls;
 mod schema;
+mod schema_ops;
 mod state;
 mod taskrun;
 mod tasks;
