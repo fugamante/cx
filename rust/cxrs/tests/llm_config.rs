@@ -2,7 +2,27 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread::sleep;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
+    let mut last = None;
+    for _ in 0..5 {
+        let out = Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(format!("--template={}", template_dir.display()))
+            .current_dir(root)
+            .output()
+            .expect("run git init");
+        if out.status.success() {
+            return;
+        }
+        last = Some(out);
+        sleep(Duration::from_millis(50));
+    }
+    panic!("git init failed after retries: {:?}", last);
+}
 
 struct TempRepo {
     root: PathBuf,
@@ -23,14 +43,7 @@ impl TempRepo {
 
         let template_dir = root.join(".git-template");
         fs::create_dir_all(&template_dir).expect("create git template dir");
-        let init = Command::new("git")
-            .arg("init")
-            .arg("-q")
-            .arg(format!("--template={}", template_dir.display()))
-            .current_dir(&root)
-            .output()
-            .expect("run git init");
-        assert!(init.status.success(), "git init failed: {:?}", init);
+        init_git_repo_with_retry(&root, &template_dir);
 
         Self { root, home }
     }

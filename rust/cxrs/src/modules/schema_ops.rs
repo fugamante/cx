@@ -1,6 +1,7 @@
 use jsonschema::JSONSchema;
 use serde_json::{Value, json};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::capture::budget_config_from_env;
 use crate::logs::validate_runs_jsonl_file;
@@ -57,79 +58,103 @@ pub fn cmd_schema(app_name: &str, args: &[String]) -> i32 {
     0
 }
 
-pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
+struct CiArgs {
+    strict: bool,
+    legacy_ok: bool,
+    json_out: bool,
+}
+
+fn parse_ci_args(app_name: &str, args: &[String]) -> Result<CiArgs, i32> {
     let sub = args.first().map(String::as_str).unwrap_or("validate");
     if sub != "validate" {
         eprintln!("Usage: {app_name} ci validate [--strict] [--legacy-ok] [--json]");
-        return 2;
+        return Err(2);
     }
-    let strict = args.iter().any(|a| a == "--strict");
-    let legacy_ok = args.iter().any(|a| a == "--legacy-ok");
-    let json_out = args.iter().any(|a| a == "--json");
+    Ok(CiArgs {
+        strict: args.iter().any(|a| a == "--strict"),
+        legacy_ok: args.iter().any(|a| a == "--legacy-ok"),
+        json_out: args.iter().any(|a| a == "--json"),
+    })
+}
 
-    let mut errors: Vec<String> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
+fn validate_schema_file(path: &Path, errors: &mut Vec<String>) {
+    let parsed = fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+    match parsed {
+        Some(v) => {
+            if let Err(e) = JSONSchema::compile(&v) {
+                errors.push(format!(
+                    "schema failed to compile ({}): {e}",
+                    path.display()
+                ));
+            }
+        }
+        None => errors.push(format!(
+            "schema unreadable/invalid json: {}",
+            path.display()
+        )),
+    }
+}
 
-    let Some(root) = repo_root() else {
-        eprintln!("cxrs ci validate: not inside a git repository");
-        return 2;
-    };
-    let schema_dir = root.join(".codex").join("schemas");
+fn check_required_schemas(schema_dir: &Path, errors: &mut Vec<String>) {
     if !schema_dir.is_dir() {
         errors.push(format!(
             "missing schema registry dir: {}",
             schema_dir.display()
         ));
-    } else {
-        let required = [
-            "commitjson.schema.json",
-            "diffsum.schema.json",
-            "next.schema.json",
-            "fixrun.schema.json",
-        ];
-        for name in required {
-            let p = schema_dir.join(name);
-            if !p.is_file() {
-                errors.push(format!("missing schema: {}", p.display()));
-            } else {
-                match fs::read_to_string(&p)
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                {
-                    Some(v) => {
-                        if let Err(e) = JSONSchema::compile(&v) {
-                            errors.push(format!("schema failed to compile ({}): {e}", p.display()));
-                        }
-                    }
-                    None => errors.push(format!("schema unreadable/invalid json: {}", p.display())),
-                }
-            }
+        return;
+    }
+    let required = [
+        "commitjson.schema.json",
+        "diffsum.schema.json",
+        "next.schema.json",
+        "fixrun.schema.json",
+    ];
+    for name in required {
+        let p = schema_dir.join(name);
+        if !p.is_file() {
+            errors.push(format!("missing schema: {}", p.display()));
+        } else {
+            validate_schema_file(&p, errors);
         }
     }
+}
 
+fn validate_logs(
+    legacy_ok: bool,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> Option<PathBuf> {
     let log_file = resolve_log_file();
     if log_file.is_none() {
         errors.push("unable to resolve log file".to_string());
+        return None;
     }
-    if let Some(log_file) = log_file {
-        if log_file.exists() {
-            match validate_runs_jsonl_file(&log_file, legacy_ok) {
-                Ok(outcome) => {
-                    if !outcome.issues.is_empty() {
-                        if outcome.legacy_ok && outcome.invalid_json_lines == 0 {
-                            warnings.extend(outcome.issues);
-                        } else {
-                            errors.extend(outcome.issues);
-                        }
-                    }
+    let log_file = log_file.expect("checked is_some");
+    if !log_file.exists() {
+        warnings.push(format!("no log file at {}", log_file.display()));
+        return Some(log_file);
+    }
+    match validate_runs_jsonl_file(&log_file, legacy_ok) {
+        Ok(outcome) => {
+            if !outcome.issues.is_empty() {
+                if outcome.legacy_ok && outcome.invalid_json_lines == 0 {
+                    warnings.extend(outcome.issues);
+                } else {
+                    errors.extend(outcome.issues);
                 }
-                Err(e) => errors.push(e),
             }
-        } else {
-            warnings.push(format!("no log file at {}", log_file.display()));
         }
+        Err(e) => errors.push(e),
     }
+    Some(log_file)
+}
 
+fn validate_budget(
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> crate::capture::BudgetConfig {
     let budget = budget_config_from_env();
     if budget.budget_chars == 0 {
         errors.push("budget_chars must be > 0".to_string());
@@ -143,39 +168,57 @@ pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
             budget.clip_mode
         ));
     }
+    budget
+}
 
-    if strict {
-        let qdir = root.join(".codex").join("quarantine");
-        if qdir.exists() && !qdir.is_dir() {
-            errors.push(format!(
-                "quarantine path exists but is not a dir: {}",
-                qdir.display()
-            ));
-        }
+fn print_ci_json(
+    ok: bool,
+    args: &CiArgs,
+    root: &Path,
+    schema_dir: &Path,
+    log_file: Option<PathBuf>,
+    budget: &crate::capture::BudgetConfig,
+    warnings: Vec<String>,
+    errors: Vec<String>,
+) -> i32 {
+    let v = json!({
+        "ok": ok,
+        "strict": args.strict,
+        "legacy_ok": args.legacy_ok,
+        "repo_root": root.display().to_string(),
+        "schema_dir": schema_dir.display().to_string(),
+        "log_file": log_file.map(|p| p.display().to_string()),
+        "budget_chars": budget.budget_chars,
+        "budget_lines": budget.budget_lines,
+        "clip_mode": budget.clip_mode,
+        "warnings": warnings,
+        "errors": errors
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())
+    );
+    if ok { 0 } else { 1 }
+}
+
+fn print_sample(label: &str, items: &[String], max: usize) {
+    println!("{label}: {}", items.len());
+    for item in items.iter().take(max) {
+        println!("- {item}");
     }
-
-    let ok = errors.is_empty();
-    if json_out {
-        let v = json!({
-            "ok": ok,
-            "strict": strict,
-            "legacy_ok": legacy_ok,
-            "repo_root": root.display().to_string(),
-            "schema_dir": schema_dir.display().to_string(),
-            "log_file": resolve_log_file().map(|p| p.display().to_string()),
-            "budget_chars": budget.budget_chars,
-            "budget_lines": budget.budget_lines,
-            "clip_mode": budget.clip_mode,
-            "warnings": warnings,
-            "errors": errors
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())
-        );
-        return if ok { 0 } else { 1 };
+    if items.len() > max {
+        println!("- ... and {} more", items.len() - max);
     }
+}
 
+fn print_ci_text(
+    ok: bool,
+    root: &Path,
+    schema_dir: &Path,
+    budget: &crate::capture::BudgetConfig,
+    warnings: &[String],
+    errors: &[String],
+) -> i32 {
     println!("== cxrs ci validate ==");
     println!("repo_root: {}", root.display());
     println!("schema_dir: {}", schema_dir.display());
@@ -189,29 +232,62 @@ pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
         budget.budget_chars, budget.budget_lines, budget.clip_mode
     );
 
-    if !warnings.is_empty() {
-        println!("warnings: {}", warnings.len());
-        for w in warnings.iter().take(10) {
-            println!("- {w}");
-        }
-        if warnings.len() > 10 {
-            println!("- ... and {} more", warnings.len() - 10);
-        }
-    } else {
+    if warnings.is_empty() {
         println!("warnings: 0");
+    } else {
+        print_sample("warnings", warnings, 10);
     }
 
-    if !errors.is_empty() {
-        println!("errors: {}", errors.len());
-        for e in errors.iter().take(20) {
-            println!("- {e}");
-        }
-        if errors.len() > 20 {
-            println!("- ... and {} more", errors.len() - 20);
-        }
-        println!("status: fail");
-        return 1;
+    if errors.is_empty() {
+        println!("status: ok");
+        return 0;
     }
-    println!("status: ok");
-    0
+    print_sample("errors", errors, 20);
+    println!("status: fail");
+    if ok { 0 } else { 1 }
+}
+
+pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
+    let parsed = match parse_ci_args(app_name, args) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+
+    let Some(root) = repo_root() else {
+        eprintln!("cxrs ci validate: not inside a git repository");
+        return 2;
+    };
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    let schema_dir = root.join(".codex").join("schemas");
+
+    check_required_schemas(&schema_dir, &mut errors);
+    let log_file = validate_logs(parsed.legacy_ok, &mut errors, &mut warnings);
+    let budget = validate_budget(&mut errors, &mut warnings);
+
+    if parsed.strict {
+        let qdir = root.join(".codex").join("quarantine");
+        if qdir.exists() && !qdir.is_dir() {
+            errors.push(format!(
+                "quarantine path exists but is not a dir: {}",
+                qdir.display()
+            ));
+        }
+    }
+
+    let ok = errors.is_empty();
+    if parsed.json_out {
+        return print_ci_json(
+            ok,
+            &parsed,
+            &root,
+            &schema_dir,
+            log_file,
+            &budget,
+            warnings,
+            errors,
+        );
+    }
+    print_ci_text(ok, &root, &schema_dir, &budget, &warnings, &errors)
 }
