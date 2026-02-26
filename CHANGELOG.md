@@ -32,6 +32,7 @@ All notable changes to this project are documented in this file.
   - `src/schema_ops.rs`
   - `src/settings_cmds.rs`
   - `src/structured_cmds.rs`
+  - `src/task_cmds.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -59,6 +60,7 @@ All notable changes to this project are documented in this file.
 - Extracted `schema list` and `ci validate` command handlers into `src/schema_ops.rs`.
 - Extracted state and LLM preference command handlers (`state show/get/set`, `llm *`) into `src/settings_cmds.rs`.
 - Extracted structured command family (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`) into `src/structured_cmds.rs`.
+- Extracted task command dispatcher (`task add/list/show/claim/complete/fail/fanout/run/run-all`) into `src/task_cmds.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

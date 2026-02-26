@@ -24,6 +24,7 @@ mod schema_ops;
 mod settings_cmds;
 mod state;
 mod structured_cmds;
+mod task_cmds;
 mod taskrun;
 mod tasks;
 mod types;
