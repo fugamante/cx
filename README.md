@@ -11,7 +11,7 @@
 - Safety layer for command execution boundaries and policy visibility (`policy show`)
 - Backend model: Codex by default, Ollama optional/user-selectable
 
-## Technical Expose (Rust Refactor Snapshot)
+## Technical Exposé (Rust Refactor Snapshot)
 
 This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
 
