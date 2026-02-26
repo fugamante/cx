@@ -36,7 +36,7 @@ This master manual synthesizes three viewpoints:
 \begin{itemize}
   \item Active branch focus: split monolithic command logic into cohesive Rust modules.
   \item Orchestrator: \texttt{src/app.rs} (routing + composition).
-  \item Core extracted command modules: \texttt{introspect}, \texttt{runtime\_controls}, \texttt{agentcmds}, \texttt{logview}, \texttt{analytics}, \texttt{diagnostics}, \texttt{routing}, \texttt{prompting}, \texttt{optimize}, \texttt{doctor}, \texttt{schema\_ops}, \texttt{settings\_cmds}.
+  \item Core extracted command modules: \texttt{introspect}, \texttt{runtime\_controls}, \texttt{agentcmds}, \texttt{logview}, \texttt{analytics}, \texttt{diagnostics}, \texttt{routing}, \texttt{prompting}, \texttt{optimize}, \texttt{doctor}, \texttt{schema\_ops}, \texttt{settings\_cmds}, \texttt{structured\_cmds}, \texttt{task\_cmds}.
   \item Behavioral contract is unchanged: deterministic schemas, quarantine/replay, policy gating, budgeted capture, append-only logs.
   \item Quality gate per extraction slice: \texttt{cargo fmt} + \texttt{cargo test} must pass.
 \end{itemize}

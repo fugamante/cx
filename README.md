@@ -31,6 +31,8 @@ Current refactor highlights:
   - `src/doctor.rs` (`doctor`, `health`)
   - `src/schema_ops.rs` (`schema list`, `ci validate`)
   - `src/settings_cmds.rs` (`state *`, `llm *`)
+  - `src/structured_cmds.rs` (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`)
+  - `src/task_cmds.rs` (`task add/list/show/claim/complete/fail/fanout/run/run-all`)
 
 Design intent:
 - keep command UX stable while shrinking coupling and improving testability
