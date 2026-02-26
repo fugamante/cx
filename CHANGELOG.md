@@ -57,6 +57,12 @@ All notable changes to this project are documented in this file.
   - ollama timeout/failure-path coverage with backend + timeout log assertions
   - rtk capture failure fallback coverage (`capture_provider=native`, `rtk_used=false`)
   - `fix-run` policy-block invariant coverage (`policy_blocked=true` + reason present)
+  - expanded failure-matrix coverage:
+    - missing schema file in partial registry scenarios
+    - corrupted quarantine record handling (`quarantine show`)
+    - unwritable `.codex/quarantine` error surfacing during schema failure handling
+    - unwritable `.codex/cxlogs` resilience (command execution remains functional)
+    - timeout override end-to-end coverage for `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, and `CX_TIMEOUT_SHELL_SECS`
 
 ### Changed
 - Replaced string-parsed timeout telemetry with structured timeout propagation:

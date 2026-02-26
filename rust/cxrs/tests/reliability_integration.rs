@@ -166,6 +166,22 @@ fn parse_jsonl(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+#[cfg(unix)]
+fn set_readonly(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(path).expect("metadata").permissions();
+    perms.set_mode(0o555);
+    fs::set_permissions(path, perms).expect("set readonly");
+}
+
+#[cfg(unix)]
+fn set_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(path).expect("metadata").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).expect("set writable");
+}
+
 fn assert_required_run_fields(v: &Value) {
     for key in [
         "execution_id",
@@ -230,6 +246,97 @@ sleep 2
 }
 
 #[test]
+fn timeout_override_llm_precedence_is_logged_end_to_end() {
+    let repo = TempRepo::new();
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 2
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["cxo", "echo", "hello"],
+        &[("CX_CMD_TIMEOUT_SECS", "9"), ("CX_TIMEOUT_LLM_SECS", "1")],
+    );
+    assert!(
+        !out.status.success(),
+        "expected timeout failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = parse_jsonl(&repo.runs_log());
+    let last = runs.last().expect("last run");
+    assert_eq!(last.get("timed_out").and_then(Value::as_bool), Some(true));
+    assert_eq!(last.get("timeout_secs").and_then(Value::as_u64), Some(1));
+    assert!(
+        last.get("command_label")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.contains("codex"))
+    );
+}
+
+#[test]
+fn timeout_override_git_precedence_is_logged_end_to_end() {
+    let repo = TempRepo::new();
+    repo.write_mock(
+        "git",
+        r#"#!/usr/bin/env bash
+sleep 2
+exit 0
+"#,
+    );
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
+
+    let out = repo.run_with_env(
+        &["cxo", "git", "status"],
+        &[("CX_CMD_TIMEOUT_SECS", "9"), ("CX_TIMEOUT_GIT_SECS", "1")],
+    );
+    assert!(
+        !out.status.success(),
+        "expected git timeout; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("timed out after 1s"),
+        "expected git timeout override in stderr: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn timeout_override_shell_precedence_applies_to_clipboard_backend() {
+    let repo = TempRepo::new();
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text("copy me"));
+    repo.write_mock(
+        "pbcopy",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 2
+exit 0
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["cxcopy", "echo", "hello"],
+        &[("CX_CMD_TIMEOUT_SECS", "9"), ("CX_TIMEOUT_SHELL_SECS", "1")],
+    );
+    assert!(
+        !out.status.success(),
+        "expected clipboard timeout failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("pbcopy timed out after 1s"),
+        "expected shell timeout override in stderr: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
 fn schema_failure_injection_creates_quarantine_and_run_flags() {
     let repo = TempRepo::new();
     repo.write_mock(
@@ -268,6 +375,107 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
         Some(false)
     );
     assert_eq!(last.get("quarantine_id").and_then(Value::as_str), Some(qid));
+}
+
+#[test]
+fn missing_schema_file_fails_structured_command_cleanly() {
+    let repo = TempRepo::new();
+    let schema_file = repo
+        .root
+        .join(".codex")
+        .join("schemas")
+        .join("next.schema.json");
+    fs::remove_file(&schema_file).expect("remove next schema");
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text("{\"commands\":[\"echo ok\"]}"));
+
+    let out = repo.run_with_env(&["next", "echo", "hello"], &[]);
+    assert!(
+        !out.status.success(),
+        "expected missing schema failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("failed to read"),
+        "missing schema error not surfaced: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn corrupted_quarantine_record_fails_show_with_clear_error() {
+    let repo = TempRepo::new();
+    let qdir = repo.root.join(".codex").join("quarantine");
+    fs::create_dir_all(&qdir).expect("create quarantine dir");
+    let qid = "bad_record";
+    fs::write(qdir.join(format!("{qid}.json")), "{broken json").expect("write broken quarantine");
+
+    let out = repo.run_with_env(&["quarantine", "show", qid], &[]);
+    assert!(
+        !out.status.success(),
+        "expected corrupted quarantine failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("invalid quarantine JSON"),
+        "expected invalid quarantine JSON error: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn unwritable_quarantine_path_surfaces_schema_failure_io_error() {
+    let repo = TempRepo::new();
+    let qdir = repo.root.join(".codex").join("quarantine");
+    fs::create_dir_all(&qdir).expect("create quarantine dir");
+    #[cfg(unix)]
+    set_readonly(&qdir);
+
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"not-json"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":32,"cached_input_tokens":1,"output_tokens":9}}'
+"#,
+    );
+
+    let out = repo.run_with_env(&["next", "echo", "hello"], &[]);
+    #[cfg(unix)]
+    set_writable(&qdir);
+
+    assert!(
+        !out.status.success(),
+        "expected failure for unwritable quarantine; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("failed to write"),
+        "expected IO write error in stderr: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn unwritable_run_log_path_does_not_break_command_execution() {
+    let repo = TempRepo::new();
+    let logs_dir = repo.root.join(".codex").join("cxlogs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    #[cfg(unix)]
+    set_readonly(&logs_dir);
+    repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
+
+    let out = repo.run_with_env(&["cxo", "echo", "hello"], &[]);
+    #[cfg(unix)]
+    set_writable(&logs_dir);
+    assert!(
+        out.status.success(),
+        "command should still succeed when logging path is unwritable; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
 }
 
 #[test]
