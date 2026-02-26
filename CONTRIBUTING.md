@@ -6,6 +6,13 @@
 - Bash is compatibility/bootstrap only.
 - Keep behavior deterministic and non-interactive unless explicitly required.
 
+## Start Here
+
+- New contributor issue list: `docs/GOOD_FIRST_ISSUES.md`
+- Contributor walkthrough: `docs/CONTRIBUTOR_WALKTHROUGH.md`
+- Roadmap: `docs/ROADMAP.md`
+- Release cadence: `docs/RELEASE_CADENCE.md`
+
 ## Development Setup
 
 ```bash

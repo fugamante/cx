@@ -1,0 +1,40 @@
+name: Feature Request
+description: Propose a new command, behavior, or runtime capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What user/developer pain does this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Concrete command/API behavior proposal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Contract requirements (determinism, logging, safety, compatibility).
+      placeholder: |
+        - No startup side effects
+        - Preserve stdout pipeline behavior
+        - Schema/log contract impacts
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Explicit testable outcomes.
+    validations:
+      required: true

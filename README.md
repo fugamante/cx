@@ -243,3 +243,7 @@ This project is licensed under the MIT License. See `LICENSE`.
 - Contributing guide: `CONTRIBUTING.md`
 - Code of conduct: `CODE_OF_CONDUCT.md`
 - Security reporting: `SECURITY.md`
+- New contributor issue list: `docs/GOOD_FIRST_ISSUES.md`
+- Contributor walkthrough: `docs/CONTRIBUTOR_WALKTHROUGH.md`
+- Roadmap: `docs/ROADMAP.md`
+- Release cadence: `docs/RELEASE_CADENCE.md`
