@@ -1,5 +1,7 @@
 # Manual Styles: Critical Comparison
 
+Branch note: on `codex/rust-refactor`, the synthesized master manual must reflect the Rust module architecture and branch migration status, not legacy Bash-first behavior.
+
 This repository now contains three deliberately different manuals:
 
 - `CX_MANUAL_STORY.tex` (story-first walkthrough)
@@ -31,4 +33,3 @@ Playbook:
 - Apple-clean layout: big headings, generous whitespace, clear hierarchy, minimal ornament.
 - Engineering-first tone: contracts, invariants, and actionable commands.
 - Determinism: treat schemas, quarantine, and telemetry as first-class operational guarantees.
-

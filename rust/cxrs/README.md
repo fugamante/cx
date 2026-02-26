@@ -1,6 +1,6 @@
-# cxrs (Rust spike)
+# cxrs (Rust canonical runtime)
 
-`cxrs` is an experimental Rust implementation track for the `cx` toolchain.
+`cxrs` is the canonical Rust implementation for the `cx` toolchain.
 
 Current scope:
 - standalone binary scaffold
@@ -34,8 +34,8 @@ Current scope:
 - strict `fix-run` remediation suggestions with dangerous-command blocking
 - LLM backend routing: `codex` (default) or `ollama` (local alternative)
 
-This crate is intentionally isolated from the production Bash toolchain and can
-evolve independently on the `codex/rust-spike` branch.
+This crate is authoritative for runtime behavior on `codex/rust-refactor`.
+Bash remains compatibility/bootstrap fallback.
 
 ## Build
 
@@ -47,7 +47,7 @@ cargo build
 ## Machine requirements
 
 Operating system:
-- macOS (primary tested target for this spike)
+- macOS (primary tested target)
 - Linux (expected to work with equivalent CLI dependencies)
 - Windows: use WSL for now
 
@@ -97,7 +97,7 @@ Current compat coverage:
 
 GitHub Actions:
 - Workflow: `cxrs-compat` (`/path/to/cxcodex/.github/workflows/cxrs-compat.yml`)
-- Triggered on pushes/PRs to `codex/rust-spike` when Rust/Bash-compat paths change.
+- Triggered on pushes/PRs to `codex/rust-refactor` when Rust/Bash-compat paths change.
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
 
 RTK version guard:
