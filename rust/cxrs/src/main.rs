@@ -1,6 +1,7 @@
 mod app;
 mod capture;
 mod error;
+mod llm;
 mod logs;
 mod paths;
 mod schema;
