@@ -30,6 +30,7 @@ All notable changes to this project are documented in this file.
   - `src/introspect.rs`
   - `src/doctor.rs`
   - `src/schema_ops.rs`
+  - `src/settings_cmds.rs`
 
 ### Changed
 - Split monolithic `main.rs` into module-based architecture with `app.rs` as command orchestrator (`98f49d0`).
@@ -55,6 +56,7 @@ All notable changes to this project are documented in this file.
 - Extracted version/core introspection output builders from `app.rs` to `src/introspect.rs`.
 - Extracted non-interactive doctor/health checks from `app.rs` to `src/doctor.rs` and routed compat/native command paths through it.
 - Extracted `schema list` and `ci validate` command handlers into `src/schema_ops.rs`.
+- Extracted state and LLM preference command handlers (`state show/get/set`, `llm *`) into `src/settings_cmds.rs`.
 - Applied rustfmt normalization after module extraction (`7f018ec`).
 
 ### Fixed

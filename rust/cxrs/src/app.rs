@@ -32,17 +32,15 @@ use crate::prompting::{cmd_fanout, cmd_prompt, cmd_promptlint, cmd_roles};
 use crate::quarantine::{cmd_quarantine_list, cmd_quarantine_show, read_quarantine_record};
 use crate::routing::{bash_function_names, cmd_routes, print_where, route_handler_for};
 use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
-use crate::runtime::{
-    llm_backend, llm_model, logging_enabled, ollama_model_preference, resolve_ollama_model_for_run,
-};
+use crate::runtime::{llm_backend, logging_enabled, resolve_ollama_model_for_run};
 use crate::runtime_controls::{
     cmd_alert_off, cmd_alert_on, cmd_alert_show, cmd_log_off, cmd_log_on, cmd_rtk_status,
 };
 use crate::schema::{build_strict_schema_prompt, load_schema, validate_schema_instance};
 use crate::schema_ops::{cmd_ci, cmd_schema};
+use crate::settings_cmds::{cmd_llm, cmd_state_get, cmd_state_set, cmd_state_show};
 use crate::state::{
-    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value,
-    set_state_path, set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
+    current_task_id, current_task_parent_id, read_state_value, set_state_path, value_at_path,
 };
 use crate::taskrun::{TaskRunner, run_task_by_id};
 use crate::tasks::{
@@ -395,230 +393,6 @@ fn cmd_task(args: &[String]) -> i32 {
             eprintln!(
                 "Usage: {APP_NAME} task <add|list|show|claim|complete|fail|fanout|run|run-all> ..."
             );
-            2
-        }
-    }
-}
-
-fn cmd_state_show() -> i32 {
-    let (_state_file, state) = match ensure_state_value() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs state show: {e}");
-            return 1;
-        }
-    };
-    match serde_json::to_string_pretty(&state) {
-        Ok(s) => {
-            println!("{s}");
-            0
-        }
-        Err(e) => {
-            eprintln!("cxrs state show: failed to render JSON: {e}");
-            1
-        }
-    }
-}
-
-fn cmd_state_get(key: &str) -> i32 {
-    let (state_file, state) = match ensure_state_value() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs state get: {e}");
-            return 1;
-        }
-    };
-    let Some(v) = value_at_path(&state, key) else {
-        eprintln!("cxrs state get: key not found: {key}");
-        eprintln!("state_file: {}", state_file.display());
-        return 1;
-    };
-    match v {
-        Value::String(s) => println!("{s}"),
-        _ => println!("{}", v),
-    }
-    0
-}
-
-fn cmd_state_set(key: &str, raw_value: &str) -> i32 {
-    let (state_file, mut state) = match ensure_state_value() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("cxrs state set: {e}");
-            return 1;
-        }
-    };
-    if let Err(e) = set_value_at_path(&mut state, key, parse_cli_value(raw_value)) {
-        eprintln!("cxrs state set: {e}");
-        return 1;
-    }
-    if let Err(e) = write_json_atomic(&state_file, &state) {
-        eprintln!("cxrs state set: {e}");
-        return 1;
-    }
-    state_cache_clear();
-    println!("ok");
-    0
-}
-
-fn cmd_llm(args: &[String]) -> i32 {
-    let print_usage = || {
-        eprintln!(
-            "Usage: {APP_NAME} llm <show|use <codex|ollama> [model]|unset <backend|model|all>|set-backend <codex|ollama>|set-model <model>|clear-model>"
-        );
-    };
-    let sub = args.first().map(String::as_str).unwrap_or("show");
-    match sub {
-        "show" => {
-            let backend = llm_backend();
-            let model = llm_model();
-            let ollama_pref = ollama_model_preference();
-            println!("llm_backend: {backend}");
-            println!(
-                "active_model: {}",
-                if model.is_empty() { "<unset>" } else { &model }
-            );
-            println!(
-                "ollama_model: {}",
-                if ollama_pref.is_empty() {
-                    "<unset>"
-                } else {
-                    &ollama_pref
-                }
-            );
-            0
-        }
-        "use" => {
-            let Some(target) = args.get(1).map(|s| s.to_lowercase()) else {
-                print_usage();
-                return 2;
-            };
-            if target != "codex" && target != "ollama" {
-                print_usage();
-                return 2;
-            }
-            if let Err(e) = set_state_path("preferences.llm_backend", Value::String(target.clone()))
-            {
-                eprintln!("cxrs llm use: {e}");
-                return 1;
-            }
-            if target == "ollama" {
-                if let Some(model) = args.get(2) {
-                    let m = model.trim();
-                    if m.is_empty() {
-                        print_usage();
-                        return 2;
-                    }
-                    if let Err(e) =
-                        set_state_path("preferences.ollama_model", Value::String(m.to_string()))
-                    {
-                        eprintln!("cxrs llm use: {e}");
-                        return 1;
-                    }
-                }
-                println!("ok");
-                println!("llm_backend: ollama");
-                let pref = ollama_model_preference();
-                println!(
-                    "ollama_model: {}",
-                    if pref.is_empty() { "<unset>" } else { &pref }
-                );
-                return 0;
-            }
-            println!("ok");
-            println!("llm_backend: codex");
-            0
-        }
-        "unset" => {
-            let target = args.get(1).map(String::as_str).unwrap_or("all");
-            match target {
-                "backend" => {
-                    if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                        eprintln!("cxrs llm unset backend: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("llm_backend: <unset>");
-                    0
-                }
-                "model" => {
-                    if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                        eprintln!("cxrs llm unset model: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("ollama_model: <unset>");
-                    0
-                }
-                "all" => {
-                    if let Err(e) = set_state_path("preferences.llm_backend", Value::Null) {
-                        eprintln!("cxrs llm unset all: {e}");
-                        return 1;
-                    }
-                    if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                        eprintln!("cxrs llm unset all: {e}");
-                        return 1;
-                    }
-                    println!("ok");
-                    println!("llm_backend: <unset>");
-                    println!("ollama_model: <unset>");
-                    0
-                }
-                _ => {
-                    print_usage();
-                    2
-                }
-            }
-        }
-        "set-backend" => {
-            let Some(v) = args.get(1).map(|s| s.to_lowercase()) else {
-                print_usage();
-                return 2;
-            };
-            if v != "codex" && v != "ollama" {
-                print_usage();
-                return 2;
-            }
-            if let Err(e) = set_state_path("preferences.llm_backend", Value::String(v.clone())) {
-                eprintln!("cxrs llm set-backend: {e}");
-                return 1;
-            }
-            println!("ok");
-            println!("llm_backend: {v}");
-            0
-        }
-        "set-model" => {
-            let Some(model) = args.get(1) else {
-                print_usage();
-                return 2;
-            };
-            if model.trim().is_empty() {
-                print_usage();
-                return 2;
-            }
-            if let Err(e) = set_state_path(
-                "preferences.ollama_model",
-                Value::String(model.trim().to_string()),
-            ) {
-                eprintln!("cxrs llm set-model: {e}");
-                return 1;
-            }
-            println!("ok");
-            println!("ollama_model: {}", model.trim());
-            0
-        }
-        "clear-model" => {
-            if let Err(e) = set_state_path("preferences.ollama_model", Value::Null) {
-                eprintln!("cxrs llm clear-model: {e}");
-                return 1;
-            }
-            println!("ok");
-            println!("ollama_model: <unset>");
-            0
-        }
-        other => {
-            eprintln!("{APP_NAME} llm: unknown subcommand '{other}'");
-            print_usage();
             2
         }
     }
@@ -1982,7 +1756,7 @@ fn cmd_cx_compat(args: &[String]) -> i32 {
                 2
             }
         },
-        "cxllm" | "llm" => cmd_llm(&args[1..]),
+        "cxllm" | "llm" => cmd_llm(APP_NAME, &args[1..]),
         "cxbench" | "bench" => {
             let Some(runs) = args
                 .get(1)
@@ -2331,7 +2105,7 @@ pub fn run() -> i32 {
                 2
             }
         },
-        "llm" => cmd_llm(&args[2..]),
+        "llm" => cmd_llm(APP_NAME, &args[2..]),
         "policy" => cmd_policy(&args[2..], APP_NAME),
         "bench" => {
             if args.len() < 5 {
