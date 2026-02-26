@@ -62,6 +62,132 @@ pub struct NativeDeps {
     pub cmd_quarantine_show: fn(&str) -> i32,
 }
 
+fn parse_n(args: &[String], idx: usize, default: usize) -> usize {
+    args.get(idx)
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(default)
+}
+
+fn require_min_args(args: &[String], min: usize, usage: &str) -> Result<(), i32> {
+    if args.len() < min {
+        return Err(print_usage_error(usage, usage));
+    }
+    Ok(())
+}
+
+fn run_agent_cmd(args: &[String], min: usize, usage: &str, f: fn(&[String]) -> i32) -> i32 {
+    if require_min_args(args, min, usage).is_err() {
+        return EXIT_USAGE;
+    }
+    f(&args[2..])
+}
+
+fn handle_state(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    match args.get(2).map(String::as_str).unwrap_or("show") {
+        "show" => (deps.cmd_state_show)(),
+        "get" => match args.get(3) {
+            Some(key) => (deps.cmd_state_get)(key),
+            None => print_usage_error("state", &format!("{app_name} state get <key>")),
+        },
+        "set" => match (args.get(3), args.get(4)) {
+            (Some(key), Some(value)) => (deps.cmd_state_set)(key, value),
+            _ => print_usage_error("state", &format!("{app_name} state set <key> <value>")),
+        },
+        other => {
+            eprintln!("{app_name}: unknown state subcommand '{other}'");
+            eprintln!("Usage: {app_name} state <show|get <key>|set <key> <value>>");
+            EXIT_USAGE
+        }
+    }
+}
+
+fn handle_supports(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    let Some(name) = args.get(2) else {
+        return print_usage_error("supports", &format!("{app_name} supports <subcommand>"));
+    };
+    if (deps.is_native_name)(name) || (deps.is_compat_name)(name) {
+        println!("true");
+        EXIT_OK
+    } else {
+        println!("false");
+        EXIT_RUNTIME
+    }
+}
+
+fn handle_bench(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    let usage = format!("{app_name} bench <runs> -- <command...>");
+    let runs = parse_n(args, 2, 0);
+    if runs == 0 {
+        return print_usage_error("bench", &usage);
+    }
+    let Some(i) = args.iter().position(|v| v == "--") else {
+        return print_usage_error("bench", &usage);
+    };
+    if i + 1 >= args.len() {
+        return print_usage_error("bench", &usage);
+    }
+    (deps.cmd_bench)(runs, &args[i + 1..])
+}
+
+fn handle_prompt(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    let usage = format!("{app_name} prompt <implement|fix|test|doc|ops> <request>");
+    let Some(mode) = args.get(2) else {
+        return print_usage_error("prompt", &usage);
+    };
+    if args.len() < 4 {
+        return print_usage_error("prompt", &usage);
+    }
+    (deps.cmd_prompt)(mode, &args[3..].join(" "))
+}
+
+fn handle_cx(args: &[String], deps: &NativeDeps) -> i32 {
+    if args.len() < 3 {
+        return print_usage_error("cx", "cx <command> [args...]");
+    }
+    if (deps.is_compat_name)(&args[2]) {
+        (deps.cmd_cx_compat)(&args[2..])
+    } else {
+        (deps.cmd_cx)(&args[2..])
+    }
+}
+
+fn handle_optimize(args: &[String], deps: &NativeDeps) -> i32 {
+    let (n, json_out) = match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{}", format_error("optimize", &e));
+            return EXIT_USAGE;
+        }
+    };
+    (deps.print_optimize)(n, json_out)
+}
+
+fn handle_replay(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    match args.get(2) {
+        Some(id) => (deps.cmd_replay)(id),
+        None => print_usage_error("replay", &format!("{app_name} replay <quarantine_id>")),
+    }
+}
+
+fn handle_quarantine(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
+    match args.get(2).map(String::as_str).unwrap_or("list") {
+        "list" => (deps.cmd_quarantine_list)(parse_n(args, 3, DEFAULT_QUARANTINE_LIST)),
+        "show" => match args.get(3) {
+            Some(id) => (deps.cmd_quarantine_show)(id),
+            None => print_usage_error(
+                "quarantine",
+                &format!("{app_name} quarantine show <quarantine_id>"),
+            ),
+        },
+        other => {
+            eprintln!("{app_name}: unknown quarantine subcommand '{other}'");
+            eprintln!("Usage: {app_name} quarantine <list [N]|show <id>>");
+            EXIT_USAGE
+        }
+    }
+}
+
 pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
     let app_name = ctx.app_name;
     let cmd = args.get(1).map(String::as_str).unwrap_or("help");
@@ -87,165 +213,30 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "routes" => (deps.cmd_routes)(&args[2..]),
         "diag" => (deps.cmd_diag)(),
         "parity" => (deps.cmd_parity)(),
-        "supports" => {
-            let Some(name) = args.get(2) else {
-                return print_usage_error("supports", &format!("{app_name} supports <subcommand>"));
-            };
-            if (deps.is_native_name)(name) || (deps.is_compat_name)(name) {
-                println!("true");
-                EXIT_OK
-            } else {
-                println!("false");
-                EXIT_RUNTIME
-            }
-        }
+        "supports" => handle_supports(app_name, args, deps),
         "doctor" => (deps.cmd_doctor)(),
-        "state" => match args.get(2).map(String::as_str).unwrap_or("show") {
-            "show" => (deps.cmd_state_show)(),
-            "get" => {
-                let Some(key) = args.get(3) else {
-                    eprintln!("Usage: {app_name} state get <key>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_state_get)(key)
-            }
-            "set" => {
-                let Some(key) = args.get(3) else {
-                    eprintln!("Usage: {app_name} state set <key> <value>");
-                    return EXIT_USAGE;
-                };
-                let Some(value) = args.get(4) else {
-                    eprintln!("Usage: {app_name} state set <key> <value>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_state_set)(key, value)
-            }
-            other => {
-                eprintln!("{app_name}: unknown state subcommand '{other}'");
-                eprintln!("Usage: {app_name} state <show|get <key>|set <key> <value>>");
-                EXIT_USAGE
-            }
-        },
+        "state" => handle_state(app_name, args, deps),
         "llm" => (deps.cmd_llm)(&args[2..]),
         "policy" => (deps.cmd_policy)(&args[2..]),
-        "bench" => {
-            if args.len() < 5 {
-                return print_usage_error(
-                    "bench",
-                    &format!("{app_name} bench <runs> -- <command...>"),
-                );
-            }
-            let runs = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(0);
-            let delim = args.iter().position(|v| v == "--");
-            let Some(i) = delim else {
-                return print_usage_error(
-                    "bench",
-                    &format!("{app_name} bench <runs> -- <command...>"),
-                );
-            };
-            if i + 1 >= args.len() {
-                return print_usage_error(
-                    "bench",
-                    &format!("{app_name} bench <runs> -- <command...>"),
-                );
-            }
-            (deps.cmd_bench)(runs, &args[i + 1..])
-        }
-        "metrics" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_metrics)(n)
-        }
-        "prompt" => {
-            let Some(mode) = args.get(2) else {
-                eprintln!("Usage: {app_name} prompt <implement|fix|test|doc|ops> <request>");
-                return EXIT_USAGE;
-            };
-            if args.len() < 4 {
-                eprintln!("Usage: {app_name} prompt <implement|fix|test|doc|ops> <request>");
-                return EXIT_USAGE;
-            }
-            let request = args[3..].join(" ");
-            (deps.cmd_prompt)(mode, &request)
-        }
+        "bench" => handle_bench(app_name, args, deps),
+        "metrics" => (deps.print_metrics)(parse_n(args, 2, DEFAULT_RUN_WINDOW)),
+        "prompt" => handle_prompt(app_name, args, deps),
         "roles" => (deps.cmd_roles)(args.get(2).map(String::as_str)),
         "fanout" => {
             if args.len() < 3 {
-                eprintln!("Usage: {app_name} fanout <objective>");
-                return EXIT_USAGE;
+                return print_usage_error("fanout", &format!("{app_name} fanout <objective>"));
             }
             (deps.cmd_fanout)(&args[2..].join(" "))
         }
-        "promptlint" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_OPTIMIZE_WINDOW);
-            (deps.cmd_promptlint)(n)
-        }
-        "cx" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cx <command> [args...]");
-                return EXIT_USAGE;
-            }
-            if (deps.is_compat_name)(&args[2]) {
-                (deps.cmd_cx_compat)(&args[2..])
-            } else {
-                (deps.cmd_cx)(&args[2..])
-            }
-        }
-        "cxj" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cxj <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxj)(&args[2..])
-        }
-        "cxo" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cxo <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxo)(&args[2..])
-        }
-        "cxol" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cxol <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxol)(&args[2..])
-        }
-        "cxcopy" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cxcopy <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxcopy)(&args[2..])
-        }
-        "fix" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} fix <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_fix)(&args[2..])
-        }
+        "promptlint" => (deps.cmd_promptlint)(parse_n(args, 2, DEFAULT_OPTIMIZE_WINDOW)),
+        "cx" => handle_cx(args, deps),
+        "cxj" => run_agent_cmd(args, 3, "cxj <command> [args...]", deps.cmd_cxj),
+        "cxo" => run_agent_cmd(args, 3, "cxo <command> [args...]", deps.cmd_cxo),
+        "cxol" => run_agent_cmd(args, 3, "cxol <command> [args...]", deps.cmd_cxol),
+        "cxcopy" => run_agent_cmd(args, 3, "cxcopy <command> [args...]", deps.cmd_cxcopy),
+        "fix" => run_agent_cmd(args, 3, "fix <command> [args...]", deps.cmd_fix),
         "budget" => (deps.cmd_budget)(),
-        "log-tail" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(10);
-            (deps.cmd_log_tail)(n)
-        }
+        "log-tail" => (deps.cmd_log_tail)(parse_n(args, 2, 10)),
         "health" => (deps.cmd_health)(),
         "rtk-status" => (deps.cmd_rtk_status)(),
         "log-on" => (deps.cmd_log_on)(),
@@ -255,96 +246,19 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
         "alert-off" => (deps.cmd_alert_off)(),
         "chunk" => (deps.cmd_chunk)(),
         "cx-compat" => (deps.cmd_cx_compat)(&args[2..]),
-        "profile" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_profile)(n)
-        }
-        "alert" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_alert)(n)
-        }
-        "optimize" => {
-            let (n, json_out) =
-                match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("{}", format_error("optimize", &e));
-                        return EXIT_USAGE;
-                    }
-                };
-            (deps.print_optimize)(n, json_out)
-        }
-        "worklog" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_worklog)(n)
-        }
-        "trace" => {
-            let n = args
-                .get(2)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(1);
-            (deps.print_trace)(n)
-        }
-        "next" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} next <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_next)(&args[2..])
-        }
+        "profile" => (deps.print_profile)(parse_n(args, 2, DEFAULT_RUN_WINDOW)),
+        "alert" => (deps.print_alert)(parse_n(args, 2, DEFAULT_RUN_WINDOW)),
+        "optimize" => handle_optimize(args, deps),
+        "worklog" => (deps.print_worklog)(parse_n(args, 2, DEFAULT_RUN_WINDOW)),
+        "trace" => (deps.print_trace)(parse_n(args, 2, 1)),
+        "next" => run_agent_cmd(args, 3, "next <command> [args...]", deps.cmd_next),
         "diffsum" => (deps.cmd_diffsum)(false),
         "diffsum-staged" => (deps.cmd_diffsum)(true),
-        "fix-run" => {
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} fix-run <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_fix_run)(&args[2..])
-        }
+        "fix-run" => run_agent_cmd(args, 3, "fix-run <command> [args...]", deps.cmd_fix_run),
         "commitjson" => (deps.cmd_commitjson)(),
         "commitmsg" => (deps.cmd_commitmsg)(),
-        "replay" => {
-            let Some(id) = args.get(2) else {
-                eprintln!("Usage: {app_name} replay <quarantine_id>");
-                return EXIT_USAGE;
-            };
-            (deps.cmd_replay)(id)
-        }
-        "quarantine" => match args.get(2).map(String::as_str).unwrap_or("list") {
-            "list" => {
-                let n = args
-                    .get(3)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(DEFAULT_QUARANTINE_LIST);
-                (deps.cmd_quarantine_list)(n)
-            }
-            "show" => {
-                let Some(id) = args.get(3) else {
-                    eprintln!("Usage: {app_name} quarantine show <quarantine_id>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_quarantine_show)(id)
-            }
-            other => {
-                eprintln!("{app_name}: unknown quarantine subcommand '{other}'");
-                eprintln!("Usage: {app_name} quarantine <list [N]|show <id>>");
-                EXIT_USAGE
-            }
-        },
+        "replay" => handle_replay(app_name, args, deps),
+        "quarantine" => handle_quarantine(app_name, args, deps),
         _ => {
             eprintln!(
                 "{}",

@@ -57,6 +57,116 @@ pub struct CompatDeps {
     pub cmd_quarantine_show: fn(&str) -> i32,
 }
 
+fn parse_n(args: &[String], idx: usize, default: usize) -> usize {
+    args.get(idx)
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(default)
+}
+
+fn require_prefixed_arg(args: &[String], usage: &str) -> Result<(), i32> {
+    if args.len() < 2 {
+        return Err(print_usage_error("cx", usage));
+    }
+    Ok(())
+}
+
+fn run_prefixed_cmd(args: &[String], usage: &str, f: fn(&[String]) -> i32) -> i32 {
+    if require_prefixed_arg(args, usage).is_err() {
+        return EXIT_USAGE;
+    }
+    f(&args[1..])
+}
+
+fn handle_state(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+    match args.get(1).map(String::as_str).unwrap_or("show") {
+        "show" => (deps.cmd_state_show)(),
+        "get" => match args.get(2) {
+            Some(key) => (deps.cmd_state_get)(key),
+            None => print_usage_error("state", &format!("{app_name} cx state get <key>")),
+        },
+        "set" => match (args.get(2), args.get(3)) {
+            (Some(key), Some(value)) => (deps.cmd_state_set)(key, value),
+            _ => print_usage_error("state", &format!("{app_name} cx state set <key> <value>")),
+        },
+        other => {
+            eprintln!("{app_name} cx state: unknown subcommand '{other}'");
+            EXIT_USAGE
+        }
+    }
+}
+
+fn handle_bench(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+    let Some(runs) = args
+        .get(1)
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+    else {
+        return print_usage_error(
+            "bench",
+            &format!("{app_name} cx bench <runs> -- <command...>"),
+        );
+    };
+    let Some(i) = args.iter().position(|v| v == "--") else {
+        return print_usage_error(
+            "bench",
+            &format!("{app_name} cx bench <runs> -- <command...>"),
+        );
+    };
+    if i + 1 >= args.len() {
+        return print_usage_error(
+            "bench",
+            &format!("{app_name} cx bench <runs> -- <command...>"),
+        );
+    }
+    (deps.cmd_bench)(runs, &args[i + 1..])
+}
+
+fn handle_prompt(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+    let Some(mode) = args.get(1) else {
+        return print_usage_error("prompt", &format!("{app_name} cx prompt <mode> <request>"));
+    };
+    if args.len() < 3 {
+        return print_usage_error("prompt", &format!("{app_name} cx prompt <mode> <request>"));
+    }
+    (deps.cmd_prompt)(mode, &args[2..].join(" "))
+}
+
+fn handle_optimize(args: &[String], deps: &CompatDeps) -> i32 {
+    let (n, json_out) = match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{}", format_error("cx optimize", &e));
+            return EXIT_USAGE;
+        }
+    };
+    (deps.print_optimize)(n, json_out)
+}
+
+fn handle_replay(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+    match args.get(1) {
+        Some(id) => (deps.cmd_replay)(id),
+        None => print_usage_error("replay", &format!("{app_name} cx replay <quarantine_id>")),
+    }
+}
+
+fn handle_quarantine(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
+    match args.get(1).map(String::as_str).unwrap_or("list") {
+        "list" => (deps.cmd_quarantine_list)(parse_n(args, 2, DEFAULT_QUARANTINE_LIST)),
+        "show" => match args.get(2) {
+            Some(id) => (deps.cmd_quarantine_show)(id),
+            None => print_usage_error(
+                "quarantine",
+                &format!("{app_name} cx quarantine show <quarantine_id>"),
+            ),
+        },
+        other => {
+            eprintln!("{app_name} cx quarantine: unknown subcommand '{other}'");
+            EXIT_USAGE
+        }
+    }
+}
+
 pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
     let app_name = ctx.app_name;
     if args.is_empty() {
@@ -84,193 +194,66 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
         "cxcore" | "core" => (deps.cmd_core)(),
         "cxlogs" | "logs" => (deps.cmd_logs)(&args[1..]),
         "cxtask" | "task" => (deps.cmd_task)(&args[1..]),
-        "cxmetrics" | "metrics" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_metrics)(n)
-        }
-        "cxprofile" | "profile" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_profile)(n)
-        }
-        "cxtrace" | "trace" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(1);
-            (deps.print_trace)(n)
-        }
-        "cxalert" | "alert" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_alert)(n)
-        }
-        "cxoptimize" | "optimize" => {
-            let (n, json_out) =
-                match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("{}", format_error("cx optimize", &e));
-                        return EXIT_USAGE;
-                    }
-                };
-            (deps.print_optimize)(n, json_out)
-        }
-        "cxworklog" | "worklog" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(DEFAULT_RUN_WINDOW);
-            (deps.print_worklog)(n)
-        }
-        "cx" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cx <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cx)(&args[1..])
-        }
-        "cxj" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cxj <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxj)(&args[1..])
-        }
-        "cxo" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cxo <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxo)(&args[1..])
-        }
-        "cxol" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cxol <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxol)(&args[1..])
-        }
-        "cxcopy" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cxcopy <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_cxcopy)(&args[1..])
-        }
+        "cxmetrics" | "metrics" => (deps.print_metrics)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cxprofile" | "profile" => (deps.print_profile)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cxtrace" | "trace" => (deps.print_trace)(parse_n(args, 1, 1)),
+        "cxalert" | "alert" => (deps.print_alert)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cxoptimize" | "optimize" => handle_optimize(args, deps),
+        "cxworklog" | "worklog" => (deps.print_worklog)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cx" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cx <command> [args...]"),
+            deps.cmd_cx,
+        ),
+        "cxj" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cxj <command> [args...]"),
+            deps.cmd_cxj,
+        ),
+        "cxo" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cxo <command> [args...]"),
+            deps.cmd_cxo,
+        ),
+        "cxol" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cxol <command> [args...]"),
+            deps.cmd_cxol,
+        ),
+        "cxcopy" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cxcopy <command> [args...]"),
+            deps.cmd_cxcopy,
+        ),
         "cxpolicy" | "policy" => (deps.cmd_policy)(&args[1..]),
-        "cxstate" | "state" => match args.get(1).map(String::as_str).unwrap_or("show") {
-            "show" => (deps.cmd_state_show)(),
-            "get" => {
-                let Some(key) = args.get(2) else {
-                    eprintln!("Usage: {app_name} cx state get <key>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_state_get)(key)
-            }
-            "set" => {
-                let Some(key) = args.get(2) else {
-                    eprintln!("Usage: {app_name} cx state set <key> <value>");
-                    return EXIT_USAGE;
-                };
-                let Some(value) = args.get(3) else {
-                    eprintln!("Usage: {app_name} cx state set <key> <value>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_state_set)(key, value)
-            }
-            other => {
-                eprintln!("{app_name} cx state: unknown subcommand '{other}'");
-                EXIT_USAGE
-            }
-        },
+        "cxstate" | "state" => handle_state(app_name, args, deps),
         "cxllm" | "llm" => (deps.cmd_llm)(&args[1..]),
-        "cxbench" | "bench" => {
-            let Some(runs) = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-            else {
-                eprintln!("Usage: {app_name} cx bench <runs> -- <command...>");
-                return EXIT_USAGE;
-            };
-            let delim = args.iter().position(|v| v == "--");
-            let Some(i) = delim else {
-                eprintln!("Usage: {app_name} cx bench <runs> -- <command...>");
-                return EXIT_USAGE;
-            };
-            if i + 1 >= args.len() {
-                eprintln!("Usage: {app_name} cx bench <runs> -- <command...>");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_bench)(runs, &args[i + 1..])
-        }
-        "cxprompt" | "prompt" => {
-            let Some(mode) = args.get(1) else {
-                eprintln!("Usage: {app_name} cx prompt <mode> <request>");
-                return EXIT_USAGE;
-            };
-            if args.len() < 3 {
-                eprintln!("Usage: {app_name} cx prompt <mode> <request>");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_prompt)(mode, &args[2..].join(" "))
-        }
+        "cxbench" | "bench" => handle_bench(app_name, args, deps),
+        "cxprompt" | "prompt" => handle_prompt(app_name, args, deps),
         "cxroles" | "roles" => (deps.cmd_roles)(args.get(1).map(String::as_str)),
         "cxfanout" | "fanout" => {
             if args.len() < 2 {
-                eprintln!("Usage: {app_name} cx fanout <objective>");
-                return EXIT_USAGE;
+                return print_usage_error("fanout", &format!("{app_name} cx fanout <objective>"));
             }
             (deps.cmd_fanout)(&args[1..].join(" "))
         }
-        "cxpromptlint" | "promptlint" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(200);
-            (deps.cmd_promptlint)(n)
-        }
-        "cxnext" | "next" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cx next <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_next)(&args[1..])
-        }
-        "cxfix" | "fix" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cx fix <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_fix)(&args[1..])
-        }
+        "cxpromptlint" | "promptlint" => (deps.cmd_promptlint)(parse_n(args, 1, 200)),
+        "cxnext" | "next" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cx next <command> [args...]"),
+            deps.cmd_next,
+        ),
+        "cxfix" | "fix" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cx fix <command> [args...]"),
+            deps.cmd_fix,
+        ),
         "cxdiffsum" | "diffsum" => (deps.cmd_diffsum)(false),
         "cxdiffsum_staged" | "diffsum-staged" => (deps.cmd_diffsum)(true),
         "cxcommitjson" | "commitjson" => (deps.cmd_commitjson)(),
         "cxcommitmsg" | "commitmsg" => (deps.cmd_commitmsg)(),
         "cxbudget" | "budget" => (deps.cmd_budget)(),
-        "cxlog_tail" | "log-tail" => {
-            let n = args
-                .get(1)
-                .and_then(|v| v.parse::<usize>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(10);
-            (deps.cmd_log_tail)(n)
-        }
+        "cxlog_tail" | "log-tail" => (deps.cmd_log_tail)(parse_n(args, 1, 10)),
         "cxhealth" | "health" => (deps.cmd_health)(),
         "cxrtk" | "rtk-status" => (deps.cmd_rtk_status)(),
         "cxlog_on" | "log-on" => (deps.cmd_log_on)(),
@@ -279,41 +262,13 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &CompatDeps) -> i32 {
         "cxalert_on" | "alert-on" => (deps.cmd_alert_on)(),
         "cxalert_off" | "alert-off" => (deps.cmd_alert_off)(),
         "cxchunk" | "chunk" => (deps.cmd_chunk)(),
-        "cxfix_run" | "fix-run" => {
-            if args.len() < 2 {
-                eprintln!("Usage: {app_name} cx fix-run <command> [args...]");
-                return EXIT_USAGE;
-            }
-            (deps.cmd_fix_run)(&args[1..])
-        }
-        "cxreplay" | "replay" => {
-            let Some(id) = args.get(1) else {
-                eprintln!("Usage: {app_name} cx replay <quarantine_id>");
-                return EXIT_USAGE;
-            };
-            (deps.cmd_replay)(id)
-        }
-        "cxquarantine" | "quarantine" => match args.get(1).map(String::as_str).unwrap_or("list") {
-            "list" => {
-                let n = args
-                    .get(2)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(DEFAULT_QUARANTINE_LIST);
-                (deps.cmd_quarantine_list)(n)
-            }
-            "show" => {
-                let Some(id) = args.get(2) else {
-                    eprintln!("Usage: {app_name} cx quarantine show <quarantine_id>");
-                    return EXIT_USAGE;
-                };
-                (deps.cmd_quarantine_show)(id)
-            }
-            other => {
-                eprintln!("{app_name} cx quarantine: unknown subcommand '{other}'");
-                EXIT_USAGE
-            }
-        },
+        "cxfix_run" | "fix-run" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} cx fix-run <command> [args...]"),
+            deps.cmd_fix_run,
+        ),
+        "cxreplay" | "replay" => handle_replay(app_name, args, deps),
+        "cxquarantine" | "quarantine" => handle_quarantine(app_name, args, deps),
         other => {
             eprintln!(
                 "{}",
