@@ -115,6 +115,14 @@ fn handle_supports(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
     }
 }
 
+fn handle_telemetry(args: &[String], deps: &NativeDeps) -> i32 {
+    let mut logs_args = vec!["stats".to_string()];
+    if args.len() > 2 {
+        logs_args.extend_from_slice(&args[2..]);
+    }
+    (deps.cmd_logs)(&logs_args)
+}
+
 fn handle_bench(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
     let usage = format!("{app_name} bench <runs> -- <command...>");
     let runs = parse_n(args, 2, 0);
@@ -209,6 +217,7 @@ fn dispatch_meta_commands(
         }
         "schema" => (deps.cmd_schema)(&args[2..]),
         "logs" => (deps.cmd_logs)(&args[2..]),
+        "telemetry" => handle_telemetry(args, deps),
         "ci" => (deps.cmd_ci)(&args[2..]),
         "core" => (deps.cmd_core)(),
         "task" => (deps.cmd_task)(&args[2..]),

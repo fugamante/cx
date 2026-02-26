@@ -96,6 +96,14 @@ fn handle_state(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
     }
 }
 
+fn handle_telemetry(args: &[String], deps: &CompatDeps) -> i32 {
+    let mut logs_args = vec!["stats".to_string()];
+    if args.len() > 1 {
+        logs_args.extend_from_slice(&args[1..]);
+    }
+    (deps.cmd_logs)(&logs_args)
+}
+
 fn handle_bench(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
     let Some(runs) = args
         .get(1)
@@ -193,6 +201,7 @@ fn dispatch_meta_commands(
         "cxparity" | "parity" => (deps.cmd_parity)(),
         "cxcore" | "core" => (deps.cmd_core)(),
         "cxlogs" | "logs" => (deps.cmd_logs)(&args[1..]),
+        "cxtelemetry" | "telemetry" => handle_telemetry(args, deps),
         "cxtask" | "task" => (deps.cmd_task)(&args[1..]),
         "cxpolicy" | "policy" => (deps.cmd_policy)(&args[1..]),
         "cxstate" | "state" => handle_state(app_name, args, deps),

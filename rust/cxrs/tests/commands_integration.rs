@@ -289,3 +289,43 @@ fn command_parsing_and_file_io_edge_cases() {
     assert_eq!(unknown_flag.status.code(), Some(2));
     assert!(stderr_str(&unknown_flag).contains("unknown flag"));
 }
+
+#[test]
+fn logs_stats_and_telemetry_alias_report_population_and_drift() {
+    let repo = TempRepo::new();
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row1 = serde_json::json!({
+        "execution_id":"e1","timestamp":"2026-01-01T00:00:00Z","command":"cx",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":10,"schema_enforced":false,"schema_valid":true
+    });
+    let row2 = serde_json::json!({
+        "execution_id":"e2","timestamp":"2026-01-01T00:00:01Z","command":"next",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"deterministic",
+        "duration_ms":20,"schema_enforced":true,"schema_valid":true,"task_id":"task_001"
+    });
+    let mut text = serde_json::to_string(&row1).expect("row1");
+    text.push('\n');
+    text.push_str(&serde_json::to_string(&row2).expect("row2"));
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["logs", "stats", "2"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("logs stats"), "{stdout}");
+    assert!(stdout.contains("field_population"), "{stdout}");
+    assert!(stdout.contains("contract_drift"), "{stdout}");
+    assert!(stdout.contains("new_keys_second_half"), "{stdout}");
+
+    let out_json = repo.run(&["telemetry", "2", "--json"]);
+    assert!(
+        out_json.status.success(),
+        "stderr={}",
+        stderr_str(&out_json)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out_json)).expect("json output");
+    assert_eq!(v.get("window_runs").and_then(Value::as_u64), Some(2));
+    assert!(v.get("fields").and_then(Value::as_array).is_some());
+}

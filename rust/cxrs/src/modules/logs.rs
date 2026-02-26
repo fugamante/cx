@@ -15,7 +15,9 @@ mod logs_read;
 
 pub use logs_cmd::cmd_logs;
 pub use logs_migrate::migrate_runs_jsonl;
-pub use logs_read::{file_len, load_runs, load_runs_appended, validate_runs_jsonl_file};
+pub use logs_read::{
+    file_len, load_runs, load_runs_appended, load_values, validate_runs_jsonl_file,
+};
 
 pub fn validate_execution_log_row(row: &ExecutionLog) -> Result<(), String> {
     if row.execution_id.trim().is_empty() {

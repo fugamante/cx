@@ -659,7 +659,10 @@ echo "this is not json"
 
     let out = repo.run_with_env(
         &["next", "echo", "hello"],
-        &[("CX_LLM_BACKEND", "ollama"), ("CX_OLLAMA_MODEL", "llama3.1")],
+        &[
+            ("CX_LLM_BACKEND", "ollama"),
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+        ],
     );
     assert!(
         !out.status.success(),
@@ -675,7 +678,10 @@ echo "this is not json"
         .and_then(Value::as_str)
         .unwrap_or("");
     assert!(!qid.is_empty(), "expected quarantine_id");
-    assert!(repo.quarantine_file(qid).exists(), "missing quarantine file");
+    assert!(
+        repo.quarantine_file(qid).exists(),
+        "missing quarantine file"
+    );
 
     let runs = parse_jsonl(&repo.runs_log());
     let last = runs.last().expect("last run");

@@ -67,6 +67,9 @@ All notable changes to this project are documented in this file.
     - unset/set model transition enforcement with persisted state verification
     - malformed schema-output handling under Ollama with quarantine/log assertions
     - schema-command enforcement under `CX_MODE=lean` (schema remains enforced/validated)
+  - observability telemetry command surface:
+    - `cx logs stats [N] [--json]` for field-population health and contract drift detection
+    - `cx telemetry [N] [--json]` alias (native + compat routing)
 
 ### Changed
 - Expanded policy-path safety coverage and enforcement:

@@ -46,6 +46,16 @@ const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Normalize legacy run logs to current contract",
     },
     CommandHelp {
+        name: "logs",
+        usage: "logs stats [N] [--json]",
+        description: "Telemetry health and contract-drift summary",
+    },
+    CommandHelp {
+        name: "telemetry",
+        usage: "telemetry [N] [--json]",
+        description: "Alias for 'logs stats'",
+    },
+    CommandHelp {
         name: "ci",
         usage: "ci validate [--strict] [--legacy-ok] [--json]",
         description: "CI-friendly validation gate (no network)",

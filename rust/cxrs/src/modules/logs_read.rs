@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static RUNS_PARSE_WARNED: AtomicBool = AtomicBool::new(false);
-const REQUIRED_STRICT_FIELDS: [&str; 26] = [
+pub(crate) const REQUIRED_STRICT_FIELDS: [&str; 26] = [
     "execution_id",
     "timestamp",
     "command",
@@ -164,6 +164,29 @@ fn validate_required_fields(
 
 pub fn load_runs(log_file: &Path, limit: usize) -> Result<Vec<RunEntry>, String> {
     load_runs_cx(log_file, limit).map_err(|e| e.to_string())
+}
+
+pub fn load_values(log_file: &Path, limit: usize) -> Result<Vec<Value>, String> {
+    let file =
+        File::open(log_file).map_err(|e| format!("cannot open {}: {e}", log_file.display()))?;
+    let reader = BufReader::new(file);
+    let mut out: Vec<Value> = Vec::new();
+    for line_res in reader.lines() {
+        let line = match line_res {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<Value>(&line) {
+            out.push(v);
+        }
+    }
+    if limit > 0 && out.len() > limit {
+        out = out[out.len() - limit..].to_vec();
+    }
+    Ok(out)
 }
 
 fn load_runs_cx(log_file: &Path, limit: usize) -> CxResult<Vec<RunEntry>> {
