@@ -289,7 +289,12 @@ pub fn clip_text_with_config(input: &str, cfg: &BudgetConfig) -> (String, Captur
     )
 }
 
-pub fn should_use_rtk(cmd: &[String], provider_mode: &str, rtk_enabled: bool, rtk_usable: bool) -> bool {
+pub fn should_use_rtk(
+    cmd: &[String],
+    provider_mode: &str,
+    rtk_enabled: bool,
+    rtk_usable: bool,
+) -> bool {
     let supported = cmd
         .first()
         .map(|c| is_rtk_supported_prefix(c))

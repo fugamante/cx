@@ -1,18 +1,18 @@
 mod app;
 mod capture;
 mod error;
+mod execmeta;
 mod llm;
 mod logs;
 mod paths;
 mod policy;
 mod quarantine;
-mod execmeta;
-mod runtime;
 mod runlog;
+mod runtime;
 mod schema;
 mod state;
-mod tasks;
 mod taskrun;
+mod tasks;
 mod types;
 mod util;
 

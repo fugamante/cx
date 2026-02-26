@@ -50,9 +50,17 @@ pub fn resolve_log_file() -> Option<PathBuf> {
 
 pub fn resolve_schema_fail_log_file() -> Option<PathBuf> {
     if let Some(root) = repo_root() {
-        return Some(root.join(".codex").join("cxlogs").join("schema_failures.jsonl"));
+        return Some(
+            root.join(".codex")
+                .join("cxlogs")
+                .join("schema_failures.jsonl"),
+        );
     }
-    home_dir().map(|h| h.join(".codex").join("cxlogs").join("schema_failures.jsonl"))
+    home_dir().map(|h| {
+        h.join(".codex")
+            .join("cxlogs")
+            .join("schema_failures.jsonl")
+    })
 }
 
 pub fn resolve_quarantine_dir() -> Option<PathBuf> {

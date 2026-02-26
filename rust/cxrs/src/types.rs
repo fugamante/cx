@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub static SCHEMA_COMPILED_CACHE: OnceLock<Mutex<HashMap<String, Arc<JSONSchema>>>> = OnceLock::new();
+pub static SCHEMA_COMPILED_CACHE: OnceLock<Mutex<HashMap<String, Arc<JSONSchema>>>> =
+    OnceLock::new();
 
 #[derive(Debug, Deserialize, Default, Clone)]
 #[allow(dead_code)]
@@ -244,4 +245,3 @@ pub struct TaskRecord {
     pub created_at: String,
     pub updated_at: String,
 }
-

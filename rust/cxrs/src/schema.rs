@@ -20,10 +20,14 @@ pub fn load_schema(schema_name: &str) -> Result<LoadedSchema, String> {
     let dir = resolve_schema_dir().ok_or_else(|| "unable to resolve schema dir".to_string())?;
     let name = normalize_schema_name(schema_name);
     let path = dir.join(&name);
-    let raw = fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    let value: Value =
-        serde_json::from_str(&raw).map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
-    let id = value.get("$id").and_then(Value::as_str).map(ToOwned::to_owned);
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
+    let id = value
+        .get("$id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
     Ok(LoadedSchema {
         name,
         path,
@@ -51,10 +55,14 @@ pub fn list_schemas() -> Result<Vec<LoadedSchema>, String> {
         if !fname.ends_with(".schema.json") {
             continue;
         }
-        let raw = fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        let value: Value =
-            serde_json::from_str(&raw).map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
-        let id = value.get("$id").and_then(Value::as_str).map(ToOwned::to_owned);
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("invalid schema JSON {}: {e}", path.display()))?;
+        let id = value
+            .get("$id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
         out.push(LoadedSchema {
             name: fname.to_string(),
             path,
@@ -124,4 +132,3 @@ pub fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Valu
     }
     Ok(instance)
 }
-

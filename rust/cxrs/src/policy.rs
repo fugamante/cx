@@ -35,7 +35,9 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
     let last = tokens.last().cloned().unwrap_or_default();
     for i in 0..tokens.len() {
         let t = tokens[i].as_str();
-        if (t == ">" || t == ">>" || t == "tee") && let Some(next) = tokens.get(i + 1) {
+        if (t == ">" || t == ">>" || t == "tee")
+            && let Some(next) = tokens.get(i + 1)
+        {
             candidates.push(next.clone());
         }
         if (t == "touch" || t == "mkdir" || t == "chmod" || t == "chown")
@@ -54,7 +56,11 @@ fn write_targets_outside_repo(cmd: &str, repo_root: &Path) -> bool {
         }
     }
     // For cp/mv/install, treat the last argument as destination.
-    if tokens.iter().any(|t| t == "cp" || t == "mv" || t == "install") && !last.is_empty() {
+    if tokens
+        .iter()
+        .any(|t| t == "cp" || t == "mv" || t == "install")
+        && !last.is_empty()
+    {
         candidates.push(last);
     }
     candidates.into_iter().any(|p| {

@@ -192,8 +192,8 @@ pub fn log_schema_failure(
     };
     validate_execution_log_row(&run_failure)
         .map_err(|e| format!("schema failure log invalid: {e}"))?;
-    let failure_value = serde_json::to_value(run_failure)
-        .map_err(|e| format!("failed serialize run log: {e}"))?;
+    let failure_value =
+        serde_json::to_value(run_failure).map_err(|e| format!("failed serialize run log: {e}"))?;
     append_jsonl(&run_log, &failure_value)?;
 
     Ok(qid)

@@ -18,35 +18,34 @@ use crate::llm::{
     extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain, usage_from_jsonl,
     wrap_agent_text_as_jsonl,
 };
-use crate::types::{
-    CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, RunEntry, TaskInput, TaskSpec,
-    UsageStats,
-};
+use crate::logs::{cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file};
 use crate::paths::{
-    repo_root, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir, resolve_state_file,
-    repo_root_hint,
+    repo_root, repo_root_hint, resolve_log_file, resolve_quarantine_dir, resolve_schema_dir,
+    resolve_state_file,
 };
 use crate::policy::{SafetyDecision, cmd_policy, evaluate_command_safety};
-use crate::logs::{cmd_logs, file_len, load_runs, load_runs_appended, validate_runs_jsonl_file};
-use crate::quarantine::{
-    cmd_quarantine_list, cmd_quarantine_show, read_quarantine_record,
-};
+use crate::quarantine::{cmd_quarantine_list, cmd_quarantine_show, read_quarantine_record};
+use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
 use crate::runtime::{
     llm_backend, llm_bin_name, llm_model, logging_enabled, ollama_model_preference,
     resolve_ollama_model_for_run,
 };
-use crate::runlog::{RunLogInput, log_codex_run, log_schema_failure};
 use crate::schema::{
     build_strict_schema_prompt, list_schemas, load_schema, validate_schema_instance,
 };
 use crate::state::{
-    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value, set_state_path,
-    set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
-};
-use crate::tasks::{
-    cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status, write_tasks,
+    current_task_id, current_task_parent_id, ensure_state_value, parse_cli_value, read_state_value,
+    set_state_path, set_value_at_path, state_cache_clear, value_at_path, write_json_atomic,
 };
 use crate::taskrun::{TaskRunner, run_task_by_id};
+use crate::tasks::{
+    cmd_task_add, cmd_task_fanout, cmd_task_list, cmd_task_show, read_tasks, set_task_status,
+    write_tasks,
+};
+use crate::types::{
+    CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, RunEntry, TaskInput, TaskSpec,
+    UsageStats,
+};
 use crate::util::sha256_hex;
 
 const APP_NAME: &str = "cxrs";
@@ -67,8 +66,12 @@ fn print_help() {
     println!("  parity             Run Rust/Bash parity invariants");
     println!("  schema list [--json]  List registered schemas");
     println!("  logs validate [--fix=false] [--legacy-ok]  Validate execution log JSONL contract");
-    println!("  logs migrate [--out PATH] [--in-place]  Normalize legacy run logs to current contract");
-    println!("  ci validate [--strict] [--legacy-ok] [--json]  CI-friendly validation gate (no network)");
+    println!(
+        "  logs migrate [--out PATH] [--in-place]  Normalize legacy run logs to current contract"
+    );
+    println!(
+        "  ci validate [--strict] [--legacy-ok] [--json]  CI-friendly validation gate (no network)"
+    );
     println!("  core               Show execution-core pipeline config");
     println!(
         "  task <op> [...]    Task graph management (add/list/claim/complete/fail/show/fanout)"
@@ -1106,7 +1109,10 @@ fn cmd_ci(args: &[String]) -> i32 {
     };
     let schema_dir = root.join(".codex").join("schemas");
     if !schema_dir.is_dir() {
-        errors.push(format!("missing schema registry dir: {}", schema_dir.display()));
+        errors.push(format!(
+            "missing schema registry dir: {}",
+            schema_dir.display()
+        ));
     } else {
         let required = [
             "commitjson.schema.json",
@@ -1176,7 +1182,10 @@ fn cmd_ci(args: &[String]) -> i32 {
         // Strict mode adds a cheap local integrity check over quarantine directory naming.
         let qdir = root.join(".codex").join("quarantine");
         if qdir.exists() && !qdir.is_dir() {
-            errors.push(format!("quarantine path exists but is not a dir: {}", qdir.display()));
+            errors.push(format!(
+                "quarantine path exists but is not a dir: {}",
+                qdir.display()
+            ));
         }
     }
 
@@ -1195,7 +1204,10 @@ fn cmd_ci(args: &[String]) -> i32 {
             "warnings": warnings,
             "errors": errors
         });
-        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())
+        );
         return if ok { 0 } else { 1 };
     }
 
@@ -4965,8 +4977,15 @@ mod tests {
             .output()
             .expect("git init");
 
-        let qid = log_schema_failure("cxrs_next", "invalid_json", "raw", "{}", "prompt", Vec::new())
-            .expect("schema failure log");
+        let qid = log_schema_failure(
+            "cxrs_next",
+            "invalid_json",
+            "raw",
+            "{}",
+            "prompt",
+            Vec::new(),
+        )
+        .expect("schema failure log");
         assert!(!qid.is_empty());
 
         let qfile = dir

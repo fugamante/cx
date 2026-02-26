@@ -44,7 +44,10 @@ fn parse_words(input: &str) -> Vec<String> {
         .collect()
 }
 
-fn run_task_objective(runner: &TaskRunner, task: &TaskRecord) -> Result<(i32, Option<String>), String> {
+fn run_task_objective(
+    runner: &TaskRunner,
+    task: &TaskRecord,
+) -> Result<(i32, Option<String>), String> {
     let words = parse_words(&task.objective);
     if let Some(cmd0) = words.first().map(String::as_str) {
         let args: Vec<String> = words.iter().skip(1).cloned().collect();
@@ -241,4 +244,3 @@ pub fn run_task_by_id(
     }
     Ok((status_code, execution_id))
 }
-

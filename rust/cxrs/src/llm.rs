@@ -132,4 +132,3 @@ pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
     serde_json::to_string(&wrapped)
         .map_err(|e| format!("failed to serialize ollama JSONL wrapper: {e}"))
 }
-

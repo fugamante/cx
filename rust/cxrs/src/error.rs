@@ -5,15 +5,23 @@ pub type CxResult<T> = Result<T, CxError>;
 
 #[derive(Debug)]
 pub enum CxError {
-    Io { context: String, source: std::io::Error },
-    JsonParse { context: String, source: serde_json::Error },
+    Io {
+        context: String,
+        source: std::io::Error,
+    },
+    JsonParse {
+        context: String,
+        source: serde_json::Error,
+    },
     JsonLineParse {
         file: PathBuf,
         line: usize,
         content_preview: String,
         source: serde_json::Error,
     },
-    InvalidData { context: String },
+    InvalidData {
+        context: String,
+    },
 }
 
 impl CxError {
@@ -71,4 +79,3 @@ impl std::error::Error for CxError {
         }
     }
 }
-

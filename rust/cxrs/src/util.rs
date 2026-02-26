@@ -16,4 +16,3 @@ impl IfEmpty for String {
         if self.is_empty() { f() } else { self }
     }
 }
-

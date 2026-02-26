@@ -62,7 +62,8 @@ fn append_jsonl_cx(path: &Path, value: &Value) -> CxResult<()> {
         .map_err(|e| CxError::io(format!("failed opening {}", path.display()), e))?;
     f.lock_exclusive()
         .map_err(|e| CxError::io(format!("failed locking {}", path.display()), e))?;
-    let mut line = serde_json::to_string(value).map_err(|e| CxError::json("log json serialize", e))?;
+    let mut line =
+        serde_json::to_string(value).map_err(|e| CxError::json("log json serialize", e))?;
     line.push('\n');
     let write_res = f
         .write_all(line.as_bytes())
@@ -82,7 +83,10 @@ pub struct LogValidateOutcome {
     pub issues: Vec<String>,
 }
 
-pub fn validate_runs_jsonl_file(log_file: &Path, legacy_ok: bool) -> Result<LogValidateOutcome, String> {
+pub fn validate_runs_jsonl_file(
+    log_file: &Path,
+    legacy_ok: bool,
+) -> Result<LogValidateOutcome, String> {
     validate_runs_jsonl_file_cx(log_file, legacy_ok).map_err(|e| e.to_string())
 }
 
@@ -115,7 +119,11 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
         "policy_blocked",
         "policy_reason",
     ];
-    let required_legacy_any_of = [("ts", "timestamp"), ("tool", "command"), ("repo_root", "repo_root")];
+    let required_legacy_any_of = [
+        ("ts", "timestamp"),
+        ("tool", "command"),
+        ("repo_root", "repo_root"),
+    ];
 
     let mut out = LogValidateOutcome {
         legacy_ok,
@@ -155,7 +163,8 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
         };
         let Some(obj) = parsed.as_object() else {
             out.corrupted_lines.insert(line_no);
-            out.issues.push(format!("line {line_no}: json is not an object"));
+            out.issues
+                .push(format!("line {line_no}: json is not an object"));
             continue;
         };
         if legacy_ok {
@@ -164,7 +173,8 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
                 for k in required_strict {
                     if !obj.contains_key(k) {
                         out.corrupted_lines.insert(line_no);
-                        out.issues.push(format!("line {line_no}: missing required field '{k}'"));
+                        out.issues
+                            .push(format!("line {line_no}: missing required field '{k}'"));
                     }
                 }
             } else {
@@ -186,7 +196,8 @@ fn validate_runs_jsonl_file_cx(log_file: &Path, legacy_ok: bool) -> CxResult<Log
             for k in required_strict {
                 if !obj.contains_key(k) {
                     out.corrupted_lines.insert(line_no);
-                    out.issues.push(format!("line {line_no}: missing required field '{k}'"));
+                    out.issues
+                        .push(format!("line {line_no}: missing required field '{k}'"));
                 }
             }
         }
@@ -344,7 +355,11 @@ fn normalize_run_log_row_cx(v: &Value) -> CxResult<(String, bool)> {
         .or_else(|| obj.get("tool").and_then(Value::as_str))
         .unwrap_or("unknown")
         .to_string();
-    let cwd_val = obj.get("cwd").and_then(Value::as_str).unwrap_or("").to_string();
+    let cwd_val = obj
+        .get("cwd")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let scope_val = obj.get("scope").and_then(Value::as_str).unwrap_or("repo");
     let repo_root_val = obj.get("repo_root").and_then(Value::as_str).unwrap_or("");
     let backend_used = obj
@@ -375,7 +390,12 @@ fn normalize_run_log_row_cx(v: &Value) -> CxResult<(String, bool)> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string()
-            .if_empty_else(|| format!("legacy_{}", sha256_hex(&format!("{command}|{ts}|{cwd_val}")))),
+            .if_empty_else(|| {
+                format!(
+                    "legacy_{}",
+                    sha256_hex(&format!("{command}|{ts}|{cwd_val}"))
+                )
+            }),
         timestamp: ts.clone(),
         ts,
         command: command.clone(),
@@ -385,7 +405,10 @@ fn normalize_run_log_row_cx(v: &Value) -> CxResult<(String, bool)> {
         repo_root: repo_root_val.to_string(),
         backend_used: backend_used.clone(),
         llm_backend: backend_used,
-        llm_model: obj.get("llm_model").and_then(Value::as_str).map(|s| s.to_string()),
+        llm_model: obj
+            .get("llm_model")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
         capture_provider,
         execution_mode,
         duration_ms: obj.get("duration_ms").and_then(Value::as_u64),
@@ -394,40 +417,77 @@ fn normalize_run_log_row_cx(v: &Value) -> CxResult<(String, bool)> {
             .and_then(Value::as_bool)
             .or_else(|| obj.get("schema_ok").and_then(Value::as_bool).map(|_| false))
             .unwrap_or(false),
-        schema_name: obj.get("schema_name").and_then(Value::as_str).map(|s| s.to_string()),
+        schema_name: obj
+            .get("schema_name")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
         schema_valid: obj
             .get("schema_valid")
             .and_then(Value::as_bool)
             .or_else(|| obj.get("schema_ok").and_then(Value::as_bool))
             .unwrap_or(true),
-        schema_ok: obj.get("schema_ok").and_then(Value::as_bool).unwrap_or(true),
-        schema_reason: obj.get("schema_reason").and_then(Value::as_str).map(|s| s.to_string()),
-        quarantine_id: obj.get("quarantine_id").and_then(Value::as_str).map(|s| s.to_string()),
-        task_id: obj.get("task_id").and_then(Value::as_str).map(|s| s.to_string()),
-        task_parent_id: obj.get("task_parent_id").and_then(Value::as_str).map(|s| s.to_string()),
+        schema_ok: obj
+            .get("schema_ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        schema_reason: obj
+            .get("schema_reason")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        quarantine_id: obj
+            .get("quarantine_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        task_id: obj
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        task_parent_id: obj
+            .get("task_parent_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
         input_tokens: obj.get("input_tokens").and_then(Value::as_u64),
         cached_input_tokens: obj.get("cached_input_tokens").and_then(Value::as_u64),
         effective_input_tokens: obj.get("effective_input_tokens").and_then(Value::as_u64),
         output_tokens: obj.get("output_tokens").and_then(Value::as_u64),
         system_output_len_raw: obj.get("system_output_len_raw").and_then(Value::as_u64),
-        system_output_len_processed: obj.get("system_output_len_processed").and_then(Value::as_u64),
+        system_output_len_processed: obj
+            .get("system_output_len_processed")
+            .and_then(Value::as_u64),
         system_output_len_clipped: obj.get("system_output_len_clipped").and_then(Value::as_u64),
         system_output_lines_raw: obj.get("system_output_lines_raw").and_then(Value::as_u64),
-        system_output_lines_processed: obj.get("system_output_lines_processed").and_then(Value::as_u64),
-        system_output_lines_clipped: obj.get("system_output_lines_clipped").and_then(Value::as_u64),
+        system_output_lines_processed: obj
+            .get("system_output_lines_processed")
+            .and_then(Value::as_u64),
+        system_output_lines_clipped: obj
+            .get("system_output_lines_clipped")
+            .and_then(Value::as_u64),
         clipped: obj.get("clipped").and_then(Value::as_bool),
         budget_chars: obj.get("budget_chars").and_then(Value::as_u64),
         budget_lines: obj.get("budget_lines").and_then(Value::as_u64),
-        clip_mode: obj.get("clip_mode").and_then(Value::as_str).map(|s| s.to_string()),
+        clip_mode: obj
+            .get("clip_mode")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
         clip_footer: obj.get("clip_footer").and_then(Value::as_bool),
         rtk_used: obj.get("rtk_used").and_then(Value::as_bool),
-        prompt_sha256: obj.get("prompt_sha256").and_then(Value::as_str).map(|s| s.to_string()),
-        prompt_preview: obj.get("prompt_preview").and_then(Value::as_str).map(|s| s.to_string()),
+        prompt_sha256: obj
+            .get("prompt_sha256")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
+        prompt_preview: obj
+            .get("prompt_preview")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
         policy_blocked: obj.get("policy_blocked").and_then(Value::as_bool),
-        policy_reason: obj.get("policy_reason").and_then(Value::as_str).map(|s| s.to_string()),
+        policy_reason: obj
+            .get("policy_reason")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string()),
     };
 
-    let line = serde_json::to_string(&row).map_err(|e| CxError::json("serialize normalized row", e))?;
+    let line =
+        serde_json::to_string(&row).map_err(|e| CxError::json("serialize normalized row", e))?;
     Ok((line, has_modern))
 }
 
@@ -436,7 +496,8 @@ pub fn migrate_runs_jsonl(in_path: &Path, out_path: &Path) -> Result<MigrateSumm
 }
 
 fn migrate_runs_jsonl_cx(in_path: &Path, out_path: &Path) -> CxResult<MigrateSummary> {
-    let file = File::open(in_path).map_err(|e| CxError::io(format!("cannot open {}", in_path.display()), e))?;
+    let file = File::open(in_path)
+        .map_err(|e| CxError::io(format!("cannot open {}", in_path.display()), e))?;
     let reader = BufReader::new(file);
     ensure_parent_dir(out_path).map_err(CxError::invalid)?;
     let tmp = out_path.with_extension("jsonl.tmp");
@@ -504,7 +565,10 @@ pub fn cmd_logs(app_name: &str, args: &[String]) -> i32 {
                 return 1;
             };
             if !log_file.exists() {
-                println!("{app_name} logs validate: no log file at {}", log_file.display());
+                println!(
+                    "{app_name} logs validate: no log file at {}",
+                    log_file.display()
+                );
                 return 0;
             }
             let outcome = match validate_runs_jsonl_file(&log_file, legacy_ok) {
@@ -548,7 +612,10 @@ pub fn cmd_logs(app_name: &str, args: &[String]) -> i32 {
                 return 1;
             };
             if !log_file.exists() {
-                eprintln!("{app_name} logs migrate: no log file at {}", log_file.display());
+                eprintln!(
+                    "{app_name} logs migrate: no log file at {}",
+                    log_file.display()
+                );
                 return 1;
             }
 
