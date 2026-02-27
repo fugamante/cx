@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 fn git_bin() -> String {
     if let Ok(v) = std::env::var("GIT_BIN")
         && !v.trim().is_empty()
+        && Command::new(&v).arg("--version").output().is_ok()
     {
         return v;
     }

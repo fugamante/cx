@@ -3,6 +3,8 @@ mod common;
 use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
+use std::thread::sleep;
+use std::time::Duration;
 
 fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
     for line in s.lines() {
@@ -77,10 +79,16 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
     );
 
     let qdir = repo.quarantine_dir();
-    let q_entries: Vec<_> = fs::read_dir(&qdir)
-        .expect("read quarantine dir")
-        .filter_map(Result::ok)
-        .collect();
+    let mut q_entries: Vec<std::fs::DirEntry> = Vec::new();
+    for _ in 0..20 {
+        if let Ok(rd) = fs::read_dir(&qdir) {
+            q_entries = rd.filter_map(Result::ok).collect();
+            if !q_entries.is_empty() {
+                break;
+            }
+        }
+        sleep(Duration::from_millis(50));
+    }
     assert!(
         !q_entries.is_empty(),
         "expected quarantine entries in {}",

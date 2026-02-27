@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Rust integration entrypoint coverage:
+  - `rust/cxrs/tests/entrypoint_integration.rs`
+  - validates `bin/cx version` execution path and `lib/cx.sh` sourceability/function export.
+- release metadata checker:
+  - `rust/cxrs/tools/release_check.py`
+  - validates `VERSION`, `CHANGELOG`, `README` sections, and license presence.
+- help/dispatch modularization:
+  - `rust/cxrs/src/modules/help_data.rs`
+  - `rust/cxrs/src/modules/help_render.rs`
+  - `rust/cxrs/src/modules/compat_dispatch.rs`
+  - `rust/cxrs/src/modules/native_dispatch.rs`
 - `rust/cxrs/src/modules/log_contract.rs`:
   - single shared strict telemetry contract field list used by both log validation and telemetry stats.
 - capture/analytics module decomposition:
@@ -99,6 +110,9 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `rust/cxrs/src/modules/help.rs` reduced to facade + shared data/render modules.
+- `rust/cxrs/src/modules/compat_cmd.rs` and `rust/cxrs/src/modules/native_cmd.rs` reduced to deps + thin handler facades.
+- `.github/workflows/cxrs-compat.yml` now runs release metadata check (`python3 rust/cxrs/tools/release_check.py --repo-root "$GITHUB_WORKSPACE"`).
 - `.github/workflows/cxrs-compat.yml` trigger scope widened:
   - now includes changes under `bin/**`, `lib/**`, `test/**`, and `cx.sh`.
 - `.github/workflows/cxrs-compat.yml` now runs shell-level regression scripts (`test/*.sh`) in CI.

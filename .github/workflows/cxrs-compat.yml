@@ -80,6 +80,11 @@ jobs:
           cd rust/cxrs
           python3 tools/quality_gate.py --max-raw-eprintln 0
 
+      - name: Release Metadata Check
+        run: |
+          cd rust/cxrs
+          python3 tools/release_check.py --repo-root "$GITHUB_WORKSPACE"
+
       - name: Compat check
         run: |
           cd rust/cxrs

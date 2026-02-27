@@ -228,6 +228,7 @@ cd rust/cxrs
 cargo fmt
 cargo check
 cargo test --tests
+python3 tools/release_check.py --repo-root ../..
 
 cd ../..
 ./test/bin_cx_entrypoint.sh
