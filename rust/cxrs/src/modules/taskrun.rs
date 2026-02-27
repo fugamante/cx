@@ -280,13 +280,31 @@ fn select_winner(mode: &str, outcomes: &[ReplicaOutcome]) -> ReplicaOutcome {
                     .unwrap_or_else(|| outcomes[0].clone())
             }
         }
-        "judge" | "score" => outcomes
-            .iter()
-            .find(|o| o.status_code == 0)
-            .cloned()
-            .unwrap_or_else(|| outcomes[0].clone()),
+        "judge" | "score" => {
+            let mut scored: Vec<(i64, u32, ReplicaOutcome)> = outcomes
+                .iter()
+                .cloned()
+                .map(|o| (score_outcome(&o), o.index, o))
+                .collect();
+            scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            scored
+                .first()
+                .map(|(_, _, o)| o.clone())
+                .unwrap_or_else(|| outcomes[0].clone())
+        }
         _ => outcomes[0].clone(),
     }
+}
+
+fn score_outcome(outcome: &ReplicaOutcome) -> i64 {
+    let success_score = if outcome.status_code == 0 { 1000 } else { 0 };
+    let execution_id_bonus = if outcome.execution_id.is_some() {
+        100
+    } else {
+        0
+    };
+    let error_penalty = outcome.error.as_ref().map(|e| e.len() as i64).unwrap_or(0);
+    success_score + execution_id_bonus - error_penalty.min(200)
 }
 
 fn run_replica(
@@ -318,24 +336,43 @@ fn run_replica(
     }
 }
 
-fn convergence_votes_json(outcomes: &[ReplicaOutcome]) -> String {
+fn convergence_votes_json(
+    converge_mode: &str,
+    outcomes: &[ReplicaOutcome],
+    winner: &ReplicaOutcome,
+) -> String {
     let ok = outcomes.iter().filter(|o| o.status_code == 0).count() as u64;
     let fail = outcomes.len() as u64 - ok;
+    let candidates = outcomes
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "index": o.index,
+                "status_code": o.status_code,
+                "score": score_outcome(o),
+                "execution_id": o.execution_id,
+            })
+        })
+        .collect::<Vec<serde_json::Value>>();
     serde_json::json!({
+        "mode": converge_mode,
+        "winner": winner.index,
         "ok": ok,
         "fail": fail,
         "replicas_executed": outcomes.len() as u64,
-        "replicas_target": outcomes.iter().map(|o| o.index).max().unwrap_or(0) as u64
+        "replicas_target": outcomes.iter().map(|o| o.index).max().unwrap_or(0) as u64,
+        "candidates": candidates,
     })
     .to_string()
 }
 
 fn log_convergence_summary(
     task: &TaskRecord,
+    converge_mode: &str,
     outcomes: &[ReplicaOutcome],
     winner: &ReplicaOutcome,
 ) {
-    let votes_json = convergence_votes_json(outcomes);
+    let votes_json = convergence_votes_json(converge_mode, outcomes, winner);
     let prev_votes = env::var("CX_TASK_CONVERGE_VOTES").ok();
     set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
     set_optional_env("CX_TASK_CONVERGE_VOTES", Some(votes_json));
@@ -452,12 +489,6 @@ pub fn run_task_by_id(
             tasks[idx].replicas
         );
     }
-    if matches!(converge_mode.as_str(), "judge" | "score") {
-        crate::cx_eprintln!(
-            "cxrs task run: converge={} currently uses first_valid fallback",
-            converge_mode
-        );
-    }
     let mut outcomes: Vec<ReplicaOutcome> = Vec::new();
     for replica_index in 1..=replica_count {
         let outcome = run_replica(
@@ -478,7 +509,7 @@ pub fn run_task_by_id(
     let winner = select_winner(&converge_mode, &outcomes);
     set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
     if replica_count > 1 || converge_mode != "none" {
-        log_convergence_summary(&tasks[idx], &outcomes, &winner);
+        log_convergence_summary(&tasks[idx], &converge_mode, &outcomes, &winner);
     }
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
     set_optional_env("CX_TASK_REPLICA_INDEX", prev_replica_index);
@@ -521,5 +552,17 @@ mod tests {
         let winner = select_winner("majority", &[out(1, 1), out(2, 0)]);
         assert_eq!(winner.status_code, 0);
         assert_eq!(winner.index, 2);
+    }
+
+    #[test]
+    fn winner_score_prefers_success() {
+        let winner = select_winner("score", &[out(1, 1), out(2, 0)]);
+        assert_eq!(winner.index, 2);
+    }
+
+    #[test]
+    fn winner_judge_breaks_tie_by_lowest_index() {
+        let winner = select_winner("judge", &[out(2, 1), out(1, 1)]);
+        assert_eq!(winner.index, 1);
     }
 }
