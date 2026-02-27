@@ -224,6 +224,20 @@ Stage II runtime commands:
 ./bin/cx logs validate --fix=false
 ```
 
+## Migration Phase III (Orchestration Modes)
+
+Current status:
+- task graph and runner exist (`task add/list/fanout/run/run-all`), with sequential execution as the default.
+
+Next migration phase (active on feature branch, not yet merged to main behavior):
+- add switchable orchestration modes so tasks can be explicitly sequential or parallelizable.
+- introduce execution-policy metadata on tasks (`run_mode`, `depends_on`, `resource_keys`, optional retries/timeouts).
+- introduce `task run-plan` for deterministic schedule preview before execution.
+- keep safety/determinism contracts unchanged:
+  - policy gates still enforced for execution paths,
+  - schema commands remain deterministic by default,
+  - telemetry/log contracts remain append-only and validated.
+
 ## Validation
 
 ```bash

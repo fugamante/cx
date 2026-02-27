@@ -14,17 +14,18 @@ Scope: entire `CX` project
 ## 2) Branch strategy
 
 - `main`: stable operational branch for incremental Rust-first rollout.
-- `codex/rust-refactor`: active extraction branch for modularization and error-path hardening.
+- `codex/*`: feature branches for scoped migration phases.
+- current phase branch: `codex/orchestration-mode-phase` (switchable sequential/parallel orchestration planning + contracts).
 
 Flow:
-1. Build and validate risky work on `codex/rust-refactor`.
+1. Branch from `main` into a scoped `codex/*` feature branch.
 2. Promote to `main` only after parity + smoke checks pass.
 3. Keep branch READMEs branch-specific.
 
 Current branch focus:
-- split `cxrs` command families into domain modules
-- preserve CLI contracts while reducing monolithic coupling
-- keep Rust tests/parity checks green on every extraction slice
+- define and stage Phase III orchestration contracts before enabling concurrency by default
+- preserve deterministic schema/policy/logging guarantees during scheduler changes
+- keep Rust tests/parity checks green on every iteration slice
 
 ## 3) Feature intake checklist (for every new feature)
 
@@ -109,3 +110,26 @@ All true:
 - Rust commands are the documented default workflow.
 - Compatibility checks are green in CI for the tracked surface.
 - Bash remains thin and no longer accumulates core logic.
+
+## 11) Phase III: Switchable Orchestration Modes (new)
+
+Objective:
+- support both sequential and parallel task execution without breaking determinism/safety contracts.
+
+First-step implementation contract:
+1. Extend task schema with execution policy metadata:
+   - `run_mode`: `sequential|parallel`
+   - `depends_on`: array of task ids
+   - `resource_keys`: logical locks (for repo-write and other conflict domains)
+   - optional: `max_retries`, `timeout_secs`
+2. Add scheduler planning command:
+   - `cx task run-plan [--status pending] [--json]`
+   - outputs deterministic execution order/groups before any execution.
+3. Keep `task run-all` sequential by default until planning + lock enforcement are validated.
+4. Introduce bounded worker execution only for tasks proven independent by dependencies + resource locks.
+5. Extend telemetry contract for concurrency:
+   - `task_id`, `worker_id`, `attempt`, `queued_at`, `started_at`, `finished_at`
+6. Maintain hard constraints:
+   - policy engine still blocks unsafe commands by default,
+   - schema commands remain deterministic by default,
+   - logs remain append-only JSONL with contract validation.
