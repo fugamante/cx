@@ -26,6 +26,7 @@ pub struct CompatDeps {
     pub cmd_cxol: fn(&[String]) -> i32,
     pub cmd_cxcopy: fn(&[String]) -> i32,
     pub cmd_policy: fn(&[String]) -> i32,
+    pub cmd_broker: fn(&[String]) -> i32,
     pub cmd_state_show: fn() -> i32,
     pub cmd_state_get: fn(&str) -> i32,
     pub cmd_state_set: fn(&str, &str) -> i32,

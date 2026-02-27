@@ -6,6 +6,7 @@ mod deps;
 use crate::agentcmds;
 use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
 use crate::bench_parity;
+use crate::broker::cmd_broker as broker_cmd;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
 use crate::cmdctx::CmdCtx;
 use crate::command_names::{is_compat_name, is_native_name};
@@ -216,6 +217,10 @@ fn compat_cmd_policy(args: &[String]) -> i32 {
     cmd_policy(args, APP_NAME)
 }
 
+fn compat_cmd_broker(args: &[String]) -> i32 {
+    broker_cmd(APP_NAME, args)
+}
+
 fn compat_cmd_llm(args: &[String]) -> i32 {
     cmd_llm(APP_NAME, args)
 }
@@ -266,6 +271,10 @@ fn native_cmd_llm(args: &[String]) -> i32 {
 
 fn native_cmd_policy(args: &[String]) -> i32 {
     cmd_policy(args, APP_NAME)
+}
+
+fn native_cmd_broker(args: &[String]) -> i32 {
+    broker_cmd(APP_NAME, args)
 }
 
 fn native_cmd_doctor() -> i32 {

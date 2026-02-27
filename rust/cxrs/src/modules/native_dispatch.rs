@@ -172,6 +172,7 @@ fn dispatch_meta_commands(
         "state" => handle_state(app_name, args, deps),
         "llm" => (deps.cmd_llm)(&args[2..]),
         "policy" => (deps.cmd_policy)(&args[2..]),
+        "broker" => (deps.cmd_broker)(&args[2..]),
         _ => return None,
     };
     Some(out)

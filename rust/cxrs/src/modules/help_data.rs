@@ -62,6 +62,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Show execution-core pipeline config",
     },
     CommandHelp {
+        name: "broker",
+        usage: "broker show [--json]",
+        description: "Show backend broker policy, active selection, and provider availability",
+    },
+    CommandHelp {
         name: "task",
         usage: "task <op> [...]",
         description: "Task graph management (add/list/claim/complete/fail/show/fanout)",

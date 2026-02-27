@@ -71,6 +71,22 @@ fn base_execution_log(
 ) -> ExecutionLog {
     let backend = llm_backend();
     let model = llm_model();
+    let model_opt = if model.is_empty() {
+        None
+    } else {
+        Some(model.clone())
+    };
+    let backend_selected = backend.clone();
+    let broker_policy = app_config().broker_policy.clone();
+    let route_reason = if backend == "ollama" {
+        if model.is_empty() {
+            "ollama_selected_model_unset".to_string()
+        } else {
+            "ollama_selected".to_string()
+        }
+    } else {
+        "codex_selected".to_string()
+    };
     let (task_id, task_parent_id) = current_task_fields();
     let mut row = ExecutionLog {
         execution_id: make_execution_id(tool),
@@ -83,7 +99,11 @@ fn base_execution_log(
         repo_root: root,
         backend_used: backend.clone(),
         llm_backend: backend,
-        llm_model: if model.is_empty() { None } else { Some(model) },
+        llm_model: model_opt.clone(),
+        backend_selected: Some(backend_selected),
+        model_selected: model_opt,
+        route_policy: Some(broker_policy),
+        route_reason: Some(route_reason),
         task_id,
         task_parent_id,
         ..Default::default()

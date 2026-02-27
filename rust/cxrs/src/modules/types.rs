@@ -213,6 +213,10 @@ pub struct ExecutionLog {
     pub backend_used: String,
     pub llm_backend: String,
     pub llm_model: Option<String>,
+    pub backend_selected: Option<String>,
+    pub model_selected: Option<String>,
+    pub route_policy: Option<String>,
+    pub route_reason: Option<String>,
     pub capture_provider: Option<String>,
     pub execution_mode: String,
     pub duration_ms: Option<u64>,
@@ -259,6 +263,12 @@ pub struct TaskRecord {
     pub role: String,
     pub objective: String,
     pub context_ref: String,
+    #[serde(default = "default_task_backend")]
+    pub backend: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_task_profile")]
+    pub profile: String,
     #[serde(default = "default_task_run_mode")]
     pub run_mode: String,
     #[serde(default)]
@@ -276,4 +286,12 @@ pub struct TaskRecord {
 
 fn default_task_run_mode() -> String {
     "sequential".to_string()
+}
+
+fn default_task_backend() -> String {
+    "auto".to_string()
+}
+
+fn default_task_profile() -> String {
+    "balanced".to_string()
 }

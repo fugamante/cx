@@ -39,6 +39,7 @@ pub struct AppConfig {
     pub schema_relaxed: bool,
     pub cxlog_enabled: bool,
     pub capture_provider: String,
+    pub broker_policy: String,
     pub cmd_timeout_secs: usize,
 }
 
@@ -91,6 +92,19 @@ fn resolve_ollama_model(state: &Option<Value>) -> String {
         .unwrap_or_default()
 }
 
+fn resolve_broker_policy(state: &Option<Value>) -> String {
+    let raw = env::var("CX_BROKER_POLICY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| state_pref_str(state, "preferences.broker_policy"))
+        .unwrap_or_else(|| "balanced".to_string());
+    match raw.as_str() {
+        "latency" | "quality" | "cost" | "balanced" => raw,
+        _ => "balanced".to_string(),
+    }
+}
+
 impl AppConfig {
     pub fn from_env() -> Self {
         let state = read_state_value();
@@ -112,6 +126,7 @@ impl AppConfig {
             cxlog_enabled: env_bool("CXLOG_ENABLED", true),
             capture_provider: env::var("CX_CAPTURE_PROVIDER")
                 .unwrap_or_else(|_| "auto".to_string()),
+            broker_policy: resolve_broker_policy(&state),
             cmd_timeout_secs: env_usize("CX_CMD_TIMEOUT_SECS", DEFAULT_CMD_TIMEOUT_SECS).max(1),
         }
     }

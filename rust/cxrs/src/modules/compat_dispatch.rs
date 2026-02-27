@@ -151,6 +151,7 @@ fn dispatch_meta_commands(
         "cxtelemetry" | "telemetry" => handle_telemetry(args, deps),
         "cxtask" | "task" => (deps.cmd_task)(&args[1..]),
         "cxpolicy" | "policy" => (deps.cmd_policy)(&args[1..]),
+        "cxbroker" | "broker" => (deps.cmd_broker)(&args[1..]),
         "cxstate" | "state" => handle_state(app_name, args, deps),
         "cxllm" | "llm" => (deps.cmd_llm)(&args[1..]),
         _ => return None,
