@@ -4,7 +4,7 @@ use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
     for line in s.lines() {
@@ -55,6 +55,185 @@ fn task_lifecycle_add_claim_complete() {
         .find(|t| t.get("id").and_then(Value::as_str) == Some(id.as_str()))
         .expect("task exists");
     assert_eq!(task.get("status").and_then(Value::as_str), Some("complete"));
+}
+
+#[test]
+fn mixed_run_all_enforces_backend_cap_and_records_queue_ms() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 1
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+
+    for i in 1..=3 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo cap-test-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let started = Instant::now();
+    let out = repo.run(&[
+        "task",
+        "run-all",
+        "--status",
+        "pending",
+        "--mode",
+        "mixed",
+        "--backend-pool",
+        "codex",
+        "--backend-cap",
+        "codex=1",
+        "--max-workers",
+        "3",
+    ]);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        elapsed_ms >= 2800,
+        "backend cap likely not enforced; elapsed_ms={elapsed_ms}"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let task_rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    assert!(
+        task_rows.len() >= 3,
+        "expected at least 3 cxo rows in runs log, got {}",
+        task_rows.len()
+    );
+    for row in task_rows {
+        assert!(row.get("worker_id").is_some(), "missing worker_id: {row}");
+        assert!(row.get("queue_ms").is_some(), "missing queue_ms: {row}");
+    }
+}
+
+#[test]
+fn mixed_run_all_respects_dependency_waves_with_concurrency() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 1
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+
+    let t1 = repo.run(&[
+        "task",
+        "add",
+        "cxo echo dep-root",
+        "--role",
+        "implementer",
+        "--backend",
+        "codex",
+        "--mode",
+        "sequential",
+    ]);
+    assert!(t1.status.success(), "stderr={}", stderr_str(&t1));
+    let id1 = stdout_str(&t1).trim().to_string();
+
+    for label in ["dep-child-a", "dep-child-b"] {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo {label}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+            "--mode",
+            "parallel",
+            "--depends-on",
+            &id1,
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let started = Instant::now();
+    let out = repo.run(&[
+        "task",
+        "run-all",
+        "--status",
+        "pending",
+        "--mode",
+        "mixed",
+        "--backend-pool",
+        "codex",
+        "--backend-cap",
+        "codex=2",
+        "--max-workers",
+        "2",
+    ]);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        elapsed_ms >= 1800 && elapsed_ms <= 3800,
+        "expected two-wave runtime envelope, got elapsed_ms={elapsed_ms}"
+    );
+
+    let tasks = read_json(&repo.tasks_file());
+    let statuses: Vec<String> = tasks
+        .as_array()
+        .expect("tasks array")
+        .iter()
+        .map(|t| {
+            t.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    assert!(
+        statuses.iter().all(|s| s == "complete"),
+        "not all tasks completed: {statuses:?}"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let cxo_rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    let mut queue_ms_values: Vec<u64> = cxo_rows
+        .iter()
+        .filter_map(|v| v.get("queue_ms").and_then(Value::as_u64))
+        .collect();
+    queue_ms_values.sort();
+    assert!(
+        queue_ms_values.len() >= 3,
+        "expected queue_ms on all task rows; got {queue_ms_values:?}"
+    );
+    assert!(
+        queue_ms_values.last().copied().unwrap_or(0) >= 900,
+        "expected deferred wave queue_ms >= 900ms, got {queue_ms_values:?}"
+    );
 }
 
 #[test]

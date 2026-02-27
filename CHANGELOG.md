@@ -39,6 +39,9 @@ All notable changes to this project are documented in this file.
   - `judge` and `score` now use deterministic scoring-based winner selection (no LLM judge yet).
   - score factors: success status, execution id presence, and error-size penalty.
   - deterministic tie-break: lowest replica index.
+- mixed-mode scheduler reliability coverage expanded:
+  - backend cap enforcement test for codex-limited worker scheduling.
+  - dependency-wave ordering test with queue telemetry assertions.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
