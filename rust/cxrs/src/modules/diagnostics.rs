@@ -98,7 +98,7 @@ fn percentile_u64(values: &[u64], pct: f64) -> Option<u64> {
     sorted.get(idx).copied()
 }
 
-fn print_scheduler_diag(log_file_path: &str) {
+fn print_scheduler_diag(log_file_path: &str, window: usize) {
     let path = Path::new(log_file_path);
     if !path.exists() {
         println!("scheduler_window_runs: 0");
@@ -110,7 +110,7 @@ fn print_scheduler_diag(log_file_path: &str) {
         println!("scheduler_backend_distribution: <none>");
         return;
     }
-    let rows = load_values(path, 200).unwrap_or_default();
+    let rows = load_values(path, window).unwrap_or_default();
     let mut queue_vals: Vec<u64> = Vec::new();
     let mut worker_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -196,7 +196,7 @@ fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
     println!("active_model: {active_model}");
 }
 
-fn scheduler_diag_value(log_file_path: &str) -> Value {
+fn scheduler_diag_value(log_file_path: &str, window: usize) -> Value {
     let path = Path::new(log_file_path);
     if !path.exists() {
         return serde_json::json!({
@@ -209,7 +209,7 @@ fn scheduler_diag_value(log_file_path: &str) -> Value {
             "backend_distribution": {}
         });
     }
-    let rows = load_values(path, 200).unwrap_or_default();
+    let rows = load_values(path, window).unwrap_or_default();
     let mut queue_vals: Vec<u64> = Vec::new();
     let mut worker_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -246,12 +246,46 @@ fn scheduler_diag_value(log_file_path: &str) -> Value {
     })
 }
 
-pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
-    let as_json = args.iter().any(|a| a == "--json");
-    if args.iter().any(|a| a.starts_with('-') && a != "--json") {
-        crate::cx_eprintln!("Usage: diag [--json]");
-        return 2;
+fn parse_diag_args(args: &[String]) -> Result<(bool, usize), String> {
+    let mut as_json = false;
+    let mut window = 200usize;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                as_json = true;
+                i += 1;
+            }
+            "--window" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    return Err("diag: --window requires a value".to_string());
+                };
+                let parsed = v
+                    .parse::<usize>()
+                    .map_err(|_| "diag: --window must be an integer".to_string())?;
+                if parsed == 0 {
+                    return Err("diag: --window must be >= 1".to_string());
+                }
+                window = parsed;
+                i += 2;
+            }
+            other => {
+                return Err(format!("diag: unknown flag '{other}'"));
+            }
+        }
     }
+    Ok((as_json, window))
+}
+
+pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
+    let (as_json, window) = match parse_diag_args(args) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::cx_eprintln!("{e}");
+            crate::cx_eprintln!("Usage: diag [--json] [--window N]");
+            return 2;
+        }
+    };
     let cfg = app_config();
     let provider = cfg.capture_provider.clone();
     let log_file = resolve_log_file()
@@ -266,7 +300,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     } else {
         model
     };
-    let scheduler = scheduler_diag_value(&log_file);
+    let scheduler = scheduler_diag_value(&log_file, window);
     let sample_cmd = "cxo git status";
     let rust_handles = route_handler_for("cxo");
     let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
@@ -305,6 +339,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "schema_registry_dir": schema_dir.display().to_string(),
             "schema_registry_files": schema_count(&schema_dir),
             "scheduler": scheduler,
+            "scheduler_window_requested": window,
             "routing_trace": {
                 "sample": sample_cmd,
                 "route": route,
@@ -337,7 +372,8 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     println!("last_run_id: {}", last_run_id());
     println!("schema_registry_dir: {}", schema_dir.display());
     println!("schema_registry_files: {}", schema_count(&schema_dir));
-    print_scheduler_diag(&log_file);
+    print_scheduler_diag(&log_file, window);
+    println!("scheduler_window_requested: {window}");
 
     println!(
         "routing_trace: sample='{}' route={} reason={}",

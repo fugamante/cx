@@ -49,6 +49,7 @@ All notable changes to this project are documented in this file.
   - worker distribution (`scheduler_workers_seen`, `scheduler_worker_distribution`),
   - backend distribution (`scheduler_backend_distribution`).
   - added `diag --json` for machine-readable diagnostics output (including scheduler block).
+  - added `diag --window N` to scope scheduler diagnostics to the most recent N runs.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
