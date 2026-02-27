@@ -170,6 +170,36 @@ _cx_log_file() {
   fi
 }
 
+_cx_resolve_source_location() {
+  local src="$1"
+  local repo_dir cx_sh path
+  repo_dir="$(_cx_default_repo_dir)"
+  cx_sh="$repo_dir/cx.sh"
+  if [[ -z "$src" || "$src" == "local-shell" ]]; then
+    if [[ -f "$cx_sh" ]]; then
+      printf "repo:%s" "$cx_sh"
+    else
+      printf "local-shell"
+    fi
+    return 0
+  fi
+  case "$src" in
+    repo:*)
+      path="${src#repo:}"
+      if [[ -f "$path" ]]; then
+        printf "%s" "$src"
+      elif [[ -f "$cx_sh" ]]; then
+        printf "repo:%s" "$cx_sh"
+      else
+        printf "%s" "$src"
+      fi
+      ;;
+    *)
+      printf "%s" "$src"
+      ;;
+  esac
+}
+
 cxversion() {
   local root sha ts src logf version_file version_text
   local mode rtk_enabled rtk_system budget_chars budget_lines clip_mode
@@ -181,7 +211,7 @@ cxversion() {
     sha=""
   fi
   ts="$(date -u +"%Y-%m-%d")"
-  src="${CX_SOURCE_LOCATION:-local-shell}"
+  src="$(_cx_resolve_source_location "${CX_SOURCE_LOCATION:-local-shell}")"
   logf="$(_cx_log_file)"
   version_file="$(_cx_default_repo_dir)/VERSION"
   if [[ -f "$version_file" ]]; then
