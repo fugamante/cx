@@ -28,6 +28,9 @@ All notable changes to this project are documented in this file.
     - `majority`: winner selected by success/failure majority with deterministic tie-break
     - `judge` / `score`: currently mapped to deterministic `first_valid` fallback
   - replica execution context is exported for telemetry (`CX_TASK_REPLICA_INDEX`, `CX_TASK_REPLICA_COUNT`, `CX_TASK_CONVERGE_MODE`).
+  - convergence summary log rows (`tool=cxtask_converge`) now materialize:
+    - `converge_winner`
+    - `converge_votes` (ok/fail/executed counts)
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.

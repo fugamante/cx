@@ -101,6 +101,9 @@ fn base_execution_log(
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    let converge_votes = env::var("CX_TASK_CONVERGE_VOTES")
+        .ok()
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
     let queue_ms = env::var("CX_TASK_QUEUE_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
@@ -125,7 +128,7 @@ fn base_execution_log(
         replica_count,
         converge_mode,
         converge_winner,
-        converge_votes: None,
+        converge_votes,
         queue_ms,
         task_id,
         task_parent_id,

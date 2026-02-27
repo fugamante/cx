@@ -100,7 +100,7 @@ Must remain true:
 Current implementation status on `codex/orchestration-mode-phase`:
 - Milestone A: completed
 - Milestone B: in progress (routing controls implemented; bounded worker pool still pending)
-- Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented; judge/score strategy and winner-vote log materialization still pending)
+- Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented; judge/score strategy still pending)
 
 Milestone A: Routing Substrate
 - add task backend/model/profile metadata

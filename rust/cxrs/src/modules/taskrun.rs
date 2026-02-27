@@ -3,6 +3,7 @@ use std::env;
 use std::fmt;
 use std::process::Command;
 
+use crate::runlog::{RunLogInput, log_codex_run};
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskRecord, TaskSpec};
 
 #[derive(Debug, Clone)]
@@ -317,6 +318,51 @@ fn run_replica(
     }
 }
 
+fn convergence_votes_json(outcomes: &[ReplicaOutcome]) -> String {
+    let ok = outcomes.iter().filter(|o| o.status_code == 0).count() as u64;
+    let fail = outcomes.len() as u64 - ok;
+    serde_json::json!({
+        "ok": ok,
+        "fail": fail,
+        "replicas_executed": outcomes.len() as u64,
+        "replicas_target": outcomes.iter().map(|o| o.index).max().unwrap_or(0) as u64
+    })
+    .to_string()
+}
+
+fn log_convergence_summary(
+    task: &TaskRecord,
+    outcomes: &[ReplicaOutcome],
+    winner: &ReplicaOutcome,
+) {
+    let votes_json = convergence_votes_json(outcomes);
+    let prev_votes = env::var("CX_TASK_CONVERGE_VOTES").ok();
+    set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
+    set_optional_env("CX_TASK_CONVERGE_VOTES", Some(votes_json));
+    let usage = crate::types::UsageStats::default();
+    let capture = crate::types::CaptureStats::default();
+    let _ = log_codex_run(RunLogInput {
+        tool: "cxtask_converge",
+        prompt: &task.objective,
+        schema_prompt: None,
+        schema_raw: None,
+        schema_attempt: None,
+        timed_out: None,
+        timeout_secs: None,
+        command_label: Some("task_converge"),
+        duration_ms: 0,
+        usage: Some(&usage),
+        capture: Some(&capture),
+        schema_ok: true,
+        schema_reason: None,
+        schema_name: None,
+        quarantine_id: None,
+        policy_blocked: None,
+        policy_reason: None,
+    });
+    set_optional_env("CX_TASK_CONVERGE_VOTES", prev_votes);
+}
+
 fn set_runtime_task_state(runner: &TaskRunner, id: &str, parent_id: Option<&String>) {
     let _ = (runner.set_state_path)("runtime.current_task_id", Value::String(id.to_string()));
     let _ = (runner.set_state_path)(
@@ -431,6 +477,9 @@ pub fn run_task_by_id(
     }
     let winner = select_winner(&converge_mode, &outcomes);
     set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
+    if replica_count > 1 || converge_mode != "none" {
+        log_convergence_summary(&tasks[idx], &outcomes, &winner);
+    }
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
     set_optional_env("CX_TASK_REPLICA_INDEX", prev_replica_index);
     set_optional_env("CX_TASK_REPLICA_COUNT", prev_replica_count);
