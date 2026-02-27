@@ -15,7 +15,7 @@ use crate::config::{
     APP_DESC, APP_NAME, APP_VERSION, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW, app_config,
     init_app_config,
 };
-use crate::diagnostics::cmd_diag;
+use crate::diagnostics::{cmd_diag, cmd_scheduler};
 use crate::doctor;
 use crate::execmeta::utc_now_iso;
 use crate::help::{render_help, render_task_help};
@@ -205,6 +205,10 @@ fn compat_cmd_diag(args: &[String]) -> i32 {
     cmd_diag(APP_VERSION, args)
 }
 
+fn compat_cmd_scheduler(args: &[String]) -> i32 {
+    cmd_scheduler(args)
+}
+
 fn compat_cmd_core() -> i32 {
     introspect_cmd_core(APP_VERSION)
 }
@@ -259,6 +263,10 @@ fn native_cmd_where(args: &[String]) -> i32 {
 
 fn native_cmd_diag(args: &[String]) -> i32 {
     cmd_diag(APP_VERSION, args)
+}
+
+fn native_cmd_scheduler(args: &[String]) -> i32 {
+    cmd_scheduler(args)
 }
 
 fn native_cmd_core() -> i32 {

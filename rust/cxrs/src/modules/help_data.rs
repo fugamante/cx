@@ -22,6 +22,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Non-interactive diagnostic report",
     },
     CommandHelp {
+        name: "scheduler",
+        usage: "scheduler [--json] [--window N] [--strict]",
+        description: "Scheduler-focused diagnostics summary",
+    },
+    CommandHelp {
         name: "parity",
         usage: "parity",
         description: "Run Rust/Bash parity invariants",

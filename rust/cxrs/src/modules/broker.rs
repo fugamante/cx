@@ -37,6 +37,18 @@ fn parse_set_policy(args: &[String]) -> Result<String, String> {
 }
 
 fn backend_available(name: &str) -> bool {
+    let disabled = match name {
+        "codex" => std::env::var("CX_DISABLE_CODEX")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        "ollama" => std::env::var("CX_DISABLE_OLLAMA")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        _ => false,
+    };
+    if disabled {
+        return false;
+    }
     Command::new("bash")
         .args(["-lc", &format!("command -v {name} >/dev/null 2>&1")])
         .status()

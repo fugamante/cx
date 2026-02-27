@@ -166,6 +166,7 @@ fn dispatch_meta_commands(
         "where" => (deps.cmd_where)(&args[2..]),
         "routes" => (deps.cmd_routes)(&args[2..]),
         "diag" => (deps.cmd_diag)(&args[2..]),
+        "scheduler" => (deps.cmd_scheduler)(&args[2..]),
         "parity" => (deps.cmd_parity)(),
         "supports" => handle_supports(app_name, args, deps),
         "doctor" => (deps.cmd_doctor)(),

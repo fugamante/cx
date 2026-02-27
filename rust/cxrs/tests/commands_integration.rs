@@ -330,6 +330,126 @@ printf '%s\n' "ok"
 }
 
 #[test]
+fn mixed_run_all_falls_back_when_pool_backend_unavailable() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    // Intentionally do not provide ollama mock; scheduler should fallback to codex.
+    for i in 1..=3 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo fallback-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "auto",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let out = repo.run_with_env(
+        &[
+            "task",
+            "run-all",
+            "--status",
+            "pending",
+            "--mode",
+            "mixed",
+            "--backend-pool",
+            "codex,ollama",
+            "--max-workers",
+            "2",
+        ],
+        &[("CX_DISABLE_OLLAMA", "1")],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let cxo_rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    assert!(!cxo_rows.is_empty(), "expected cxo run rows");
+    assert!(
+        cxo_rows
+            .iter()
+            .all(|v| v.get("backend_used").and_then(Value::as_str) == Some("codex")),
+        "expected codex fallback for all rows: {cxo_rows:?}"
+    );
+}
+
+#[test]
+fn judge_convergence_uses_model_path_and_logs_decision_source() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+prompt="$(cat)"
+if printf '%s' "$prompt" | grep -q "Select the best candidate index"; then
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"winner_index\":1,\"reason\":\"prefer success\"}"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":40,"cached_input_tokens":4,"output_tokens":8}}'
+else
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+fi
+"#,
+    );
+
+    let add = repo.run(&[
+        "task",
+        "add",
+        "cxo echo judge-path",
+        "--role",
+        "implementer",
+        "--backend",
+        "codex",
+        "--converge",
+        "judge",
+        "--replicas",
+        "2",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    let id = stdout_str(&add).trim().to_string();
+
+    let run = repo.run(&["task", "run", &id]);
+    assert!(
+        run.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&run),
+        stderr_str(&run)
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let converge_row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxtask_converge"))
+        .expect("converge row");
+    let votes = converge_row
+        .get("converge_votes")
+        .and_then(Value::as_object)
+        .expect("converge votes object");
+    assert_eq!(
+        votes.get("decision_source").and_then(Value::as_str),
+        Some("model_judge"),
+        "unexpected converge votes: {votes:?}"
+    );
+}
+
+#[test]
 fn mixed_run_all_queue_ms_increases_for_later_tasks_under_caps() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
@@ -836,4 +956,37 @@ fn diag_json_strict_passes_on_ok_severity() {
     );
     let v: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
     assert_eq!(v.get("severity").and_then(Value::as_str), Some("ok"));
+}
+
+#[test]
+fn scheduler_json_strict_reports_severity() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let mut text = String::new();
+    for i in 1..=4u64 {
+        let row = serde_json::json!({
+            "execution_id":format!("sch{i}"),"timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10 + i,"schema_enforced":false,"schema_valid":true,"queue_ms":2500 + i * 10,"worker_id":"w1"
+        });
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["scheduler", "--json", "--strict", "--window", "4"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected strict scheduler failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("scheduler json");
+    assert_eq!(
+        v.get("scheduler_window_requested").and_then(Value::as_u64),
+        Some(4)
+    );
+    assert_ne!(v.get("severity").and_then(Value::as_str), Some("ok"));
 }

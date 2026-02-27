@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::cmdctx::CmdCtx;
 use crate::config::app_config;
-use crate::process::run_command_output_with_timeout;
+use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
 use crate::tasks::set_task_status;
@@ -274,12 +274,13 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         let pool = options.backend_pool.join(",");
         let cap_notes = render_backend_caps(&options.backend_caps);
         println!(
-            "run-all mode=mixed waves={} runnable={} backend_pool={} max_workers={} backend_caps={}",
+            "run-all mode=mixed waves={} runnable={} backend_pool={} max_workers={} backend_caps={} fairness={}",
             plan.waves.len(),
             ids.len(),
             pool,
             options.max_workers,
-            cap_notes
+            cap_notes,
+            options.fairness
         );
         for wave in &plan.waves {
             println!(
@@ -311,7 +312,10 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         let mut failed = 0usize;
         for (idx, id) in schedule.iter().enumerate() {
             let task = task_index.get(id);
-            let backend_selected = choose_backend_for_task(task, &options.backend_pool, idx);
+            let backend_selected = fallback_backend(
+                choose_backend_for_task(task, &options.backend_pool, idx),
+                &available_pool(&options.backend_pool),
+            );
             match (deps.run_task_by_id)(
                 &(deps.make_task_runner)(),
                 id,
@@ -349,6 +353,7 @@ struct RunAllOptions {
     backend_pool: Vec<String>,
     backend_caps: HashMap<String, usize>,
     max_workers: usize,
+    fairness: String,
 }
 
 fn normalize_backend(v: &str) -> Option<String> {
@@ -403,15 +408,55 @@ fn default_backend_pool() -> Vec<String> {
     }
 }
 
+fn backend_available(name: &str) -> bool {
+    let disabled = match name {
+        "codex" => std::env::var("CX_DISABLE_CODEX")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        "ollama" => std::env::var("CX_DISABLE_OLLAMA")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        _ => false,
+    };
+    if disabled {
+        return false;
+    }
+    let mut cmd = Command::new("bash");
+    cmd.args(["-lc", &format!("command -v {name} >/dev/null 2>&1")]);
+    run_command_status_with_timeout(cmd, "command -v")
+        .ok()
+        .is_some_and(|s| s.success())
+}
+
+fn available_pool(pool: &[String]) -> Vec<String> {
+    pool.iter()
+        .filter(|b| backend_available(b))
+        .cloned()
+        .collect::<Vec<String>>()
+}
+
+fn fallback_backend(selected: Option<String>, available: &[String]) -> Option<String> {
+    if available.is_empty() {
+        return None;
+    }
+    if let Some(s) = selected
+        && available.contains(&s)
+    {
+        return Some(s);
+    }
+    Some(available[0].clone())
+}
+
 fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOptions, i32> {
     let usage = format!(
-        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N]"
+        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded]"
     );
     let mut status_filter = "pending".to_string();
     let mut run_mode = "sequential".to_string();
     let mut backend_pool = default_backend_pool();
     let mut backend_caps: HashMap<String, usize> = HashMap::new();
     let mut max_workers = 1usize;
+    let mut fairness = "round_robin".to_string();
     let mut i = 1usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -485,6 +530,19 @@ fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOption
                 max_workers = n;
                 i += 2;
             }
+            "--fairness" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                let fv = v.trim().to_lowercase();
+                if !matches!(fv.as_str(), "round_robin" | "least_loaded") {
+                    crate::cx_eprintln!("cxrs task run-all: invalid fairness '{fv}'");
+                    return Err(2);
+                }
+                fairness = fv;
+                i += 2;
+            }
             other => {
                 crate::cx_eprintln!("cxrs task run-all: unknown flag '{other}'");
                 return Err(2);
@@ -497,6 +555,7 @@ fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOption
         backend_pool,
         backend_caps,
         max_workers,
+        fairness,
     })
 }
 
@@ -567,13 +626,20 @@ fn run_schedule_parallel(
     task_index: &HashMap<String, TaskRecord>,
     options: &RunAllOptions,
 ) -> Result<(usize, usize), String> {
+    let available = available_pool(&options.backend_pool);
+    if available.is_empty() {
+        return Err("task run-all: no available backend from --backend-pool".to_string());
+    }
     let mut pending: Vec<PendingLaunch> = schedule
         .iter()
         .enumerate()
         .map(|(idx, id)| PendingLaunch {
             id: id.clone(),
-            backend: choose_backend_for_task(task_index.get(id), &options.backend_pool, idx)
-                .unwrap_or_else(|| "codex".to_string()),
+            backend: fallback_backend(
+                choose_backend_for_task(task_index.get(id), &options.backend_pool, idx),
+                &available,
+            )
+            .unwrap_or_else(|| available[0].clone()),
             queue_since: Instant::now(),
         })
         .collect();
@@ -585,10 +651,22 @@ fn run_schedule_parallel(
 
     while !pending.is_empty() || !active.is_empty() {
         while active.len() < options.max_workers && !pending.is_empty() {
-            let maybe_idx = pending.iter().position(|p| {
-                let cur = backend_active.get(&p.backend).copied().unwrap_or(0);
-                cur < backend_cap_for(options, &p.backend)
-            });
+            let maybe_idx = if options.fairness == "least_loaded" {
+                pending
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| {
+                        let cur = backend_active.get(&p.backend).copied().unwrap_or(0);
+                        cur < backend_cap_for(options, &p.backend)
+                    })
+                    .min_by_key(|(_, p)| backend_active.get(&p.backend).copied().unwrap_or(0))
+                    .map(|(idx, _)| idx)
+            } else {
+                pending.iter().position(|p| {
+                    let cur = backend_active.get(&p.backend).copied().unwrap_or(0);
+                    cur < backend_cap_for(options, &p.backend)
+                })
+            };
             let Some(pos) = maybe_idx else {
                 break;
             };
@@ -811,6 +889,8 @@ mod tests {
             "codex=2".to_string(),
             "--max-workers".to_string(),
             "3".to_string(),
+            "--fairness".to_string(),
+            "least_loaded".to_string(),
         ];
         let opts = parse_run_all_options("cx", &args).expect("parse options");
         assert_eq!(opts.run_mode, "mixed");
@@ -818,6 +898,7 @@ mod tests {
         assert!(opts.backend_pool.iter().any(|b| b == "ollama"));
         assert_eq!(opts.backend_caps.get("codex"), Some(&2usize));
         assert_eq!(opts.max_workers, 3);
+        assert_eq!(opts.fairness, "least_loaded");
     }
 
     #[test]

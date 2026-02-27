@@ -9,6 +9,7 @@ pub struct CompatDeps {
     pub cmd_where: fn(&[String]) -> i32,
     pub cmd_routes: fn(&[String]) -> i32,
     pub cmd_diag: fn(&[String]) -> i32,
+    pub cmd_scheduler: fn(&[String]) -> i32,
     pub cmd_parity: fn() -> i32,
     pub cmd_core: fn() -> i32,
     pub cmd_logs: fn(&[String]) -> i32,

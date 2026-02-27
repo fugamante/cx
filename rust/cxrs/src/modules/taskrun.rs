@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::env;
 use std::fmt;
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::runlog::{RunLogInput, log_codex_run};
@@ -307,6 +308,104 @@ fn score_outcome(outcome: &ReplicaOutcome) -> i64 {
     success_score + execution_id_bonus - error_penalty.min(200)
 }
 
+fn score_outcome_breakdown(outcome: &ReplicaOutcome) -> (i64, i64, i64, i64) {
+    let success_score = if outcome.status_code == 0 { 1000 } else { 0 };
+    let execution_id_bonus = if outcome.execution_id.is_some() {
+        100
+    } else {
+        0
+    };
+    let error_penalty = outcome.error.as_ref().map(|e| e.len() as i64).unwrap_or(0);
+    let bounded_penalty = error_penalty.min(200);
+    (
+        success_score + execution_id_bonus - bounded_penalty,
+        success_score,
+        execution_id_bonus,
+        bounded_penalty,
+    )
+}
+
+fn judge_winner_with_model(
+    runner: &TaskRunner,
+    task: &TaskRecord,
+    outcomes: &[ReplicaOutcome],
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+) -> Option<(u32, String)> {
+    if outcomes.is_empty() {
+        return None;
+    }
+    let candidates = outcomes
+        .iter()
+        .map(|o| {
+            let (score, success_score, execution_id_bonus, error_penalty) =
+                score_outcome_breakdown(o);
+            serde_json::json!({
+                "index": o.index,
+                "status_code": o.status_code,
+                "score": score,
+                "success_score": success_score,
+                "execution_id_bonus": execution_id_bonus,
+                "error_penalty": error_penalty,
+                "has_execution_id": o.execution_id.is_some(),
+                "error": o.error
+            })
+        })
+        .collect::<Vec<Value>>();
+    let prompt = format!(
+        "Task objective:\n{}\n\nSelect the best candidate index using reliability-first judgement. Prefer successful runs, lower error penalties, and stable metadata.\n\nCandidates:\n{}\n\nReturn JSON only.",
+        task.objective,
+        serde_json::to_string_pretty(&candidates).ok()?
+    );
+    let schema = crate::types::LoadedSchema {
+        name: "converge_judge.schema.json".to_string(),
+        path: PathBuf::from("<inline>"),
+        value: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["winner_index", "reason"],
+            "properties": {
+              "winner_index": { "type": "integer", "minimum": 1, "maximum": outcomes.len() as i64 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+        }),
+        id: None,
+    };
+    let prev_mode = env::var("CX_MODE").ok();
+    let prev_backend = env::var("CX_LLM_BACKEND").ok();
+    if let Some(mode) = mode_override {
+        set_optional_env("CX_MODE", Some(mode.to_string()));
+    }
+    if let Some(backend) = backend_override {
+        set_optional_env("CX_LLM_BACKEND", Some(backend.to_string()));
+    }
+    let res = (runner.execute_task)(TaskSpec {
+        command_name: "cxtask_converge_judge".to_string(),
+        input: TaskInput::Prompt(prompt.clone()),
+        output_kind: LlmOutputKind::SchemaJson,
+        schema: Some(schema),
+        schema_task_input: Some(prompt),
+        logging_enabled: true,
+        capture_override: None,
+    });
+    set_optional_env("CX_MODE", prev_mode);
+    set_optional_env("CX_LLM_BACKEND", prev_backend);
+    let Ok(result) = res else {
+        return None;
+    };
+    let parsed: Value = serde_json::from_str(&result.stdout).ok()?;
+    let winner = parsed.get("winner_index").and_then(Value::as_u64)? as u32;
+    if !outcomes.iter().any(|o| o.index == winner) {
+        return None;
+    }
+    let reason = parsed
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("judge_selected")
+        .to_string();
+    Some((winner, reason))
+}
+
 fn run_replica(
     runner: &TaskRunner,
     task: &TaskRecord,
@@ -340,6 +439,8 @@ fn convergence_votes_json(
     converge_mode: &str,
     outcomes: &[ReplicaOutcome],
     winner: &ReplicaOutcome,
+    decision_source: &str,
+    decision_reason: Option<&str>,
 ) -> String {
     let ok = outcomes.iter().filter(|o| o.status_code == 0).count() as u64;
     let fail = outcomes.len() as u64 - ok;
@@ -350,6 +451,11 @@ fn convergence_votes_json(
                 "index": o.index,
                 "status_code": o.status_code,
                 "score": score_outcome(o),
+                "score_components": {
+                    "success_score": score_outcome_breakdown(o).1,
+                    "execution_id_bonus": score_outcome_breakdown(o).2,
+                    "error_penalty": score_outcome_breakdown(o).3
+                },
                 "execution_id": o.execution_id,
             })
         })
@@ -357,6 +463,8 @@ fn convergence_votes_json(
     serde_json::json!({
         "mode": converge_mode,
         "winner": winner.index,
+        "decision_source": decision_source,
+        "decision_reason": decision_reason,
         "ok": ok,
         "fail": fail,
         "replicas_executed": outcomes.len() as u64,
@@ -371,8 +479,16 @@ fn log_convergence_summary(
     converge_mode: &str,
     outcomes: &[ReplicaOutcome],
     winner: &ReplicaOutcome,
+    decision_source: &str,
+    decision_reason: Option<&str>,
 ) {
-    let votes_json = convergence_votes_json(converge_mode, outcomes, winner);
+    let votes_json = convergence_votes_json(
+        converge_mode,
+        outcomes,
+        winner,
+        decision_source,
+        decision_reason,
+    );
     let prev_votes = env::var("CX_TASK_CONVERGE_VOTES").ok();
     set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
     set_optional_env("CX_TASK_CONVERGE_VOTES", Some(votes_json));
@@ -519,10 +635,42 @@ pub fn run_task_by_id(
             break;
         }
     }
-    let winner = select_winner(&converge_mode, &outcomes);
+    let judge_pick = if converge_mode == "judge" {
+        judge_winner_with_model(
+            runner,
+            &tasks[idx],
+            &outcomes,
+            effective_mode.as_deref(),
+            effective_backend.as_deref(),
+        )
+    } else {
+        None
+    };
+    let (winner, decision_source, decision_reason) = if let Some((winner_idx, reason)) = judge_pick
+    {
+        let selected = outcomes
+            .iter()
+            .find(|o| o.index == winner_idx)
+            .cloned()
+            .unwrap_or_else(|| select_winner(&converge_mode, &outcomes));
+        (selected, "model_judge", Some(reason))
+    } else {
+        (
+            select_winner(&converge_mode, &outcomes),
+            "score_fallback",
+            None,
+        )
+    };
     set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
     if replica_count > 1 || converge_mode != "none" {
-        log_convergence_summary(&tasks[idx], &converge_mode, &outcomes, &winner);
+        log_convergence_summary(
+            &tasks[idx],
+            &converge_mode,
+            &outcomes,
+            &winner,
+            decision_source,
+            decision_reason.as_deref(),
+        );
     }
     if !managed_by_parent {
         restore_runtime_task_state(runner, prev_task_id, prev_parent_id);

@@ -53,6 +53,24 @@ All notable changes to this project are documented in this file.
   - added `diag --json --strict` severity gating:
     - emits `severity` + `severity_reasons`,
     - returns non-zero when severity is not `ok` in strict mode.
+- added dedicated scheduler diagnostics command:
+  - `cx scheduler [--json] [--window N] [--strict]`
+  - emits queue/worker/backend telemetry and severity gate output without full `diag` payload.
+- mixed scheduler execution polish:
+  - `task run-all --mode mixed` now supports `--fairness round_robin|least_loaded`.
+  - backend selection now gracefully falls back to available providers when a pooled backend is unavailable.
+  - backend availability checks now honor explicit disable env flags:
+    - `CX_DISABLE_CODEX=1`
+    - `CX_DISABLE_OLLAMA=1`
+- convergence `judge` mode upgraded from deterministic scoring fallback to model-assisted selection:
+  - judge path runs schema-enforced JSON winner selection (`winner_index`, `reason`) with deterministic fallback on parse/validation failure.
+  - convergence telemetry now logs richer vote metadata:
+    - `decision_source` (`judge_model|fallback`),
+    - `decision_reason`,
+    - candidate-level score details.
+- CI added scheduler strictness gate in `.github/workflows/cxrs-compat.yml`:
+  - validates `diag --json --strict --window 3` non-zero behavior for high queue pressure.
+  - validates `scheduler --json --window 3` output contract.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.

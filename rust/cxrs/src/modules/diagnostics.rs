@@ -99,83 +99,80 @@ fn percentile_u64(values: &[u64], pct: f64) -> Option<u64> {
 }
 
 fn print_scheduler_diag(log_file_path: &str, window: usize) {
-    let path = Path::new(log_file_path);
-    if !path.exists() {
-        println!("scheduler_window_runs: 0");
-        println!("scheduler_queue_rows: 0");
-        println!("scheduler_queue_ms_avg: n/a");
-        println!("scheduler_queue_ms_p95: n/a");
-        println!("scheduler_workers_seen: <none>");
-        println!("scheduler_worker_distribution: <none>");
-        println!("scheduler_backend_distribution: <none>");
-        return;
-    }
-    let rows = load_values(path, window).unwrap_or_default();
-    let mut queue_vals: Vec<u64> = Vec::new();
-    let mut worker_counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let scheduler = scheduler_diag_value(log_file_path, window);
+    let workers_seen = scheduler
+        .get("workers_seen")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            let mut out: Vec<String> = arr
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect();
+            out.sort();
+            if out.is_empty() {
+                "<none>".to_string()
+            } else {
+                out.join(",")
+            }
+        })
+        .unwrap_or_else(|| "<none>".to_string());
+    let worker_distribution = scheduler
+        .get("worker_distribution")
+        .and_then(Value::as_object)
+        .map(|m| {
+            if m.is_empty() {
+                "<none>".to_string()
+            } else {
+                m.iter()
+                    .map(|(k, v)| format!("{}={}", k, v.as_u64().unwrap_or(0)))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            }
+        })
+        .unwrap_or_else(|| "<none>".to_string());
+    let backend_distribution = scheduler
+        .get("backend_distribution")
+        .and_then(Value::as_object)
+        .map(|m| {
+            if m.is_empty() {
+                "<none>".to_string()
+            } else {
+                m.iter()
+                    .map(|(k, v)| format!("{}={}", k, v.as_u64().unwrap_or(0)))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            }
+        })
+        .unwrap_or_else(|| "<none>".to_string());
 
-    for v in &rows {
-        if let Some(q) = v.get("queue_ms").and_then(Value::as_u64) {
-            queue_vals.push(q);
-        }
-        if let Some(w) = v.get("worker_id").and_then(Value::as_str) {
-            *worker_counts.entry(w.to_string()).or_insert(0) += 1;
-        }
-        if let Some(b) = v
-            .get("backend_selected")
-            .and_then(Value::as_str)
-            .or_else(|| v.get("backend_used").and_then(Value::as_str))
-        {
-            *backend_counts.entry(b.to_string()).or_insert(0) += 1;
-        }
-    }
-
-    let queue_avg = if queue_vals.is_empty() {
-        None
-    } else {
-        Some(queue_vals.iter().sum::<u64>() / queue_vals.len() as u64)
-    };
-    let queue_p95 = percentile_u64(&queue_vals, 0.95);
-    let workers_seen = if worker_counts.is_empty() {
-        "<none>".to_string()
-    } else {
-        worker_counts
-            .keys()
-            .cloned()
-            .collect::<Vec<String>>()
-            .join(",")
-    };
-    let worker_distribution = if worker_counts.is_empty() {
-        "<none>".to_string()
-    } else {
-        worker_counts
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<String>>()
-            .join(",")
-    };
-    let backend_distribution = if backend_counts.is_empty() {
-        "<none>".to_string()
-    } else {
-        backend_counts
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<String>>()
-            .join(",")
-    };
-
-    println!("scheduler_window_runs: {}", rows.len());
-    println!("scheduler_queue_rows: {}", queue_vals.len());
+    println!(
+        "scheduler_window_runs: {}",
+        scheduler
+            .get("window_runs")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "scheduler_queue_rows: {}",
+        scheduler
+            .get("queue_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
     println!(
         "scheduler_queue_ms_avg: {}",
-        queue_avg
+        scheduler
+            .get("queue_ms_avg")
+            .and_then(Value::as_u64)
             .map(|v| v.to_string())
             .unwrap_or_else(|| "n/a".to_string())
     );
     println!(
         "scheduler_queue_ms_p95: {}",
-        queue_p95
+        scheduler
+            .get("queue_ms_p95")
+            .and_then(Value::as_u64)
             .map(|v| v.to_string())
             .unwrap_or_else(|| "n/a".to_string())
     );
@@ -448,6 +445,50 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
         "routing_trace: sample='{}' route={} reason={}",
         sample_cmd, route, route_reason
     );
+    if strict && severity != "ok" { 1 } else { 0 }
+}
+
+pub fn cmd_scheduler(args: &[String]) -> i32 {
+    let (as_json, window, strict) = match parse_diag_args(args) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::cx_eprintln!("{e}");
+            crate::cx_eprintln!("Usage: scheduler [--json] [--window N] [--strict]");
+            return 2;
+        }
+    };
+    let log_file = resolve_log_file()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let scheduler = scheduler_diag_value(&log_file, window);
+    let (severity, severity_reasons) = scheduler_severity(&scheduler);
+
+    if as_json {
+        let payload = serde_json::json!({
+            "log_file": log_file,
+            "scheduler_window_requested": window,
+            "scheduler": scheduler,
+            "severity": severity,
+            "severity_reasons": severity_reasons
+        });
+        match serde_json::to_string_pretty(&payload) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                crate::cx_eprintln!("cxrs scheduler: failed to render json: {e}");
+                return 1;
+            }
+        }
+        return if strict && severity != "ok" { 1 } else { 0 };
+    }
+
+    println!("== cxscheduler ==");
+    println!("log_file: {log_file}");
+    print_scheduler_diag(&log_file, window);
+    println!("scheduler_window_requested: {window}");
+    println!("severity: {severity}");
+    if !severity_reasons.is_empty() {
+        println!("severity_reasons: {}", severity_reasons.join(","));
+    }
     if strict && severity != "ok" { 1 } else { 0 }
 }
 
