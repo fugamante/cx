@@ -648,3 +648,53 @@ fn telemetry_json_output_is_stable_on_macos() {
     );
     assert_eq!(v1, v2, "telemetry output drifted on repeated invocation");
 }
+
+#[test]
+fn diag_reports_scheduler_distribution_fields() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"d1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,"queue_ms":0,"worker_id":"w1"
+        }),
+        serde_json::json!({
+            "execution_id":"d2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":12,"schema_enforced":false,"schema_valid":true,"queue_ms":900,"worker_id":"w2"
+        }),
+        serde_json::json!({
+            "execution_id":"d3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":14,"schema_enforced":false,"schema_valid":true,"queue_ms":1800,"worker_id":"w1"
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["diag"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("scheduler_window_runs: 3"), "{stdout}");
+    assert!(stdout.contains("scheduler_queue_rows: 3"), "{stdout}");
+    assert!(stdout.contains("scheduler_workers_seen: w1,w2"), "{stdout}");
+    assert!(
+        stdout.contains("scheduler_worker_distribution: w1=2,w2=1"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("scheduler_backend_distribution: codex=2,ollama=1"),
+        "{stdout}"
+    );
+}

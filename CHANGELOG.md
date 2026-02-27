@@ -44,6 +44,10 @@ All notable changes to this project are documented in this file.
   - dependency-wave ordering test with queue telemetry assertions.
   - balanced backend-pool fairness test (codex + ollama) to ensure no backend starvation.
   - queue growth stress test under strict backend cap (`codex=1`) validating deferred-task `queue_ms`.
+- `cxdiag` scheduler diagnostics section:
+  - reports recent-window queue telemetry (`scheduler_queue_ms_avg`, `scheduler_queue_ms_p95`),
+  - worker distribution (`scheduler_workers_seen`, `scheduler_worker_distribution`),
+  - backend distribution (`scheduler_backend_distribution`).
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.

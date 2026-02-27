@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
@@ -8,6 +9,7 @@ use std::process::Command;
 use crate::config::app_config;
 use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::logs::file_len;
+use crate::logs::load_values;
 use crate::paths::{repo_root_hint, resolve_log_file};
 use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::routing::{bash_type_of_function, route_handler_for};
@@ -85,6 +87,103 @@ fn last_run_id() -> String {
         .unwrap_or_else(|| "<none>".to_string())
 }
 
+fn percentile_u64(values: &[u64], pct: f64) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let p = pct.clamp(0.0, 1.0);
+    let idx = ((sorted.len() as f64 - 1.0) * p).round() as usize;
+    sorted.get(idx).copied()
+}
+
+fn print_scheduler_diag(log_file_path: &str) {
+    let path = Path::new(log_file_path);
+    if !path.exists() {
+        println!("scheduler_window_runs: 0");
+        println!("scheduler_queue_rows: 0");
+        println!("scheduler_queue_ms_avg: n/a");
+        println!("scheduler_queue_ms_p95: n/a");
+        println!("scheduler_workers_seen: <none>");
+        println!("scheduler_worker_distribution: <none>");
+        println!("scheduler_backend_distribution: <none>");
+        return;
+    }
+    let rows = load_values(path, 200).unwrap_or_default();
+    let mut queue_vals: Vec<u64> = Vec::new();
+    let mut worker_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
+
+    for v in &rows {
+        if let Some(q) = v.get("queue_ms").and_then(Value::as_u64) {
+            queue_vals.push(q);
+        }
+        if let Some(w) = v.get("worker_id").and_then(Value::as_str) {
+            *worker_counts.entry(w.to_string()).or_insert(0) += 1;
+        }
+        if let Some(b) = v
+            .get("backend_selected")
+            .and_then(Value::as_str)
+            .or_else(|| v.get("backend_used").and_then(Value::as_str))
+        {
+            *backend_counts.entry(b.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    let queue_avg = if queue_vals.is_empty() {
+        None
+    } else {
+        Some(queue_vals.iter().sum::<u64>() / queue_vals.len() as u64)
+    };
+    let queue_p95 = percentile_u64(&queue_vals, 0.95);
+    let workers_seen = if worker_counts.is_empty() {
+        "<none>".to_string()
+    } else {
+        worker_counts
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    let worker_distribution = if worker_counts.is_empty() {
+        "<none>".to_string()
+    } else {
+        worker_counts
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    let backend_distribution = if backend_counts.is_empty() {
+        "<none>".to_string()
+    } else {
+        backend_counts
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+
+    println!("scheduler_window_runs: {}", rows.len());
+    println!("scheduler_queue_rows: {}", queue_vals.len());
+    println!(
+        "scheduler_queue_ms_avg: {}",
+        queue_avg
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "n/a".to_string())
+    );
+    println!(
+        "scheduler_queue_ms_p95: {}",
+        queue_p95
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "n/a".to_string())
+    );
+    println!("scheduler_workers_seen: {workers_seen}");
+    println!("scheduler_worker_distribution: {worker_distribution}");
+    println!("scheduler_backend_distribution: {backend_distribution}");
+}
+
 fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
     let backend = llm_backend();
     let model = llm_model();
@@ -122,6 +221,7 @@ pub fn cmd_diag(app_version: &str) -> i32 {
     println!("last_run_id: {}", last_run_id());
     println!("schema_registry_dir: {}", schema_dir.display());
     println!("schema_registry_files: {}", schema_count(&schema_dir));
+    print_scheduler_diag(&log_file);
 
     let sample_cmd = "cxo git status";
     let rust_handles = route_handler_for("cxo");
