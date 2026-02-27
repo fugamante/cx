@@ -37,6 +37,14 @@ pub struct TaskRunner {
     pub execute_task: fn(TaskSpec) -> Result<ExecutionResult, String>,
 }
 
+#[derive(Debug, Clone)]
+struct ReplicaOutcome {
+    index: u32,
+    status_code: i32,
+    execution_id: Option<String>,
+    error: Option<String>,
+}
+
 fn parse_words(input: &str) -> Vec<String> {
     match shell_words::split(input) {
         Ok(v) => v,
@@ -222,6 +230,93 @@ fn run_task_objective(
     dispatch_task_command(runner, &words, task, mode_override, backend_override)
 }
 
+fn normalize_converge_mode(raw: &str) -> String {
+    let m = raw.trim().to_lowercase();
+    if matches!(
+        m.as_str(),
+        "none" | "first_valid" | "majority" | "judge" | "score"
+    ) {
+        m
+    } else {
+        "none".to_string()
+    }
+}
+
+fn effective_replica_count(task: &TaskRecord, mode: &str) -> u32 {
+    let n = task.replicas.max(1);
+    if mode == "none" { 1 } else { n }
+}
+
+fn select_winner(mode: &str, outcomes: &[ReplicaOutcome]) -> ReplicaOutcome {
+    if outcomes.is_empty() {
+        return ReplicaOutcome {
+            index: 1,
+            status_code: 1,
+            execution_id: None,
+            error: Some("no replica outcomes".to_string()),
+        };
+    }
+    match mode {
+        "first_valid" => outcomes
+            .iter()
+            .find(|o| o.status_code == 0)
+            .cloned()
+            .unwrap_or_else(|| outcomes[0].clone()),
+        "majority" => {
+            let ok = outcomes.iter().filter(|o| o.status_code == 0).count();
+            let fail = outcomes.len().saturating_sub(ok);
+            if ok >= fail {
+                outcomes
+                    .iter()
+                    .find(|o| o.status_code == 0)
+                    .cloned()
+                    .unwrap_or_else(|| outcomes[0].clone())
+            } else {
+                outcomes
+                    .iter()
+                    .find(|o| o.status_code != 0)
+                    .cloned()
+                    .unwrap_or_else(|| outcomes[0].clone())
+            }
+        }
+        "judge" | "score" => outcomes
+            .iter()
+            .find(|o| o.status_code == 0)
+            .cloned()
+            .unwrap_or_else(|| outcomes[0].clone()),
+        _ => outcomes[0].clone(),
+    }
+}
+
+fn run_replica(
+    runner: &TaskRunner,
+    task: &TaskRecord,
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+    replica_index: u32,
+    replica_count: u32,
+    converge_mode: &str,
+) -> ReplicaOutcome {
+    set_optional_env("CX_TASK_REPLICA_INDEX", Some(replica_index.to_string()));
+    set_optional_env("CX_TASK_REPLICA_COUNT", Some(replica_count.to_string()));
+    set_optional_env("CX_TASK_CONVERGE_MODE", Some(converge_mode.to_string()));
+    set_optional_env("CX_TASK_CONVERGE_WINNER", None);
+    match run_task_objective(runner, task, mode_override, backend_override) {
+        Ok((code, execution_id)) => ReplicaOutcome {
+            index: replica_index,
+            status_code: code,
+            execution_id,
+            error: None,
+        },
+        Err(e) => ReplicaOutcome {
+            index: replica_index,
+            status_code: 1,
+            execution_id: None,
+            error: Some(e),
+        },
+    }
+}
+
 fn set_runtime_task_state(runner: &TaskRunner, id: &str, parent_id: Option<&String>) {
     let _ = (runner.set_state_path)("runtime.current_task_id", Value::String(id.to_string()));
     let _ = (runner.set_state_path)(
@@ -295,13 +390,6 @@ pub fn run_task_by_id(
     let prev_converge_mode = env::var("CX_TASK_CONVERGE_MODE").ok();
     let prev_converge_winner = env::var("CX_TASK_CONVERGE_WINNER").ok();
     set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
-    set_optional_env("CX_TASK_REPLICA_INDEX", Some("1".to_string()));
-    set_optional_env(
-        "CX_TASK_REPLICA_COUNT",
-        Some(tasks[idx].replicas.max(1).to_string()),
-    );
-    set_optional_env("CX_TASK_CONVERGE_MODE", Some(tasks[idx].converge.clone()));
-    set_optional_env("CX_TASK_CONVERGE_WINNER", None);
 
     let effective_mode = mode_override
         .map(ToOwned::to_owned)
@@ -309,26 +397,80 @@ pub fn run_task_by_id(
     let effective_backend = backend_override
         .map(ToOwned::to_owned)
         .or_else(|| task_backend_override(&tasks[idx]));
-    let exec = run_task_objective(
-        runner,
-        &tasks[idx],
-        effective_mode.as_deref(),
-        effective_backend.as_deref(),
-    );
+    let converge_mode = normalize_converge_mode(&tasks[idx].converge);
+    let replica_count = effective_replica_count(&tasks[idx], &converge_mode);
+    if tasks[idx].converge == "none" && tasks[idx].replicas > 1 {
+        crate::cx_eprintln!(
+            "cxrs task run: task {} replicas={} ignored because converge=none",
+            id,
+            tasks[idx].replicas
+        );
+    }
+    if matches!(converge_mode.as_str(), "judge" | "score") {
+        crate::cx_eprintln!(
+            "cxrs task run: converge={} currently uses first_valid fallback",
+            converge_mode
+        );
+    }
+    let mut outcomes: Vec<ReplicaOutcome> = Vec::new();
+    for replica_index in 1..=replica_count {
+        let outcome = run_replica(
+            runner,
+            &tasks[idx],
+            effective_mode.as_deref(),
+            effective_backend.as_deref(),
+            replica_index,
+            replica_count,
+            &converge_mode,
+        );
+        let should_stop = converge_mode == "first_valid" && outcome.status_code == 0;
+        outcomes.push(outcome);
+        if should_stop {
+            break;
+        }
+    }
+    let winner = select_winner(&converge_mode, &outcomes);
+    set_optional_env("CX_TASK_CONVERGE_WINNER", Some(winner.index.to_string()));
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
     set_optional_env("CX_TASK_REPLICA_INDEX", prev_replica_index);
     set_optional_env("CX_TASK_REPLICA_COUNT", prev_replica_count);
     set_optional_env("CX_TASK_CONVERGE_MODE", prev_converge_mode);
     set_optional_env("CX_TASK_CONVERGE_WINNER", prev_converge_winner);
 
-    let (status_code, execution_id, objective_err) = match exec {
-        Ok((c, eid)) => (c, eid, None),
-        Err(e) => (1, None, Some(e)),
-    };
+    let status_code = winner.status_code;
+    let execution_id = winner.execution_id.clone();
+    let objective_err = winner.error.clone();
 
     finalize_task_status(runner, id, status_code)?;
     if let Some(e) = objective_err {
         crate::cx_eprintln!("cxrs task run: objective failed for {id}: {e}");
     }
     Ok((status_code, execution_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn out(index: u32, status_code: i32) -> ReplicaOutcome {
+        ReplicaOutcome {
+            index,
+            status_code,
+            execution_id: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn winner_first_valid_picks_first_success() {
+        let winner = select_winner("first_valid", &[out(1, 1), out(2, 0), out(3, 0)]);
+        assert_eq!(winner.index, 2);
+    }
+
+    #[test]
+    fn winner_majority_prefers_success_when_tied_or_better() {
+        let winner = select_winner("majority", &[out(1, 1), out(2, 0)]);
+        assert_eq!(winner.status_code, 0);
+        assert_eq!(winner.index, 2);
+    }
 }

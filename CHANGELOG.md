@@ -21,6 +21,13 @@ All notable changes to this project are documented in this file.
   - `cx task add` parses and validates the new convergence flags.
   - run logs can now carry replica/convergence telemetry context:
     - `replica_index`, `replica_count`, `converge_mode`, `converge_winner`, `converge_votes`, `queue_ms`.
+- Phase IV convergence execution baseline:
+  - `task run` now executes task replicas sequentially when `replicas > 1` and convergence mode is enabled.
+  - supported convergence selection behavior:
+    - `first_valid`: first successful replica wins (early stop)
+    - `majority`: winner selected by success/failure majority with deterministic tie-break
+    - `judge` / `score`: currently mapped to deterministic `first_valid` fallback
+  - replica execution context is exported for telemetry (`CX_TASK_REPLICA_INDEX`, `CX_TASK_REPLICA_COUNT`, `CX_TASK_CONVERGE_MODE`).
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
