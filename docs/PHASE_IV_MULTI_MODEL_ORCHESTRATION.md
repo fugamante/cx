@@ -100,6 +100,7 @@ Must remain true:
 Current implementation status on `codex/orchestration-mode-phase`:
 - Milestone A: completed
 - Milestone B: in progress (routing controls + bounded mixed-mode worker scheduling + `cxdiag` scheduler telemetry implemented; remaining work is deeper fairness/ordering stress validation)
+- Milestone B operator tooling now includes `diag --json` for machine-readable scheduler telemetry snapshots.
 - Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented, including deterministic `judge`/`score` scoring fallback; model-based judge remains pending)
 
 Milestone A: Routing Substrate

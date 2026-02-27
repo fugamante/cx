@@ -144,7 +144,7 @@ fn dispatch_meta_commands(
         "cxdoctor" | "doctor" => (deps.cmd_doctor)(),
         "cxwhere" | "where" => (deps.cmd_where)(&args[1..]),
         "cxroutes" | "routes" => (deps.cmd_routes)(&args[1..]),
-        "cxdiag" | "diag" => (deps.cmd_diag)(),
+        "cxdiag" | "diag" => (deps.cmd_diag)(&args[1..]),
         "cxparity" | "parity" => (deps.cmd_parity)(),
         "cxcore" | "core" => (deps.cmd_core)(),
         "cxlogs" | "logs" => (deps.cmd_logs)(&args[1..]),

@@ -12,7 +12,7 @@ pub struct NativeDeps {
     pub cmd_task: fn(&[String]) -> i32,
     pub cmd_where: fn(&[String]) -> i32,
     pub cmd_routes: fn(&[String]) -> i32,
-    pub cmd_diag: fn() -> i32,
+    pub cmd_diag: fn(&[String]) -> i32,
     pub cmd_parity: fn() -> i32,
     pub is_native_name: fn(&str) -> bool,
     pub is_compat_name: fn(&str) -> bool,

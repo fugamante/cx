@@ -48,6 +48,7 @@ All notable changes to this project are documented in this file.
   - reports recent-window queue telemetry (`scheduler_queue_ms_avg`, `scheduler_queue_ms_p95`),
   - worker distribution (`scheduler_workers_seen`, `scheduler_worker_distribution`),
   - backend distribution (`scheduler_backend_distribution`).
+  - added `diag --json` for machine-readable diagnostics output (including scheduler block).
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.

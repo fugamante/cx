@@ -196,7 +196,62 @@ fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
     println!("active_model: {active_model}");
 }
 
-pub fn cmd_diag(app_version: &str) -> i32 {
+fn scheduler_diag_value(log_file_path: &str) -> Value {
+    let path = Path::new(log_file_path);
+    if !path.exists() {
+        return serde_json::json!({
+            "window_runs": 0,
+            "queue_rows": 0,
+            "queue_ms_avg": Value::Null,
+            "queue_ms_p95": Value::Null,
+            "workers_seen": [],
+            "worker_distribution": {},
+            "backend_distribution": {}
+        });
+    }
+    let rows = load_values(path, 200).unwrap_or_default();
+    let mut queue_vals: Vec<u64> = Vec::new();
+    let mut worker_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
+
+    for v in &rows {
+        if let Some(q) = v.get("queue_ms").and_then(Value::as_u64) {
+            queue_vals.push(q);
+        }
+        if let Some(w) = v.get("worker_id").and_then(Value::as_str) {
+            *worker_counts.entry(w.to_string()).or_insert(0) += 1;
+        }
+        if let Some(b) = v
+            .get("backend_selected")
+            .and_then(Value::as_str)
+            .or_else(|| v.get("backend_used").and_then(Value::as_str))
+        {
+            *backend_counts.entry(b.to_string()).or_insert(0) += 1;
+        }
+    }
+    let queue_avg = if queue_vals.is_empty() {
+        None
+    } else {
+        Some(queue_vals.iter().sum::<u64>() / queue_vals.len() as u64)
+    };
+    let queue_p95 = percentile_u64(&queue_vals, 0.95);
+    serde_json::json!({
+        "window_runs": rows.len(),
+        "queue_rows": queue_vals.len(),
+        "queue_ms_avg": queue_avg,
+        "queue_ms_p95": queue_p95,
+        "workers_seen": worker_counts.keys().cloned().collect::<Vec<String>>(),
+        "worker_distribution": worker_counts,
+        "backend_distribution": backend_counts
+    })
+}
+
+pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
+    let as_json = args.iter().any(|a| a == "--json");
+    if args.iter().any(|a| a.starts_with('-') && a != "--json") {
+        crate::cx_eprintln!("Usage: diag [--json]");
+        return 2;
+    }
     let cfg = app_config();
     let provider = cfg.capture_provider.clone();
     let log_file = resolve_log_file()
@@ -204,6 +259,67 @@ pub fn cmd_diag(app_version: &str) -> i32 {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let repo = repo_root_hint().unwrap_or_else(|| PathBuf::from("."));
     let schema_dir = repo.join(".codex").join("schemas");
+    let backend = llm_backend();
+    let model = llm_model();
+    let active_model = if model.is_empty() {
+        "<unset>".to_string()
+    } else {
+        model
+    };
+    let scheduler = scheduler_diag_value(&log_file);
+    let sample_cmd = "cxo git status";
+    let rust_handles = route_handler_for("cxo");
+    let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
+    let route = if rust_handles.is_some() {
+        "rust"
+    } else if bash_handles {
+        "bash"
+    } else {
+        "unknown"
+    };
+    let route_reason = if let Some(h) = rust_handles.as_ref() {
+        format!("rust support found ({h})")
+    } else if bash_handles {
+        "bash fallback function exists".to_string()
+    } else {
+        "no rust route and no bash fallback".to_string()
+    };
+
+    if as_json {
+        let payload = serde_json::json!({
+            "timestamp": utc_now_iso(),
+            "version": toolchain_version_string(app_version),
+            "mode": cfg.cx_mode,
+            "backend": backend,
+            "active_model": active_model,
+            "capture_provider_config": provider,
+            "capture_provider_resolved": resolved_provider(&cfg.capture_provider),
+            "rtk_available": bin_in_path("rtk"),
+            "rtk_version": rtk_version_string(),
+            "budget_chars": cfg.budget_chars,
+            "budget_lines": cfg.budget_lines,
+            "clip_mode": cfg.clip_mode,
+            "clip_footer": cfg.clip_footer,
+            "log_file": log_file,
+            "last_run_id": last_run_id(),
+            "schema_registry_dir": schema_dir.display().to_string(),
+            "schema_registry_files": schema_count(&schema_dir),
+            "scheduler": scheduler,
+            "routing_trace": {
+                "sample": sample_cmd,
+                "route": route,
+                "reason": route_reason
+            }
+        });
+        match serde_json::to_string_pretty(&payload) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                crate::cx_eprintln!("cxrs diag: failed to render json: {e}");
+                return 1;
+            }
+        }
+        return 0;
+    }
 
     print_diag_header(app_version, cfg);
     println!("capture_provider_config: {provider}");
@@ -223,27 +339,9 @@ pub fn cmd_diag(app_version: &str) -> i32 {
     println!("schema_registry_files: {}", schema_count(&schema_dir));
     print_scheduler_diag(&log_file);
 
-    let sample_cmd = "cxo git status";
-    let rust_handles = route_handler_for("cxo");
-    let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
-    let route_reason = if let Some(h) = rust_handles.as_ref() {
-        format!("rust support found ({h})")
-    } else if bash_handles {
-        "bash fallback function exists".to_string()
-    } else {
-        "no rust route and no bash fallback".to_string()
-    };
     println!(
         "routing_trace: sample='{}' route={} reason={}",
-        sample_cmd,
-        if rust_handles.is_some() {
-            "rust"
-        } else if bash_handles {
-            "bash"
-        } else {
-            "unknown"
-        },
-        route_reason
+        sample_cmd, route, route_reason
     );
     0
 }

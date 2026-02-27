@@ -201,8 +201,8 @@ fn compat_cmd_where(args: &[String]) -> i32 {
     print_where(args, APP_VERSION)
 }
 
-fn compat_cmd_diag() -> i32 {
-    cmd_diag(APP_VERSION)
+fn compat_cmd_diag(args: &[String]) -> i32 {
+    cmd_diag(APP_VERSION, args)
 }
 
 fn compat_cmd_core() -> i32 {
@@ -257,8 +257,8 @@ fn native_cmd_where(args: &[String]) -> i32 {
     print_where(args, APP_VERSION)
 }
 
-fn native_cmd_diag() -> i32 {
-    cmd_diag(APP_VERSION)
+fn native_cmd_diag(args: &[String]) -> i32 {
+    cmd_diag(APP_VERSION, args)
 }
 
 fn native_cmd_core() -> i32 {

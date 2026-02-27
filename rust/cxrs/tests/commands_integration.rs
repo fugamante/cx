@@ -698,3 +698,39 @@ fn diag_reports_scheduler_distribution_fields() {
         "{stdout}"
     );
 }
+
+#[test]
+fn diag_json_reports_scheduler_object() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row = serde_json::json!({
+        "execution_id":"dj1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+        "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":10,"schema_enforced":false,"schema_valid":true,"queue_ms":500,"worker_id":"w1"
+    });
+    let mut text = serde_json::to_string(&row).expect("serialize row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["diag", "--json"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
+    assert_eq!(v.get("backend").and_then(Value::as_str), Some("codex"));
+    let scheduler = v.get("scheduler").expect("scheduler");
+    assert_eq!(scheduler.get("queue_rows").and_then(Value::as_u64), Some(1));
+    let worker_dist = scheduler
+        .get("worker_distribution")
+        .and_then(Value::as_object)
+        .expect("worker distribution");
+    assert_eq!(
+        worker_dist.get("w1").and_then(Value::as_u64),
+        Some(1),
+        "unexpected scheduler object: {scheduler}"
+    );
+}
