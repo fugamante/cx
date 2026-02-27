@@ -237,6 +237,170 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
+fn mixed_run_all_balanced_pool_uses_both_backends_without_starvation() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 1
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "list" ]; then
+  printf '%s\n' "NAME ID SIZE MODIFIED"
+  printf '%s\n' "llama3.1 abc 4GB now"
+  exit 0
+fi
+sleep 1
+printf '%s\n' "ok"
+"#,
+    );
+
+    for i in 1..=8 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo fairness-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "auto",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let out = repo.run_with_env(
+        &[
+            "task",
+            "run-all",
+            "--status",
+            "pending",
+            "--mode",
+            "mixed",
+            "--backend-pool",
+            "codex,ollama",
+            "--backend-cap",
+            "codex=1",
+            "--backend-cap",
+            "ollama=1",
+            "--max-workers",
+            "4",
+        ],
+        &[("CX_OLLAMA_MODEL", "llama3.1")],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+
+    let tasks = read_json(&repo.tasks_file());
+    assert!(
+        tasks
+            .as_array()
+            .expect("tasks array")
+            .iter()
+            .all(|t| t.get("status").and_then(Value::as_str) == Some("complete")),
+        "not all tasks completed"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let cxo_rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    let codex_count = cxo_rows
+        .iter()
+        .filter(|v| v.get("backend_used").and_then(Value::as_str) == Some("codex"))
+        .count();
+    let ollama_count = cxo_rows
+        .iter()
+        .filter(|v| v.get("backend_used").and_then(Value::as_str) == Some("ollama"))
+        .count();
+    assert!(codex_count > 0, "expected at least one codex run");
+    assert!(ollama_count > 0, "expected at least one ollama run");
+}
+
+#[test]
+fn mixed_run_all_queue_ms_increases_for_later_tasks_under_caps() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 1
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+
+    for i in 1..=4 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo queue-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let out = repo.run(&[
+        "task",
+        "run-all",
+        "--status",
+        "pending",
+        "--mode",
+        "mixed",
+        "--backend-pool",
+        "codex",
+        "--backend-cap",
+        "codex=1",
+        "--max-workers",
+        "4",
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let mut queue_values: Vec<u64> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .filter_map(|v| v.get("queue_ms").and_then(Value::as_u64))
+        .collect();
+    queue_values.sort();
+    assert_eq!(
+        queue_values.len(),
+        4,
+        "expected queue_ms for each cxo run, got {queue_values:?}"
+    );
+    assert!(
+        queue_values.first().copied().unwrap_or(0) < 300,
+        "first task should have near-zero queue, got {queue_values:?}"
+    );
+    assert!(
+        queue_values.last().copied().unwrap_or(0) >= 2500,
+        "last task should have significant queue delay, got {queue_values:?}"
+    );
+}
+
+#[test]
 fn schema_failure_creates_quarantine_and_logs() {
     let repo = TempRepo::new("cxrs-it");
 

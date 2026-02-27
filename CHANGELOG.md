@@ -42,6 +42,8 @@ All notable changes to this project are documented in this file.
 - mixed-mode scheduler reliability coverage expanded:
   - backend cap enforcement test for codex-limited worker scheduling.
   - dependency-wave ordering test with queue telemetry assertions.
+  - balanced backend-pool fairness test (codex + ollama) to ensure no backend starvation.
+  - queue growth stress test under strict backend cap (`codex=1`) validating deferred-task `queue_ms`.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
