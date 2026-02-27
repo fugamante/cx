@@ -78,6 +78,16 @@ pub struct RunEntry {
     #[serde(default)]
     pub llm_model: Option<String>,
     #[serde(default)]
+    pub worker_id: Option<String>,
+    #[serde(default)]
+    pub converge_mode: Option<String>,
+    #[serde(default)]
+    pub converge_winner: Option<String>,
+    #[serde(default)]
+    pub converge_votes: Option<Value>,
+    #[serde(default)]
+    pub queue_ms: Option<u64>,
+    #[serde(default)]
     pub task_id: Option<String>,
     #[serde(default)]
     pub task_parent_id: Option<String>,
@@ -217,6 +227,7 @@ pub struct ExecutionLog {
     pub model_selected: Option<String>,
     pub route_policy: Option<String>,
     pub route_reason: Option<String>,
+    pub worker_id: Option<String>,
     pub replica_index: Option<u32>,
     pub replica_count: Option<u32>,
     pub converge_mode: Option<String>,

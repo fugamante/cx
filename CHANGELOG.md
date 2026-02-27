@@ -12,6 +12,10 @@ All notable changes to this project are documented in this file.
     - `--backend-cap backend=limit`
     - `--max-workers N` (planner metadata; single-worker execution remains current behavior)
   - deterministic backend selection per scheduled task using task backend preference + broker policy fallback.
+  - `task run-all --mode mixed` now executes with bounded worker scheduling when `--max-workers > 1`:
+    - enforces per-backend caps (`--backend-cap`).
+    - uses parent-managed task status transitions to avoid concurrent task-file races.
+    - records queue telemetry via `queue_ms` and worker identity via `worker_id`.
 - task-run command tests for backend-pool parsing and task backend preference routing.
 - Phase IV convergence metadata scaffold:
   - task schema now supports:

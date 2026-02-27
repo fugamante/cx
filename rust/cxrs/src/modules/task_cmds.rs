@@ -1,8 +1,12 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::process::Command;
+use std::thread;
+use std::time::Instant;
 
 use crate::cmdctx::CmdCtx;
 use crate::config::app_config;
+use crate::process::run_command_output_with_timeout;
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
 use crate::tasks::set_task_status;
@@ -24,6 +28,7 @@ type TaskRunByIdFn = fn(
     &str,
     Option<&str>,
     Option<&str>,
+    bool,
 ) -> Result<(i32, Option<String>), TaskRunError>;
 
 pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
@@ -106,12 +111,13 @@ fn handle_fanout(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
 fn parse_task_run_overrides(
     app_name: &str,
     args: &[String],
-) -> Result<(Option<String>, Option<String>), i32> {
+) -> Result<(Option<String>, Option<String>, bool), i32> {
     let usage = format!(
         "Usage: {app_name} task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]"
     );
     let mut mode_override: Option<String> = None;
     let mut backend_override: Option<String> = None;
+    let mut managed_by_parent = false;
     let mut i = 2usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -131,13 +137,17 @@ fn parse_task_run_overrides(
                 backend_override = Some(v.to_string());
                 i += 2;
             }
+            "--managed-by-parent" => {
+                managed_by_parent = true;
+                i += 1;
+            }
             other => {
                 crate::cx_eprintln!("cxrs task run: unknown flag '{other}'");
                 return Err(2);
             }
         }
     }
-    Ok((mode_override, backend_override))
+    Ok((mode_override, backend_override, managed_by_parent))
 }
 
 fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
@@ -147,16 +157,18 @@ fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         );
         return 2;
     };
-    let (mode_override, backend_override) = match parse_task_run_overrides(app_name, args) {
-        Ok(v) => v,
-        Err(code) => return code,
-    };
+    let (mode_override, backend_override, managed_by_parent) =
+        match parse_task_run_overrides(app_name, args) {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
 
     match (deps.run_task_by_id)(
         &(deps.make_task_runner)(),
         &id,
         mode_override.as_deref(),
         backend_override.as_deref(),
+        managed_by_parent,
     ) {
         Ok((code, execution_id)) => {
             if let Some(eid) = execution_id {
@@ -171,6 +183,51 @@ fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             1
         }
     }
+}
+
+struct PendingLaunch {
+    id: String,
+    backend: String,
+    queue_since: Instant,
+}
+
+struct ActiveLaunch {
+    id: String,
+    backend: String,
+    join: thread::JoinHandle<Result<(i32, Option<String>), String>>,
+}
+
+fn parse_execution_id(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("execution_id: ")
+                .map(|v| v.trim().to_string())
+        })
+        .filter(|s| !s.is_empty())
+}
+
+fn run_task_managed_subprocess(
+    id: String,
+    backend: String,
+    queue_ms: u64,
+    worker_id: String,
+    task_parent_id: Option<String>,
+) -> Result<(i32, Option<String>), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("task run-all: current_exe: {e}"))?;
+    let mut cmd = Command::new(exe);
+    cmd.args(["task", "run", &id, "--managed-by-parent"]);
+    cmd.args(["--backend", &backend]);
+    cmd.env("CX_TASK_ID", &id);
+    cmd.env("CX_TASK_QUEUE_MS", queue_ms.to_string());
+    cmd.env("CX_TASK_WORKER_ID", worker_id);
+    if let Some(parent_id) = task_parent_id {
+        cmd.env("CX_TASK_PARENT_ID", parent_id);
+    }
+    let output = run_command_output_with_timeout(cmd, "task run-all worker")?;
+    let status = output.status.code().unwrap_or(1);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    Ok((status, parse_execution_id(&stdout)))
 }
 
 fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
@@ -241,31 +298,43 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             .collect()
     };
 
-    let mut ok = 0usize;
-    let mut failed = 0usize;
-    for (idx, id) in schedule.iter().enumerate() {
-        let task = task_index.get(id);
-        let backend_selected = choose_backend_for_task(task, &options.backend_pool, idx);
-        match (deps.run_task_by_id)(
-            &(deps.make_task_runner)(),
-            id,
-            None,
-            backend_selected.as_deref(),
-        ) {
-            Ok((code, _)) => {
-                if code == 0 {
-                    ok += 1;
-                } else {
-                    failed += 1;
-                    crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
-                }
-            }
+    let (ok, failed) = if options.run_mode == "mixed" && options.max_workers > 1 {
+        match run_schedule_parallel(&schedule, &task_index, &options) {
+            Ok(v) => v,
             Err(e) => {
-                crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
+                crate::cx_eprintln!("cxrs task run-all: {e}");
                 return 1;
             }
         }
-    }
+    } else {
+        let mut ok = 0usize;
+        let mut failed = 0usize;
+        for (idx, id) in schedule.iter().enumerate() {
+            let task = task_index.get(id);
+            let backend_selected = choose_backend_for_task(task, &options.backend_pool, idx);
+            match (deps.run_task_by_id)(
+                &(deps.make_task_runner)(),
+                id,
+                None,
+                backend_selected.as_deref(),
+                false,
+            ) {
+                Ok((code, _)) => {
+                    if code == 0 {
+                        ok += 1;
+                    } else {
+                        failed += 1;
+                        crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
+                    }
+                }
+                Err(e) => {
+                    crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
+                    return 1;
+                }
+            }
+        }
+        (ok, failed)
+    };
     println!(
         "run-all summary: mode={}, complete={ok}, failed={failed}",
         options.run_mode
@@ -478,6 +547,110 @@ fn render_backend_caps(caps: &HashMap<String, usize>) -> String {
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<String>>()
         .join(",")
+}
+
+fn backend_cap_for(options: &RunAllOptions, backend: &str) -> usize {
+    options
+        .backend_caps
+        .get(backend)
+        .copied()
+        .unwrap_or(options.max_workers)
+        .max(1)
+}
+
+fn set_task_status_quiet(id: &str, status: &str) -> Result<(), String> {
+    set_task_status(id, status)
+}
+
+fn run_schedule_parallel(
+    schedule: &[String],
+    task_index: &HashMap<String, TaskRecord>,
+    options: &RunAllOptions,
+) -> Result<(usize, usize), String> {
+    let mut pending: Vec<PendingLaunch> = schedule
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| PendingLaunch {
+            id: id.clone(),
+            backend: choose_backend_for_task(task_index.get(id), &options.backend_pool, idx)
+                .unwrap_or_else(|| "codex".to_string()),
+            queue_since: Instant::now(),
+        })
+        .collect();
+    let mut active: Vec<ActiveLaunch> = Vec::new();
+    let mut backend_active: HashMap<String, usize> = HashMap::new();
+    let mut ok = 0usize;
+    let mut failed = 0usize;
+    let mut next_worker = 1usize;
+
+    while !pending.is_empty() || !active.is_empty() {
+        while active.len() < options.max_workers && !pending.is_empty() {
+            let maybe_idx = pending.iter().position(|p| {
+                let cur = backend_active.get(&p.backend).copied().unwrap_or(0);
+                cur < backend_cap_for(options, &p.backend)
+            });
+            let Some(pos) = maybe_idx else {
+                break;
+            };
+            let launch = pending.remove(pos);
+            set_task_status_quiet(&launch.id, "in_progress")?;
+            let queue_ms = launch.queue_since.elapsed().as_millis() as u64;
+            let worker_id = format!("w{next_worker}");
+            next_worker = if next_worker >= options.max_workers {
+                1
+            } else {
+                next_worker + 1
+            };
+            *backend_active.entry(launch.backend.clone()).or_insert(0) += 1;
+            let id = launch.id.clone();
+            let backend = launch.backend.clone();
+            let task_parent_id = task_index.get(&id).and_then(|t| t.parent_id.clone());
+            let join = thread::spawn(move || {
+                run_task_managed_subprocess(id, backend, queue_ms, worker_id, task_parent_id)
+            });
+            active.push(ActiveLaunch {
+                id: launch.id,
+                backend: launch.backend,
+                join,
+            });
+        }
+
+        if active.is_empty() && !pending.is_empty() {
+            return Err("task run-all: scheduler deadlock (backend caps too strict)".to_string());
+        }
+
+        if !active.is_empty() {
+            let done = active.remove(0);
+            let join_out = done
+                .join
+                .join()
+                .map_err(|_| format!("task run-all: worker thread panicked for {}", done.id))?;
+            if let Some(v) = backend_active.get_mut(&done.backend)
+                && *v > 0
+            {
+                *v -= 1;
+            }
+            match join_out {
+                Ok((code, _execution_id)) => {
+                    if code == 0 {
+                        ok += 1;
+                        let _ = set_task_status_quiet(&done.id, "complete");
+                    } else {
+                        failed += 1;
+                        let _ = set_task_status_quiet(&done.id, "failed");
+                        crate::cx_eprintln!("cxrs task run-all: task failed: {}", done.id);
+                    }
+                }
+                Err(e) => {
+                    failed += 1;
+                    let _ = set_task_status_quiet(&done.id, "failed");
+                    crate::cx_eprintln!("cxrs task run-all: critical error for {}: {e}", done.id);
+                }
+            }
+        }
+    }
+
+    Ok((ok, failed))
 }
 
 fn handle_run_plan(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {

@@ -454,6 +454,7 @@ pub fn run_task_by_id(
     id: &str,
     mode_override: Option<&str>,
     backend_override: Option<&str>,
+    managed_by_parent: bool,
 ) -> Result<(i32, Option<String>), TaskRunError> {
     let mut tasks = (runner.read_tasks)().map_err(TaskRunError::Critical)?;
     let idx = tasks
@@ -463,16 +464,28 @@ pub fn run_task_by_id(
     if matches!(tasks[idx].status.as_str(), "complete" | "failed") {
         return Ok((0, None));
     }
-    tasks[idx].status = "in_progress".to_string();
-    tasks[idx].updated_at = (runner.utc_now_iso)();
-    (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
-    let prev_task_id = (runner.current_task_id)();
-    let prev_parent_id = (runner.current_task_parent_id)();
+    if !managed_by_parent {
+        tasks[idx].status = "in_progress".to_string();
+        tasks[idx].updated_at = (runner.utc_now_iso)();
+        (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
+    }
+    let prev_task_id = if managed_by_parent {
+        None
+    } else {
+        (runner.current_task_id)()
+    };
+    let prev_parent_id = if managed_by_parent {
+        None
+    } else {
+        (runner.current_task_parent_id)()
+    };
     let prev_replica_index = env::var("CX_TASK_REPLICA_INDEX").ok();
     let prev_replica_count = env::var("CX_TASK_REPLICA_COUNT").ok();
     let prev_converge_mode = env::var("CX_TASK_CONVERGE_MODE").ok();
     let prev_converge_winner = env::var("CX_TASK_CONVERGE_WINNER").ok();
-    set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
+    if !managed_by_parent {
+        set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
+    }
 
     let effective_mode = mode_override
         .map(ToOwned::to_owned)
@@ -511,7 +524,9 @@ pub fn run_task_by_id(
     if replica_count > 1 || converge_mode != "none" {
         log_convergence_summary(&tasks[idx], &converge_mode, &outcomes, &winner);
     }
-    restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
+    if !managed_by_parent {
+        restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
+    }
     set_optional_env("CX_TASK_REPLICA_INDEX", prev_replica_index);
     set_optional_env("CX_TASK_REPLICA_COUNT", prev_replica_count);
     set_optional_env("CX_TASK_CONVERGE_MODE", prev_converge_mode);
@@ -521,7 +536,9 @@ pub fn run_task_by_id(
     let execution_id = winner.execution_id.clone();
     let objective_err = winner.error.clone();
 
-    finalize_task_status(runner, id, status_code)?;
+    if !managed_by_parent {
+        finalize_task_status(runner, id, status_code)?;
+    }
     if let Some(e) = objective_err {
         crate::cx_eprintln!("cxrs task run: objective failed for {id}: {e}");
     }

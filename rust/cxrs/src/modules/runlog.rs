@@ -97,6 +97,10 @@ fn base_execution_log(
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    let worker_id = env::var("CX_TASK_WORKER_ID")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let converge_winner = env::var("CX_TASK_CONVERGE_WINNER")
         .ok()
         .map(|v| v.trim().to_string())
@@ -124,6 +128,7 @@ fn base_execution_log(
         model_selected: model_opt,
         route_policy: Some(broker_policy),
         route_reason: Some(route_reason),
+        worker_id,
         replica_index,
         replica_count,
         converge_mode,
