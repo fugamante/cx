@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase IV broker + mixed routing controls:
+  - `cx broker set --policy latency|quality|cost|balanced` persisted to `.codex/state.json`.
+  - `cx task run-all --mode mixed` now accepts:
+    - `--backend-pool codex,ollama`
+    - `--backend-cap backend=limit`
+    - `--max-workers N` (planner metadata; single-worker execution remains current behavior)
+  - deterministic backend selection per scheduled task using task backend preference + broker policy fallback.
+- task-run command tests for backend-pool parsing and task backend preference routing.
+
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
   - new planner module: `rust/cxrs/src/modules/tasks_plan.rs`.

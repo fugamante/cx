@@ -4,6 +4,37 @@ use serde_json::{Value, json};
 
 use crate::config::app_config;
 use crate::runtime::{llm_backend, llm_model};
+use crate::state::set_state_path;
+
+fn valid_policy(s: &str) -> bool {
+    matches!(s, "latency" | "quality" | "cost" | "balanced")
+}
+
+fn parse_set_policy(args: &[String]) -> Result<String, String> {
+    let mut i = 0usize;
+    let mut policy: Option<String> = None;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--policy" => {
+                let Some(v) = args.get(i + 1) else {
+                    return Err("cxrs broker set: --policy requires a value".to_string());
+                };
+                policy = Some(v.trim().to_lowercase());
+                i += 2;
+            }
+            other => {
+                return Err(format!("cxrs broker set: unknown flag '{other}'"));
+            }
+        }
+    }
+    let Some(v) = policy else {
+        return Err("cxrs broker set: missing --policy".to_string());
+    };
+    if !valid_policy(&v) {
+        return Err(format!("cxrs broker set: invalid policy '{v}'"));
+    }
+    Ok(v)
+}
 
 fn backend_available(name: &str) -> bool {
     Command::new("bash")
@@ -65,13 +96,28 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
             0
         }
         "set" => {
-            crate::cx_eprintln!(
-                "Usage: {app_name} broker show [--json]\nPhase IV note: 'broker set' is planned but not implemented yet."
-            );
-            2
+            let policy = match parse_set_policy(&args[1..]) {
+                Ok(v) => v,
+                Err(e) => {
+                    crate::cx_eprintln!(
+                        "{e}\nUsage: {app_name} broker set --policy latency|quality|cost|balanced"
+                    );
+                    return 2;
+                }
+            };
+            if let Err(e) =
+                set_state_path("preferences.broker_policy", Value::String(policy.clone()))
+            {
+                crate::cx_eprintln!("cxrs broker set: {e}");
+                return 1;
+            }
+            println!("broker_policy: {policy}");
+            0
         }
         other => {
-            crate::cx_eprintln!("Usage: {app_name} broker <show [--json]>");
+            crate::cx_eprintln!(
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced>"
+            );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2
         }

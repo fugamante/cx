@@ -65,11 +65,53 @@ fn task_prompt(task: &TaskRecord) -> String {
     )
 }
 
+fn task_backend_override(task: &TaskRecord) -> Option<String> {
+    let backend = task.backend.trim().to_lowercase();
+    if matches!(backend.as_str(), "codex" | "ollama") {
+        Some(backend)
+    } else {
+        None
+    }
+}
+
+fn task_mode_override(task: &TaskRecord) -> Option<String> {
+    match task.profile.trim().to_lowercase().as_str() {
+        "fast" => Some("lean".to_string()),
+        "quality" => Some("verbose".to_string()),
+        "schema_strict" => Some("deterministic".to_string()),
+        _ => None,
+    }
+}
+
+fn task_model_override(task: &TaskRecord) -> Option<String> {
+    task.model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn run_task_prompt(
     runner: &TaskRunner,
     task: &TaskRecord,
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+    model_override: Option<&str>,
 ) -> Result<(i32, Option<String>), String> {
-    let res = (runner.execute_task)(TaskSpec {
+    let prev_mode = env::var("CX_MODE").ok();
+    let prev_backend = env::var("CX_LLM_BACKEND").ok();
+    let prev_ollama_model = env::var("CX_OLLAMA_MODEL").ok();
+    if let Some(mode) = mode_override {
+        // scoped overrides for prompt-based task execution.
+        unsafe { env::set_var("CX_MODE", mode) };
+    }
+    if let Some(backend) = backend_override {
+        unsafe { env::set_var("CX_LLM_BACKEND", backend) };
+    }
+    if let Some(model) = model_override {
+        unsafe { env::set_var("CX_OLLAMA_MODEL", model) };
+    }
+    let exec_result = (runner.execute_task)(TaskSpec {
         command_name: "cxtask_run".to_string(),
         input: TaskInput::Prompt(task_prompt(task)),
         output_kind: LlmOutputKind::AgentText,
@@ -77,7 +119,20 @@ fn run_task_prompt(
         schema_task_input: None,
         logging_enabled: true,
         capture_override: None,
-    })?;
+    });
+    match prev_mode {
+        Some(v) => unsafe { env::set_var("CX_MODE", v) },
+        None => unsafe { env::remove_var("CX_MODE") },
+    };
+    match prev_backend {
+        Some(v) => unsafe { env::set_var("CX_LLM_BACKEND", v) },
+        None => unsafe { env::remove_var("CX_LLM_BACKEND") },
+    };
+    match prev_ollama_model {
+        Some(v) => unsafe { env::set_var("CX_OLLAMA_MODEL", v) },
+        None => unsafe { env::remove_var("CX_OLLAMA_MODEL") },
+    };
+    let res = exec_result?;
     println!("{}", res.stdout);
     Ok((0, Some(res.execution_id)))
 }
@@ -86,6 +141,7 @@ fn run_objective_subprocess(
     objective_words: &[String],
     mode_override: Option<&str>,
     backend_override: Option<&str>,
+    model_override: Option<&str>,
 ) -> Result<i32, String> {
     if objective_words.is_empty() {
         return Ok(2);
@@ -99,6 +155,9 @@ fn run_objective_subprocess(
     if let Some(backend) = backend_override {
         cmd.env("CX_LLM_BACKEND", backend);
     }
+    if let Some(model) = model_override {
+        cmd.env("CX_OLLAMA_MODEL", model);
+    }
     let status = crate::process::run_command_status_with_timeout(cmd, "cxtask_run subprocess")?;
     Ok(status.code().unwrap_or(1))
 }
@@ -111,15 +170,21 @@ fn dispatch_task_command(
     backend_override: Option<&str>,
 ) -> Result<(i32, Option<String>), String> {
     let Some(cmd0) = words.first().map(String::as_str) else {
-        return run_task_prompt(runner, task);
+        return run_task_prompt(runner, task, mode_override, backend_override, None);
     };
     let args: Vec<String> = words.iter().skip(1).cloned().collect();
+    let model_override = task_model_override(task);
     if mode_override.is_some() || backend_override.is_some() {
         match cmd0 {
             "cxcommitjson" | "commitjson" | "cxcommitmsg" | "commitmsg" | "cxdiffsum"
             | "diffsum" | "cxdiffsum_staged" | "diffsum-staged" | "cxnext" | "next"
             | "cxfix_run" | "fix-run" | "cxfix" | "fix" | "cx" | "cxj" | "cxo" => {
-                let code = run_objective_subprocess(words, mode_override, backend_override)?;
+                let code = run_objective_subprocess(
+                    words,
+                    mode_override,
+                    backend_override,
+                    model_override.as_deref(),
+                )?;
                 return Ok((code, None));
             }
             _ => {}
@@ -136,7 +201,15 @@ fn dispatch_task_command(
         "cx" => command_status_or_usage(runner.cmd_cx, &args),
         "cxj" => command_status_or_usage(runner.cmd_cxj, &args),
         "cxo" => command_status_or_usage(runner.cmd_cxo, &args),
-        _ => return run_task_prompt(runner, task),
+        _ => {
+            return run_task_prompt(
+                runner,
+                task,
+                mode_override,
+                backend_override,
+                model_override.as_deref(),
+            );
+        }
     };
     Ok((status, None))
 }
@@ -221,7 +294,18 @@ pub fn run_task_by_id(
     let prev_parent_id = (runner.current_task_parent_id)();
     set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
 
-    let exec = run_task_objective(runner, &tasks[idx], mode_override, backend_override);
+    let effective_mode = mode_override
+        .map(ToOwned::to_owned)
+        .or_else(|| task_mode_override(&tasks[idx]));
+    let effective_backend = backend_override
+        .map(ToOwned::to_owned)
+        .or_else(|| task_backend_override(&tasks[idx]));
+    let exec = run_task_objective(
+        runner,
+        &tasks[idx],
+        effective_mode.as_deref(),
+        effective_backend.as_deref(),
+    );
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
 
     let (status_code, execution_id, objective_err) = match exec {

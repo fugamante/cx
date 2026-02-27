@@ -1,6 +1,8 @@
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::cmdctx::CmdCtx;
+use crate::config::app_config;
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
 use crate::tasks::set_task_status;
@@ -172,44 +174,10 @@ fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
 }
 
 fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
-    let usage = format!(
-        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed]"
-    );
-    let mut status_filter = "pending".to_string();
-    let mut run_mode = "sequential".to_string();
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--status" => {
-                let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    crate::cx_eprintln!("{usage}");
-                    return 2;
-                };
-                if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
-                    crate::cx_eprintln!("cxrs task run-all: invalid status '{v}'");
-                    return 2;
-                }
-                status_filter = v.to_string();
-                i += 2;
-            }
-            "--mode" => {
-                let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    crate::cx_eprintln!("{usage}");
-                    return 2;
-                };
-                if !matches!(v, "sequential" | "mixed") {
-                    crate::cx_eprintln!("cxrs task run-all: invalid mode '{v}'");
-                    return 2;
-                }
-                run_mode = v.to_string();
-                i += 2;
-            }
-            other => {
-                crate::cx_eprintln!("cxrs task run-all: unknown flag '{other}'");
-                return 2;
-            }
-        }
-    }
+    let options = match parse_run_all_options(app_name, args) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
 
     let tasks = match (deps.read_tasks)() {
         Ok(v) => v,
@@ -218,14 +186,19 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             return 1;
         }
     };
-    let selected_count = tasks.iter().filter(|t| t.status == status_filter).count();
+    let selected_count = tasks
+        .iter()
+        .filter(|t| t.status == options.status_filter)
+        .count();
     if selected_count == 0 {
-        println!("No tasks matched status '{status_filter}'.");
+        println!("No tasks matched status '{}'.", options.status_filter);
         return 0;
     }
+    let task_index: HashMap<String, TaskRecord> =
+        tasks.iter().map(|t| (t.id.clone(), t.clone())).collect();
 
-    let schedule: Vec<String> = if run_mode == "mixed" {
-        let plan = build_task_run_plan(&tasks, &status_filter);
+    let schedule: Vec<String> = if options.run_mode == "mixed" {
+        let plan = build_task_run_plan(&tasks, &options.status_filter);
         if !plan.blocked.is_empty() {
             crate::cx_eprintln!("cxrs task run-all: blocked tasks prevent full schedule:");
             for b in &plan.blocked {
@@ -238,13 +211,18 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             .flat_map(|wave| wave.task_ids.iter().cloned())
             .collect();
         if ids.is_empty() {
-            println!("No runnable tasks for status '{status_filter}'.");
+            println!("No runnable tasks for status '{}'.", options.status_filter);
             return if plan.blocked.is_empty() { 0 } else { 1 };
         }
+        let pool = options.backend_pool.join(",");
+        let cap_notes = render_backend_caps(&options.backend_caps);
         println!(
-            "run-all mode=mixed waves={} runnable={}",
+            "run-all mode=mixed waves={} runnable={} backend_pool={} max_workers={} backend_caps={}",
             plan.waves.len(),
-            ids.len()
+            ids.len(),
+            pool,
+            options.max_workers,
+            cap_notes
         );
         for wave in &plan.waves {
             println!(
@@ -258,15 +236,22 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     } else {
         tasks
             .iter()
-            .filter(|t| t.status == status_filter)
+            .filter(|t| t.status == options.status_filter)
             .map(|t| t.id.clone())
             .collect()
     };
 
     let mut ok = 0usize;
     let mut failed = 0usize;
-    for id in schedule {
-        match (deps.run_task_by_id)(&(deps.make_task_runner)(), &id, None, None) {
+    for (idx, id) in schedule.iter().enumerate() {
+        let task = task_index.get(id);
+        let backend_selected = choose_backend_for_task(task, &options.backend_pool, idx);
+        match (deps.run_task_by_id)(
+            &(deps.make_task_runner)(),
+            id,
+            None,
+            backend_selected.as_deref(),
+        ) {
             Ok((code, _)) => {
                 if code == 0 {
                     ok += 1;
@@ -281,8 +266,218 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             }
         }
     }
-    println!("run-all summary: mode={run_mode}, complete={ok}, failed={failed}");
+    println!(
+        "run-all summary: mode={}, complete={ok}, failed={failed}",
+        options.run_mode
+    );
     if failed > 0 { 1 } else { 0 }
+}
+
+#[derive(Debug, Clone)]
+struct RunAllOptions {
+    status_filter: String,
+    run_mode: String,
+    backend_pool: Vec<String>,
+    backend_caps: HashMap<String, usize>,
+    max_workers: usize,
+}
+
+fn normalize_backend(v: &str) -> Option<String> {
+    let b = v.trim().to_lowercase();
+    if matches!(b.as_str(), "codex" | "ollama") {
+        Some(b)
+    } else {
+        None
+    }
+}
+
+fn parse_backend_pool(raw: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = raw.split(',').filter_map(normalize_backend).collect();
+    out.sort();
+    out.dedup();
+    if out.is_empty() {
+        return Err("cxrs task run-all: --backend-pool requires codex and/or ollama".to_string());
+    }
+    Ok(out)
+}
+
+fn parse_backend_cap(raw: &str) -> Result<(String, usize), String> {
+    let mut parts = raw.splitn(2, '=');
+    let Some(name_raw) = parts.next() else {
+        return Err("cxrs task run-all: invalid --backend-cap".to_string());
+    };
+    let Some(limit_raw) = parts.next() else {
+        return Err("cxrs task run-all: --backend-cap must use backend=limit".to_string());
+    };
+    let Some(name) = normalize_backend(name_raw) else {
+        return Err(format!(
+            "cxrs task run-all: invalid backend in cap '{name_raw}'"
+        ));
+    };
+    let Ok(limit) = limit_raw.parse::<usize>() else {
+        return Err(format!(
+            "cxrs task run-all: invalid cap limit '{limit_raw}'"
+        ));
+    };
+    if limit == 0 {
+        return Err("cxrs task run-all: backend cap must be >= 1".to_string());
+    }
+    Ok((name, limit))
+}
+
+fn default_backend_pool() -> Vec<String> {
+    let backend = app_config().llm_backend.to_lowercase();
+    if matches!(backend.as_str(), "codex" | "ollama") {
+        vec![backend]
+    } else {
+        vec!["codex".to_string()]
+    }
+}
+
+fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOptions, i32> {
+    let usage = format!(
+        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N]"
+    );
+    let mut status_filter = "pending".to_string();
+    let mut run_mode = "sequential".to_string();
+    let mut backend_pool = default_backend_pool();
+    let mut backend_caps: HashMap<String, usize> = HashMap::new();
+    let mut max_workers = 1usize;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--status" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
+                    crate::cx_eprintln!("cxrs task run-all: invalid status '{v}'");
+                    return Err(2);
+                }
+                status_filter = v.to_string();
+                i += 2;
+            }
+            "--mode" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                if !matches!(v, "sequential" | "mixed") {
+                    crate::cx_eprintln!("cxrs task run-all: invalid mode '{v}'");
+                    return Err(2);
+                }
+                run_mode = v.to_string();
+                i += 2;
+            }
+            "--backend-pool" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                match parse_backend_pool(v) {
+                    Ok(pool) => backend_pool = pool,
+                    Err(e) => {
+                        crate::cx_eprintln!("{e}");
+                        return Err(2);
+                    }
+                }
+                i += 2;
+            }
+            "--backend-cap" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                match parse_backend_cap(v) {
+                    Ok((backend, cap)) => {
+                        backend_caps.insert(backend, cap);
+                    }
+                    Err(e) => {
+                        crate::cx_eprintln!("{e}");
+                        return Err(2);
+                    }
+                }
+                i += 2;
+            }
+            "--max-workers" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return Err(2);
+                };
+                let Ok(n) = v.parse::<usize>() else {
+                    crate::cx_eprintln!("cxrs task run-all: --max-workers must be an integer");
+                    return Err(2);
+                };
+                if n == 0 {
+                    crate::cx_eprintln!("cxrs task run-all: --max-workers must be >= 1");
+                    return Err(2);
+                }
+                max_workers = n;
+                i += 2;
+            }
+            other => {
+                crate::cx_eprintln!("cxrs task run-all: unknown flag '{other}'");
+                return Err(2);
+            }
+        }
+    }
+    Ok(RunAllOptions {
+        status_filter,
+        run_mode,
+        backend_pool,
+        backend_caps,
+        max_workers,
+    })
+}
+
+fn choose_backend_for_task(
+    task: Option<&TaskRecord>,
+    pool: &[String],
+    index: usize,
+) -> Option<String> {
+    if pool.is_empty() {
+        return None;
+    }
+    if let Some(t) = task
+        && let Some(task_backend) = normalize_backend(&t.backend)
+        && pool.contains(&task_backend)
+    {
+        return Some(task_backend);
+    }
+    if pool.len() == 1 {
+        return Some(pool[0].clone());
+    }
+    let policy = app_config().broker_policy.to_lowercase();
+    match policy.as_str() {
+        "quality" => {
+            if pool.iter().any(|b| b == "codex") {
+                Some("codex".to_string())
+            } else {
+                Some(pool[index % pool.len()].clone())
+            }
+        }
+        "latency" | "cost" => {
+            if pool.iter().any(|b| b == "ollama") {
+                Some("ollama".to_string())
+            } else {
+                Some(pool[index % pool.len()].clone())
+            }
+        }
+        _ => Some(pool[index % pool.len()].clone()),
+    }
+}
+
+fn render_backend_caps(caps: &HashMap<String, usize>) -> String {
+    if caps.is_empty() {
+        return "none".to_string();
+    }
+    let mut kv: Vec<(String, usize)> = caps.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    kv.sort_by(|a, b| a.0.cmp(&b.0));
+    kv.into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<String>>()
+        .join(",")
 }
 
 fn handle_run_plan(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
@@ -400,5 +595,60 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &TaskCmdDeps) -> i32 {
             );
             2
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_task(backend: &str) -> TaskRecord {
+        TaskRecord {
+            id: "task_001".to_string(),
+            parent_id: None,
+            role: "implementer".to_string(),
+            objective: "noop".to_string(),
+            context_ref: String::new(),
+            backend: backend.to_string(),
+            model: None,
+            profile: "balanced".to_string(),
+            run_mode: "sequential".to_string(),
+            depends_on: Vec::new(),
+            resource_keys: Vec::new(),
+            max_retries: None,
+            timeout_secs: None,
+            status: "pending".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn parse_run_all_options_accepts_backend_flags() {
+        let args = vec![
+            "run-all".to_string(),
+            "--mode".to_string(),
+            "mixed".to_string(),
+            "--backend-pool".to_string(),
+            "codex,ollama".to_string(),
+            "--backend-cap".to_string(),
+            "codex=2".to_string(),
+            "--max-workers".to_string(),
+            "3".to_string(),
+        ];
+        let opts = parse_run_all_options("cx", &args).expect("parse options");
+        assert_eq!(opts.run_mode, "mixed");
+        assert!(opts.backend_pool.iter().any(|b| b == "codex"));
+        assert!(opts.backend_pool.iter().any(|b| b == "ollama"));
+        assert_eq!(opts.backend_caps.get("codex"), Some(&2usize));
+        assert_eq!(opts.max_workers, 3);
+    }
+
+    #[test]
+    fn choose_backend_prefers_task_backend_when_in_pool() {
+        let task = mk_task("ollama");
+        let selected =
+            choose_backend_for_task(Some(&task), &["codex".to_string(), "ollama".to_string()], 0);
+        assert_eq!(selected.as_deref(), Some("ollama"));
     }
 }
