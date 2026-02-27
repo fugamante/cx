@@ -4,6 +4,7 @@ use crate::cmdctx::CmdCtx;
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
 use crate::tasks::set_task_status;
+use crate::tasks_plan::build_task_run_plan;
 use crate::types::TaskRecord;
 
 pub struct TaskCmdDeps {
@@ -243,6 +244,89 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     if failed > 0 { 1 } else { 0 }
 }
 
+fn handle_run_plan(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
+    let usage = format!(
+        "Usage: {app_name} task run-plan [--status pending|in_progress|complete|failed] [--json]"
+    );
+    let mut status_filter = "pending".to_string();
+    let mut as_json = false;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--status" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return 2;
+                };
+                if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
+                    crate::cx_eprintln!("cxrs task run-plan: invalid status '{v}'");
+                    return 2;
+                }
+                status_filter = v.to_string();
+                i += 2;
+            }
+            "--json" => {
+                as_json = true;
+                i += 1;
+            }
+            other => {
+                crate::cx_eprintln!("cxrs task run-plan: unknown flag '{other}'");
+                return 2;
+            }
+        }
+    }
+
+    let tasks = match (deps.read_tasks)() {
+        Ok(v) => v,
+        Err(e) => {
+            crate::cx_eprintln!("{e}");
+            return 1;
+        }
+    };
+    let plan = build_task_run_plan(&tasks, &status_filter);
+
+    if as_json {
+        match serde_json::to_string_pretty(&plan) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                crate::cx_eprintln!("cxrs task run-plan: failed to render json: {e}");
+                return 1;
+            }
+        }
+        return if plan.blocked.is_empty() { 0 } else { 1 };
+    }
+
+    println!("== cx task run-plan ==");
+    println!("status_filter: {}", plan.status_filter);
+    println!("selected: {}", plan.selected);
+    println!("waves: {}", plan.waves.len());
+    if plan.waves.is_empty() {
+        println!("No tasks matched filter.");
+    } else {
+        println!("index | mode | task_ids");
+        println!("---|---|---");
+        for wave in &plan.waves {
+            println!(
+                "{} | {} | {}",
+                wave.index,
+                wave.mode,
+                wave.task_ids.join(",")
+            );
+        }
+    }
+    if !plan.blocked.is_empty() {
+        println!();
+        println!("blocked: {}", plan.blocked.len());
+        println!("id | reason");
+        println!("---|---");
+        for blocked in &plan.blocked {
+            println!("{} | {}", blocked.id, blocked.reason);
+        }
+        return 1;
+    }
+    0
+}
+
 pub fn handler(ctx: &CmdCtx, args: &[String], deps: &TaskCmdDeps) -> i32 {
     let app_name = ctx.app_name;
     let sub = args.first().map(String::as_str).unwrap_or("list");
@@ -266,11 +350,12 @@ pub fn handler(ctx: &CmdCtx, args: &[String], deps: &TaskCmdDeps) -> i32 {
             Err(code) => code,
         },
         "fanout" => handle_fanout(app_name, args, deps),
+        "run-plan" => handle_run_plan(app_name, args, deps),
         "run" => handle_run(app_name, args, deps),
         "run-all" => handle_run_all(app_name, args, deps),
         _ => {
             crate::cx_eprintln!(
-                "Usage: {app_name} task <add|list|show|claim|complete|fail|fanout|run|run-all> ..."
+                "Usage: {app_name} task <add|list|show|claim|complete|fail|fanout|run-plan|run|run-all> ..."
             );
             2
         }

@@ -97,6 +97,8 @@ mod task_cmds;
 mod taskrun;
 #[path = "modules/tasks.rs"]
 mod tasks;
+#[path = "modules/tasks_plan.rs"]
+mod tasks_plan;
 #[path = "modules/types.rs"]
 mod types;
 #[path = "modules/util.rs"]

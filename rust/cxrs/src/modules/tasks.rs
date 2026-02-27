@@ -59,12 +59,17 @@ struct AddArgs {
     role: String,
     parent_id: Option<String>,
     context_ref: String,
+    run_mode: String,
+    depends_on: Vec<String>,
+    resource_keys: Vec<String>,
+    max_retries: Option<u32>,
+    timeout_secs: Option<u64>,
 }
 
 fn parse_objective_prefix(app_name: &str, args: &[String]) -> Result<(String, usize), i32> {
     if args.is_empty() {
         crate::cx_eprintln!(
-            "Usage: {app_name} task add <objective> [--role <role>] [--parent <id>] [--context <ref>]"
+            "Usage: {app_name} task add <objective> [--role <role>] [--parent <id>] [--context <ref>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>] [--resource-keys <k1,k2>] [--max-retries <n>] [--timeout-secs <n>]"
         );
         return Err(2);
     }
@@ -82,10 +87,38 @@ fn parse_objective_prefix(app_name: &str, args: &[String]) -> Result<(String, us
     Ok((objective, i))
 }
 
-fn parse_add_flags(args: &[String], mut i: usize) -> Result<(String, Option<String>, String), i32> {
+fn parse_csv_list(v: &str) -> Vec<String> {
+    v.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn parse_add_flags(
+    args: &[String],
+    mut i: usize,
+) -> Result<
+    (
+        String,
+        Option<String>,
+        String,
+        String,
+        Vec<String>,
+        Vec<String>,
+        Option<u32>,
+        Option<u64>,
+    ),
+    i32,
+> {
     let mut role = "implementer".to_string();
     let mut parent_id: Option<String> = None;
     let mut context_ref = String::new();
+    let mut run_mode = "sequential".to_string();
+    let mut depends_on: Vec<String> = Vec::new();
+    let mut resource_keys: Vec<String> = Vec::new();
+    let mut max_retries: Option<u32> = None;
+    let mut timeout_secs: Option<u64> = None;
     while i < args.len() {
         match args[i].as_str() {
             "--role" => {
@@ -112,18 +145,102 @@ fn parse_add_flags(args: &[String], mut i: usize) -> Result<(String, Option<Stri
                 context_ref = v.to_string();
                 i += 2;
             }
+            "--mode" => {
+                let Some(v) = args.get(i + 1).map(|s| s.as_str()) else {
+                    crate::cx_eprintln!("cxrs task add: --mode requires a value");
+                    return Err(2);
+                };
+                if !matches!(v, "sequential" | "parallel") {
+                    crate::cx_eprintln!("cxrs task add: invalid --mode '{v}'");
+                    return Err(2);
+                }
+                run_mode = v.to_string();
+                i += 2;
+            }
+            "--depends-on" => {
+                let Some(v) = args.get(i + 1) else {
+                    crate::cx_eprintln!("cxrs task add: --depends-on requires a value");
+                    return Err(2);
+                };
+                depends_on.extend(parse_csv_list(v));
+                i += 2;
+            }
+            "--resource" => {
+                let Some(v) = args.get(i + 1) else {
+                    crate::cx_eprintln!("cxrs task add: --resource requires a value");
+                    return Err(2);
+                };
+                if !v.trim().is_empty() {
+                    resource_keys.push(v.trim().to_string());
+                }
+                i += 2;
+            }
+            "--resource-keys" => {
+                let Some(v) = args.get(i + 1) else {
+                    crate::cx_eprintln!("cxrs task add: --resource-keys requires a value");
+                    return Err(2);
+                };
+                resource_keys.extend(parse_csv_list(v));
+                i += 2;
+            }
+            "--max-retries" => {
+                let Some(v) = args.get(i + 1) else {
+                    crate::cx_eprintln!("cxrs task add: --max-retries requires a value");
+                    return Err(2);
+                };
+                let Ok(n) = v.parse::<u32>() else {
+                    crate::cx_eprintln!("cxrs task add: --max-retries must be an integer");
+                    return Err(2);
+                };
+                max_retries = Some(n);
+                i += 2;
+            }
+            "--timeout-secs" => {
+                let Some(v) = args.get(i + 1) else {
+                    crate::cx_eprintln!("cxrs task add: --timeout-secs requires a value");
+                    return Err(2);
+                };
+                let Ok(n) = v.parse::<u64>() else {
+                    crate::cx_eprintln!("cxrs task add: --timeout-secs must be an integer");
+                    return Err(2);
+                };
+                timeout_secs = Some(n);
+                i += 2;
+            }
             other => {
                 crate::cx_eprintln!("cxrs task add: unknown flag '{other}'");
                 return Err(2);
             }
         }
     }
-    Ok((role, parent_id, context_ref))
+    depends_on.sort();
+    depends_on.dedup();
+    resource_keys.sort();
+    resource_keys.dedup();
+    Ok((
+        role,
+        parent_id,
+        context_ref,
+        run_mode,
+        depends_on,
+        resource_keys,
+        max_retries,
+        timeout_secs,
+    ))
 }
 
 fn parse_task_add_args(app_name: &str, args: &[String]) -> Result<AddArgs, i32> {
     let (objective, i) = parse_objective_prefix(app_name, args)?;
-    let (role, parent_id, context_ref) = parse_add_flags(args, i)?;
+    let (
+        role,
+        parent_id,
+        context_ref,
+        run_mode,
+        depends_on,
+        resource_keys,
+        max_retries,
+        timeout_secs,
+    ) = parse_add_flags(args, i)?;
     if !task_role_valid(&role) {
         crate::cx_eprintln!("cxrs task add: invalid role '{role}'");
         return Err(2);
@@ -133,6 +250,11 @@ fn parse_task_add_args(app_name: &str, args: &[String]) -> Result<AddArgs, i32> 
         role,
         parent_id,
         context_ref,
+        run_mode,
+        depends_on,
+        resource_keys,
+        max_retries,
+        timeout_secs,
     })
 }
 
@@ -157,6 +279,11 @@ pub fn cmd_task_add(app_name: &str, args: &[String]) -> i32 {
         role: parsed.role,
         objective: parsed.objective,
         context_ref: parsed.context_ref,
+        run_mode: parsed.run_mode,
+        depends_on: parsed.depends_on,
+        resource_keys: parsed.resource_keys,
+        max_retries: parsed.max_retries,
+        timeout_secs: parsed.timeout_secs,
         status: "pending".to_string(),
         created_at: now.clone(),
         updated_at: now,

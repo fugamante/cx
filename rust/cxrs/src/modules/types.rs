@@ -259,7 +259,21 @@ pub struct TaskRecord {
     pub role: String,
     pub objective: String,
     pub context_ref: String,
+    #[serde(default = "default_task_run_mode")]
+    pub run_mode: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub resource_keys: Vec<String>,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_task_run_mode() -> String {
+    "sequential".to_string()
 }

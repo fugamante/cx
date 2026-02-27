@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase III orchestration substrate (first executable step):
+  - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
+  - new planner module: `rust/cxrs/src/modules/tasks_plan.rs`.
+  - planner computes sequential + parallel waves, dependency ordering, resource-lock gating, and blocked-task reporting.
+- Task metadata extended for switchable orchestration policy:
+  - `run_mode` (`sequential|parallel`)
+  - `depends_on` (task id list)
+  - `resource_keys` (logical lock domains)
+  - `max_retries` (optional)
+  - `timeout_secs` (optional)
+- Task planning tests in `tasks_plan.rs`:
+  - dependency ordering
+  - parallel lock conflict handling
+  - blocked/cycle detection
 - Rust integration entrypoint coverage:
   - `rust/cxrs/tests/entrypoint_integration.rs`
   - validates `bin/cx version` execution path and `lib/cx.sh` sourceability/function export.
@@ -110,6 +124,16 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `task add` now accepts orchestration policy flags:
+  - `--mode`
+  - `--depends-on`
+  - `--resource` / `--resource-keys`
+  - `--max-retries`
+  - `--timeout-secs`
+- fanout-created tasks now carry explicit execution policy defaults:
+  - parent fanout task is sequential,
+  - child subtasks default to parallel with parent dependency and role-based resource keys.
+- task help now includes `task run-plan`.
 - `rust/cxrs/src/modules/help.rs` reduced to facade + shared data/render modules.
 - `rust/cxrs/src/modules/compat_cmd.rs` and `rust/cxrs/src/modules/native_cmd.rs` reduced to deps + thin handler facades.
 - `.github/workflows/cxrs-compat.yml` now runs release metadata check (`python3 rust/cxrs/tools/release_check.py --repo-root "$GITHUB_WORKSPACE"`).

@@ -214,6 +214,7 @@ Stage II runtime commands:
 ./bin/cx task add "Implement parser hardening" --role implementer
 ./bin/cx task list --status pending
 ./bin/cx task fanout "Ship release notes improvements" --from staged-diff
+./bin/cx task run-plan --status pending
 ./bin/cx task run <task_id> --mode deterministic --backend codex
 ./bin/cx task run-all --status pending
 

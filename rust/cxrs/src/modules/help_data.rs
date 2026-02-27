@@ -286,7 +286,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
 pub const TASK_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "task add",
-        usage: "cx task add \"<objective>\" --role <architect|implementer|reviewer|tester|doc>",
+        usage: "cx task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
         description: "Create a task with role and objective",
     },
     CommandHelp {
@@ -318,6 +318,11 @@ pub const TASK_COMMANDS: &[CommandHelp] = &[
         name: "task fanout",
         usage: "cx task fanout \"<objective>\" [--from staged-diff|worktree|log|file:PATH]",
         description: "Generate role-tagged subtasks",
+    },
+    CommandHelp {
+        name: "task run-plan",
+        usage: "cx task run-plan [--status pending|in_progress|complete|failed] [--json]",
+        description: "Preview deterministic execution waves before run-all",
     },
     CommandHelp {
         name: "task run",
