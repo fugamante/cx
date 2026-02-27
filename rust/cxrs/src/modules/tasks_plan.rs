@@ -52,6 +52,22 @@ fn effective_resource_keys(task: &TaskRecord) -> Vec<String> {
     Vec::new()
 }
 
+fn parse_lock_key(key: &str) -> (&str, &str) {
+    match key.rsplit_once(':') {
+        Some((domain, mode @ ("read" | "write"))) => (domain, mode),
+        _ => (key, "write"),
+    }
+}
+
+fn lock_conflicts(held: &str, candidate: &str) -> bool {
+    let (held_domain, held_mode) = parse_lock_key(held);
+    let (cand_domain, cand_mode) = parse_lock_key(candidate);
+    if held_domain != cand_domain {
+        return false;
+    }
+    held_mode == "write" || cand_mode == "write"
+}
+
 fn unresolved_dependencies(
     task: &TaskRecord,
     done_ids: &HashSet<String>,
@@ -179,18 +195,20 @@ pub fn build_task_run_plan(tasks: &[TaskRecord], status_filter: &str) -> TaskRun
         }
 
         let mut selected_parallel: Vec<String> = Vec::new();
-        let mut held_keys: HashSet<String> = HashSet::new();
+        let mut held_keys: Vec<String> = Vec::new();
         for id in &ready_parallel {
             let Some(task) = remaining.get(id) else {
                 continue;
             };
             let keys = effective_resource_keys(task);
-            let conflicts = keys.iter().any(|k| held_keys.contains(k));
+            let conflicts = keys
+                .iter()
+                .any(|k| held_keys.iter().any(|h| lock_conflicts(h, k)));
             if conflicts {
                 continue;
             }
             for k in keys {
-                held_keys.insert(k);
+                held_keys.push(k);
             }
             selected_parallel.push(id.clone());
         }
@@ -285,12 +303,10 @@ mod tests {
         ];
         let plan = build_task_run_plan(&tasks, "pending");
         assert!(plan.blocked.is_empty());
-        assert_eq!(plan.waves.len(), 2);
-        assert_eq!(
-            plan.waves[0].task_ids,
-            vec!["task_001".to_string(), "task_003".to_string()]
-        );
+        assert_eq!(plan.waves.len(), 3);
+        assert_eq!(plan.waves[0].task_ids, vec!["task_001".to_string()]);
         assert_eq!(plan.waves[1].task_ids, vec!["task_002".to_string()]);
+        assert_eq!(plan.waves[2].task_ids, vec!["task_003".to_string()]);
     }
 
     #[test]
