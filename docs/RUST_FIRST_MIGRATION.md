@@ -1,7 +1,7 @@
 # Rust-First Migration Checklist (cx)
 
 Last updated: 2026-02-26
-Scope: entire `cxcodex` project
+Scope: entire `CX` project
 
 ## 1) Policy (effective now)
 

@@ -2,6 +2,9 @@
 
 `cxrs` is the canonical Rust implementation for the `cx` toolchain.
 
+Project naming note:
+- `CX/cxrs` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
+
 Current scope:
 - standalone binary scaffold
 - stable CLI surface for experimentation
@@ -223,7 +226,7 @@ cargo run -- worklog
 cargo run -- worklog 100
 cargo run -- trace
 cargo run -- trace 5
-cargo run -- next git -C ~/cxcodex status --short
+cargo run -- next git -C <repo-root> status --short
 cargo run -- diffsum
 cargo run -- diffsum-staged
 cargo run -- fix-run ls /does-not-exist

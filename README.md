@@ -1,6 +1,9 @@
-# cxcodex
+# CX
 
 `cx` is a deterministic, Rust-first LLM dev runtime for local repositories.
+
+Project naming note:
+- `CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
 
 - Canonical execution engine: `rust/cxrs`
 - Single authoritative entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
@@ -125,7 +128,7 @@ Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible bu
 ## Quick Start
 
 ```bash
-cd ~/cxcodex
+cd <repo-root>
 ./bin/cx version
 ./bin/cx core
 ./bin/cx cxo git status

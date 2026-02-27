@@ -493,14 +493,14 @@ cxprompt() {
   cat <<EOF
 You are working on the "cx" toolchain.
 From now on, EVERY new feature must be implemented in TWO places:
-1) Repo canonical implementation under ~/cxcodex (sourceable bash entrypoint: cxcodex/cx.sh)
+1) Repo canonical implementation under $CX_REPO_DIR (sourceable bash entrypoint: cx.sh)
 2) Shell bootstrap loader (minimal; should source repo canonical file when present)
 
 Mode:
 - ${mode}
 
 Context:
-- Repo canonical source of truth: ~/cxcodex/cx.sh and ~/cxcodex/lib/cx/*
+- Repo canonical source of truth: $CX_REPO_DIR/cx.sh and $CX_REPO_DIR/lib/cx/*
 - Shell bootstrap: startup profile sources repo canonical entrypoint
 - Existing stack: JSONL Codex pipeline, schema-enforced structured commands, repo-aware logs, cxstate/cxpolicy/cxoptimize
 
@@ -521,7 +521,7 @@ Constraints:
 - Prefer minimal diffs and robust fallbacks.
 
 Deliverables:
-- Canonical repo code changes under ~/cxcodex (including cx.sh wiring if needed)
+- Canonical repo code changes under $CX_REPO_DIR (including cx.sh wiring if needed)
 - Shell bootstrap updates (minimal, delegate to repo when present)
 - Validation outputs for changed commands/paths
 - Short manual test checklist

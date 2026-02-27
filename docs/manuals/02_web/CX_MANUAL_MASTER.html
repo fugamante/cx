@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>cxcodex Manual (Master)</title>
+    <title>CX Manual (Master)</title>
     <link rel="stylesheet" href="./apple.css" />
   </head>
   <body>
     <div class="wrap">
       <header>
-        <div class="k">cxcodex</div>
+        <div class="k">CX</div>
         <h1>Manual (Master)</h1>
         <div class="meta">Last updated: 2026-02-26 · Focus: deterministic, observable, safe runtime</div>
       </header>
@@ -26,7 +26,7 @@
         <div class="card">
           <div class="k">Quickstart</div>
           <p>Run these three commands to confirm routing, budgets, and log location.</p>
-          <pre><code>cd ~/cxcodex
+          <pre><code>cd <repo-root>
 ./bin/cx version
 ./bin/cx budget
 ./bin/cx diffsum-staged | jq .</code></pre>
@@ -98,7 +98,7 @@
       <section id="start">
         <h2>Start Here: Verify What You’re Running</h2>
         <p>Prefer Rust execution. If you are on Bash fallback, expect reduced guarantees.</p>
-        <pre><code>cd ~/cxcodex
+        <pre><code>cd <repo-root>
 ./bin/cx version
 ./bin/cx diag
 ./bin/cx where version diffsum-staged task optimize</code></pre>

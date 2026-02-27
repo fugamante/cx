@@ -98,11 +98,33 @@ _cx_git_root() {
   git rev-parse --show-toplevel 2>/dev/null || true
 }
 
+_cx_default_repo_dir() {
+  local script_path script_dir repo_guess
+  if [[ -n "${CX_REPO_DIR:-}" ]]; then
+    printf "%s" "$CX_REPO_DIR"
+    return 0
+  fi
+  if [[ -d "$HOME/cx" ]]; then
+    printf "%s" "$HOME/cx"
+    return 0
+  fi
+  script_path="${BASH_SOURCE[0]:-}"
+  if [[ -n "$script_path" ]]; then
+    script_dir="$(cd "$(dirname "$script_path")" 2>/dev/null && pwd || true)"
+    repo_guess="$(cd "$script_dir/../.." 2>/dev/null && pwd || true)"
+    if [[ -n "$repo_guess" ]] && [[ -f "$repo_guess/cx.sh" ]]; then
+      printf "%s" "$repo_guess"
+      return 0
+    fi
+  fi
+  printf "%s" "$HOME/cx"
+}
+
 _cx_rust_manifest() {
   local repo_root git_root candidate
   repo_root="${CX_REPO_ROOT:-}"
   if [[ -z "$repo_root" ]]; then
-    repo_root="${CX_REPO_DIR:-$HOME/cxcodex}"
+    repo_root="$(_cx_default_repo_dir)"
   fi
   candidate="$repo_root/rust/cxrs/Cargo.toml"
   if [[ -f "$candidate" ]]; then
@@ -161,7 +183,7 @@ cxversion() {
   ts="$(date -u +"%Y-%m-%d")"
   src="${CX_SOURCE_LOCATION:-local-shell}"
   logf="$(_cx_log_file)"
-  version_file="${CX_REPO_DIR:-$HOME/cxcodex}/VERSION"
+  version_file="$(_cx_default_repo_dir)/VERSION"
   if [[ -f "$version_file" ]]; then
     version_text="$(tr -d '\n' < "$version_file")"
   else
@@ -218,7 +240,7 @@ cxcore() {
 cxwhere() {
   local repo_root bin_cx rust_bin rust_manifest rust_ver bash_lib cmd
   repo_root="${CX_REPO_ROOT:-$(_cx_git_root)}"
-  [[ -n "$repo_root" ]] || repo_root="${CX_REPO_DIR:-$HOME/cxcodex}"
+  [[ -n "$repo_root" ]] || repo_root="$(_cx_default_repo_dir)"
   bin_cx="$repo_root/bin/cx"
   rust_bin="$repo_root/rust/cxrs/bin/cxrs"
   rust_manifest="$repo_root/rust/cxrs/Cargo.toml"
