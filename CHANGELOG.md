@@ -13,6 +13,14 @@ All notable changes to this project are documented in this file.
     - `--max-workers N` (planner metadata; single-worker execution remains current behavior)
   - deterministic backend selection per scheduled task using task backend preference + broker policy fallback.
 - task-run command tests for backend-pool parsing and task backend preference routing.
+- Phase IV convergence metadata scaffold:
+  - task schema now supports:
+    - `converge` (`none|first_valid|majority|judge|score`)
+    - `replicas` (default `1`)
+    - `max_concurrency` (optional)
+  - `cx task add` parses and validates the new convergence flags.
+  - run logs can now carry replica/convergence telemetry context:
+    - `replica_index`, `replica_count`, `converge_mode`, `converge_winner`, `converge_votes`, `queue_ms`.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.

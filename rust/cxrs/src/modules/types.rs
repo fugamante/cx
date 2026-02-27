@@ -217,6 +217,12 @@ pub struct ExecutionLog {
     pub model_selected: Option<String>,
     pub route_policy: Option<String>,
     pub route_reason: Option<String>,
+    pub replica_index: Option<u32>,
+    pub replica_count: Option<u32>,
+    pub converge_mode: Option<String>,
+    pub converge_winner: Option<String>,
+    pub converge_votes: Option<Value>,
+    pub queue_ms: Option<u64>,
     pub capture_provider: Option<String>,
     pub execution_mode: String,
     pub duration_ms: Option<u64>,
@@ -269,6 +275,12 @@ pub struct TaskRecord {
     pub model: Option<String>,
     #[serde(default = "default_task_profile")]
     pub profile: String,
+    #[serde(default = "default_task_converge")]
+    pub converge: String,
+    #[serde(default = "default_task_replicas")]
+    pub replicas: u32,
+    #[serde(default)]
+    pub max_concurrency: Option<u32>,
     #[serde(default = "default_task_run_mode")]
     pub run_mode: String,
     #[serde(default)]
@@ -294,4 +306,12 @@ fn default_task_backend() -> String {
 
 fn default_task_profile() -> String {
     "balanced".to_string()
+}
+
+fn default_task_converge() -> String {
+    "none".to_string()
+}
+
+fn default_task_replicas() -> u32 {
+    1
 }

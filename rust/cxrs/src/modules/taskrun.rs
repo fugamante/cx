@@ -91,6 +91,13 @@ fn task_model_override(task: &TaskRecord) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn set_optional_env(name: &str, value: Option<String>) {
+    match value {
+        Some(v) => unsafe { env::set_var(name, v) },
+        None => unsafe { env::remove_var(name) },
+    }
+}
+
 fn run_task_prompt(
     runner: &TaskRunner,
     task: &TaskRecord,
@@ -120,18 +127,9 @@ fn run_task_prompt(
         logging_enabled: true,
         capture_override: None,
     });
-    match prev_mode {
-        Some(v) => unsafe { env::set_var("CX_MODE", v) },
-        None => unsafe { env::remove_var("CX_MODE") },
-    };
-    match prev_backend {
-        Some(v) => unsafe { env::set_var("CX_LLM_BACKEND", v) },
-        None => unsafe { env::remove_var("CX_LLM_BACKEND") },
-    };
-    match prev_ollama_model {
-        Some(v) => unsafe { env::set_var("CX_OLLAMA_MODEL", v) },
-        None => unsafe { env::remove_var("CX_OLLAMA_MODEL") },
-    };
+    set_optional_env("CX_MODE", prev_mode);
+    set_optional_env("CX_LLM_BACKEND", prev_backend);
+    set_optional_env("CX_OLLAMA_MODEL", prev_ollama_model);
     let res = exec_result?;
     println!("{}", res.stdout);
     Ok((0, Some(res.execution_id)))
@@ -292,7 +290,18 @@ pub fn run_task_by_id(
     (runner.write_tasks)(&tasks).map_err(TaskRunError::Critical)?;
     let prev_task_id = (runner.current_task_id)();
     let prev_parent_id = (runner.current_task_parent_id)();
+    let prev_replica_index = env::var("CX_TASK_REPLICA_INDEX").ok();
+    let prev_replica_count = env::var("CX_TASK_REPLICA_COUNT").ok();
+    let prev_converge_mode = env::var("CX_TASK_CONVERGE_MODE").ok();
+    let prev_converge_winner = env::var("CX_TASK_CONVERGE_WINNER").ok();
     set_runtime_task_state(runner, id, tasks[idx].parent_id.as_ref());
+    set_optional_env("CX_TASK_REPLICA_INDEX", Some("1".to_string()));
+    set_optional_env(
+        "CX_TASK_REPLICA_COUNT",
+        Some(tasks[idx].replicas.max(1).to_string()),
+    );
+    set_optional_env("CX_TASK_CONVERGE_MODE", Some(tasks[idx].converge.clone()));
+    set_optional_env("CX_TASK_CONVERGE_WINNER", None);
 
     let effective_mode = mode_override
         .map(ToOwned::to_owned)
@@ -307,6 +316,10 @@ pub fn run_task_by_id(
         effective_backend.as_deref(),
     );
     restore_runtime_task_state(runner, prev_task_id, prev_parent_id);
+    set_optional_env("CX_TASK_REPLICA_INDEX", prev_replica_index);
+    set_optional_env("CX_TASK_REPLICA_COUNT", prev_replica_count);
+    set_optional_env("CX_TASK_CONVERGE_MODE", prev_converge_mode);
+    set_optional_env("CX_TASK_CONVERGE_WINNER", prev_converge_winner);
 
     let (status_code, execution_id, objective_err) = match exec {
         Ok((c, eid)) => (c, eid, None),

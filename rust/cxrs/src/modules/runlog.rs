@@ -87,6 +87,23 @@ fn base_execution_log(
     } else {
         "codex_selected".to_string()
     };
+    let replica_index = env::var("CX_TASK_REPLICA_INDEX")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let replica_count = env::var("CX_TASK_REPLICA_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let converge_mode = env::var("CX_TASK_CONVERGE_MODE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let converge_winner = env::var("CX_TASK_CONVERGE_WINNER")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let queue_ms = env::var("CX_TASK_QUEUE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
     let (task_id, task_parent_id) = current_task_fields();
     let mut row = ExecutionLog {
         execution_id: make_execution_id(tool),
@@ -104,6 +121,12 @@ fn base_execution_log(
         model_selected: model_opt,
         route_policy: Some(broker_policy),
         route_reason: Some(route_reason),
+        replica_index,
+        replica_count,
+        converge_mode,
+        converge_winner,
+        converge_votes: None,
+        queue_ms,
         task_id,
         task_parent_id,
         ..Default::default()

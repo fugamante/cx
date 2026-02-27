@@ -291,8 +291,8 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
 pub const TASK_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "task add",
-        usage: "cx task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
-        description: "Create a task with role and objective",
+        usage: "cx task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--backend <auto|codex|ollama>] [--model <name>] [--profile <fast|balanced|quality|schema_strict>] [--converge <none|first_valid|majority|judge|score>] [--replicas <n>] [--max-concurrency <n>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
+        description: "Create a task with role, routing, and orchestration metadata",
     },
     CommandHelp {
         name: "task list",

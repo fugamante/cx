@@ -97,6 +97,11 @@ Must remain true:
 
 ## Delivery Schedule (Near-Future)
 
+Current implementation status on `codex/orchestration-mode-phase`:
+- Milestone A: completed
+- Milestone B: in progress (routing controls implemented; bounded worker pool still pending)
+- Milestone C: in progress (task metadata + telemetry scaffold implemented; replica convergence execution still pending)
+
 Milestone A: Routing Substrate
 - add task backend/model/profile metadata
 - implement backend availability checks + route selection
