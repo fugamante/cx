@@ -331,7 +331,7 @@ pub const TASK_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "task run-all",
-        usage: "cx task run-all [--status pending]",
-        description: "Run pending tasks sequentially",
+        usage: "cx task run-all [--status pending] [--mode sequential|mixed]",
+        description: "Run tasks by status (sequential default; mixed uses run-plan waves)",
     },
 ];

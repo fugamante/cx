@@ -124,6 +124,9 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `task run-all` now supports `--mode sequential|mixed`:
+  - `sequential` preserves prior behavior.
+  - `mixed` executes deterministic run-plan waves (single-worker execution, parallel-ready ordering).
 - `task add` now accepts orchestration policy flags:
   - `--mode`
   - `--depends-on`

@@ -40,32 +40,6 @@ pub fn cmd_task_set_status(id: &str, new_status: &str) -> i32 {
     0
 }
 
-fn parse_status_filter(args: &[String], usage: &str, prefix: &str) -> Result<String, i32> {
-    let mut status_filter = "pending".to_string();
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--status" => {
-                let Some(v) = args.get(i + 1).map(String::as_str) else {
-                    crate::cx_eprintln!("{usage}");
-                    return Err(2);
-                };
-                if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
-                    crate::cx_eprintln!("{prefix}: invalid status '{v}'");
-                    return Err(2);
-                }
-                status_filter = v.to_string();
-                i += 2;
-            }
-            other => {
-                crate::cx_eprintln!("{prefix}: unknown flag '{other}'");
-                return Err(2);
-            }
-        }
-    }
-    Ok(status_filter)
-}
-
 fn handle_list(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     let usage =
         format!("Usage: {app_name} task list [--status pending|in_progress|complete|failed]");
@@ -198,12 +172,44 @@ fn handle_run(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
 }
 
 fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
-    let usage =
-        format!("Usage: {app_name} task run-all [--status pending|in_progress|complete|failed]");
-    let status_filter = match parse_status_filter(args, &usage, "cxrs task run-all") {
-        Ok(v) => v,
-        Err(code) => return code,
-    };
+    let usage = format!(
+        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed]"
+    );
+    let mut status_filter = "pending".to_string();
+    let mut run_mode = "sequential".to_string();
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--status" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return 2;
+                };
+                if !matches!(v, "pending" | "in_progress" | "complete" | "failed") {
+                    crate::cx_eprintln!("cxrs task run-all: invalid status '{v}'");
+                    return 2;
+                }
+                status_filter = v.to_string();
+                i += 2;
+            }
+            "--mode" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    crate::cx_eprintln!("{usage}");
+                    return 2;
+                };
+                if !matches!(v, "sequential" | "mixed") {
+                    crate::cx_eprintln!("cxrs task run-all: invalid mode '{v}'");
+                    return 2;
+                }
+                run_mode = v.to_string();
+                i += 2;
+            }
+            other => {
+                crate::cx_eprintln!("cxrs task run-all: unknown flag '{other}'");
+                return 2;
+            }
+        }
+    }
 
     let tasks = match (deps.read_tasks)() {
         Ok(v) => v,
@@ -212,19 +218,54 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             return 1;
         }
     };
-    let pending: Vec<String> = tasks
-        .iter()
-        .filter(|t| t.status == status_filter)
-        .map(|t| t.id.clone())
-        .collect();
-    if pending.is_empty() {
-        println!("No pending tasks.");
+    let selected_count = tasks.iter().filter(|t| t.status == status_filter).count();
+    if selected_count == 0 {
+        println!("No tasks matched status '{status_filter}'.");
         return 0;
     }
 
+    let schedule: Vec<String> = if run_mode == "mixed" {
+        let plan = build_task_run_plan(&tasks, &status_filter);
+        if !plan.blocked.is_empty() {
+            crate::cx_eprintln!("cxrs task run-all: blocked tasks prevent full schedule:");
+            for b in &plan.blocked {
+                crate::cx_eprintln!(" - {}: {}", b.id, b.reason);
+            }
+        }
+        let ids: Vec<String> = plan
+            .waves
+            .iter()
+            .flat_map(|wave| wave.task_ids.iter().cloned())
+            .collect();
+        if ids.is_empty() {
+            println!("No runnable tasks for status '{status_filter}'.");
+            return if plan.blocked.is_empty() { 0 } else { 1 };
+        }
+        println!(
+            "run-all mode=mixed waves={} runnable={}",
+            plan.waves.len(),
+            ids.len()
+        );
+        for wave in &plan.waves {
+            println!(
+                "wave {} [{}] -> {}",
+                wave.index,
+                wave.mode,
+                wave.task_ids.join(",")
+            );
+        }
+        ids
+    } else {
+        tasks
+            .iter()
+            .filter(|t| t.status == status_filter)
+            .map(|t| t.id.clone())
+            .collect()
+    };
+
     let mut ok = 0usize;
     let mut failed = 0usize;
-    for id in pending {
+    for id in schedule {
         match (deps.run_task_by_id)(&(deps.make_task_runner)(), &id, None, None) {
             Ok((code, _)) => {
                 if code == 0 {
@@ -240,7 +281,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             }
         }
     }
-    println!("run-all summary: complete={ok}, failed={failed}");
+    println!("run-all summary: mode={run_mode}, complete={ok}, failed={failed}");
     if failed > 0 { 1 } else { 0 }
 }
 
