@@ -246,14 +246,19 @@ fn scheduler_diag_value(log_file_path: &str, window: usize) -> Value {
     })
 }
 
-fn parse_diag_args(args: &[String]) -> Result<(bool, usize), String> {
+fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
     let mut as_json = false;
     let mut window = 200usize;
+    let mut strict = false;
     let mut i = 0usize;
     while i < args.len() {
         match args[i].as_str() {
             "--json" => {
                 as_json = true;
+                i += 1;
+            }
+            "--strict" => {
+                strict = true;
                 i += 1;
             }
             "--window" => {
@@ -274,15 +279,72 @@ fn parse_diag_args(args: &[String]) -> Result<(bool, usize), String> {
             }
         }
     }
-    Ok((as_json, window))
+    Ok((as_json, window, strict))
+}
+
+fn scheduler_severity(scheduler: &Value) -> (&'static str, Vec<String>) {
+    let mut reasons: Vec<String> = Vec::new();
+    let queue_p95 = scheduler
+        .get("queue_ms_p95")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let queue_rows = scheduler
+        .get("queue_rows")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if queue_rows >= 3 && queue_p95 >= 2000 {
+        reasons.push(format!("queue_p95_high:{queue_p95}"));
+    }
+
+    let backend_distribution = scheduler
+        .get("backend_distribution")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let total_backend: u64 = backend_distribution
+        .values()
+        .filter_map(Value::as_u64)
+        .sum();
+    if total_backend >= 6 {
+        let max_backend = backend_distribution
+            .values()
+            .filter_map(Value::as_u64)
+            .max()
+            .unwrap_or(0);
+        if max_backend * 100 >= total_backend * 90 {
+            reasons.push("backend_skew_high".to_string());
+        }
+    }
+
+    let workers_seen = scheduler
+        .get("workers_seen")
+        .and_then(Value::as_array)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let window_runs = scheduler
+        .get("window_runs")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if window_runs >= 6 && workers_seen <= 1 {
+        reasons.push("worker_spread_low".to_string());
+    }
+
+    let severity = if reasons.len() >= 2 {
+        "critical"
+    } else if reasons.len() == 1 {
+        "warning"
+    } else {
+        "ok"
+    };
+    (severity, reasons)
 }
 
 pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
-    let (as_json, window) = match parse_diag_args(args) {
+    let (as_json, window, strict) = match parse_diag_args(args) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{e}");
-            crate::cx_eprintln!("Usage: diag [--json] [--window N]");
+            crate::cx_eprintln!("Usage: diag [--json] [--window N] [--strict]");
             return 2;
         }
     };
@@ -318,6 +380,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     } else {
         "no rust route and no bash fallback".to_string()
     };
+    let (severity, severity_reasons) = scheduler_severity(&scheduler);
 
     if as_json {
         let payload = serde_json::json!({
@@ -340,6 +403,8 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "schema_registry_files": schema_count(&schema_dir),
             "scheduler": scheduler,
             "scheduler_window_requested": window,
+            "severity": severity,
+            "severity_reasons": severity_reasons,
             "routing_trace": {
                 "sample": sample_cmd,
                 "route": route,
@@ -353,7 +418,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
                 return 1;
             }
         }
-        return 0;
+        return if strict && severity != "ok" { 1 } else { 0 };
     }
 
     print_diag_header(app_version, cfg);
@@ -374,12 +439,16 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     println!("schema_registry_files: {}", schema_count(&schema_dir));
     print_scheduler_diag(&log_file, window);
     println!("scheduler_window_requested: {window}");
+    println!("severity: {severity}");
+    if !severity_reasons.is_empty() {
+        println!("severity_reasons: {}", severity_reasons.join(","));
+    }
 
     println!(
         "routing_trace: sample='{}' route={} reason={}",
         sample_cmd, route, route_reason
     );
-    0
+    if strict && severity != "ok" { 1 } else { 0 }
 }
 
 pub fn last_appended_json_value(log_file: &Path, offset: u64) -> Option<Value> {

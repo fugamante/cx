@@ -18,7 +18,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "diag",
-        usage: "diag [--json] [--window N]",
+        usage: "diag [--json] [--window N] [--strict]",
         description: "Non-interactive diagnostic report",
     },
     CommandHelp {

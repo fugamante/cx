@@ -50,6 +50,9 @@ All notable changes to this project are documented in this file.
   - backend distribution (`scheduler_backend_distribution`).
   - added `diag --json` for machine-readable diagnostics output (including scheduler block).
   - added `diag --window N` to scope scheduler diagnostics to the most recent N runs.
+  - added `diag --json --strict` severity gating:
+    - emits `severity` + `severity_reasons`,
+    - returns non-zero when severity is not `ok` in strict mode.
 
 - Phase III orchestration substrate (first executable step):
   - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
