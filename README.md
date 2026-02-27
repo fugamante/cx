@@ -240,6 +240,16 @@ Next migration phase (active on feature branch, not yet merged to main behavior)
   - schema commands remain deterministic by default,
   - telemetry/log contracts remain append-only and validated.
 
+## Phase IV Preview (Multi-Model Tandem)
+
+Planned next migration focus:
+- broker-managed backend/model routing for tasks (`codex`, `ollama`, `auto`)
+- tandem execution convergence (`first_valid`, `majority`, `judge`, `score`)
+- backend pool scheduling for mixed-mode run-all with deterministic planning constraints
+
+Design and schedule:
+- `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`
+
 ## Validation
 
 ```bash

@@ -133,3 +133,32 @@ First-step implementation contract:
    - policy engine still blocks unsafe commands by default,
    - schema commands remain deterministic by default,
    - logs remain append-only JSONL with contract validation.
+
+## 12) Phase IV: Multi-Model Tandem Orchestration (planned)
+
+Objective:
+- route task execution across multiple backends/models with deterministic scheduling and explicit convergence.
+
+Planned first-step contract:
+1. Extend task metadata:
+   - `backend` (`codex|ollama|auto`)
+   - `model` (nullable)
+   - `profile` (`fast|balanced|quality|schema_strict`)
+2. Add broker command surface:
+   - `cx broker show`
+   - `cx broker set --policy latency|quality|cost|balanced`
+3. Extend run-all mixed mode:
+   - `cx task run-all --mode mixed --backend-pool codex,ollama --max-workers <n>`
+4. Add tandem convergence modes:
+   - `first_valid`, `majority`, `judge`, `score`
+5. Extend telemetry:
+   - backend/model route decision fields
+   - convergence metadata fields
+   - queue timing metrics
+6. Preserve invariants:
+   - schema enforcement remains deterministic by default,
+   - policy gates remain mandatory for command execution,
+   - quarantine/replay contract remains intact.
+
+Design reference:
+- `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`

@@ -18,6 +18,9 @@
 - Broaden OS validation matrix (Linux-focused CI pass).
 - Add bounded worker pool for `parallel` tasks with dependency + resource-lock enforcement.
 - Add run-level concurrency telemetry (`worker_id`, queue/start/finish timestamps, attempt).
+- Phase IV kickoff: multi-model tandem orchestration with broker routing policies.
+- Add task-level backend/model/profile assignment (`codex|ollama|auto`).
+- Add convergence modes for tandem runs (`first_valid`, `majority`, `judge`, `score`).
 
 ## Later (2+ months)
 
@@ -32,3 +35,4 @@
 - Structured commands stay schema-enforced.
 - Logging contract changes require tests + changelog.
 - Mixed-mode orchestration must keep policy boundaries and deterministic schema behavior.
+- Multi-model routing must preserve schema determinism, quarantine replayability, and stable log contracts.
