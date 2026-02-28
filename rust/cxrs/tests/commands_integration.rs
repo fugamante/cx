@@ -2449,6 +2449,56 @@ fn scheduler_json_strict_reports_severity() {
 }
 
 #[test]
+fn scheduler_json_strict_flags_critical_halts_detected() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"schc1","timestamp":"2026-01-01T00:00:00Z","command":"cxtask_runall","tool":"cxtask_runall",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":120,"schema_enforced":false,"schema_valid":true,
+            "run_all_mode":"mixed","halt_on_critical":true,
+            "run_all_scheduled":3,"run_all_complete":1,"run_all_failed":1,"run_all_critical_errors":1
+        }),
+        serde_json::json!({
+            "execution_id":"schc2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,"queue_ms":100,"worker_id":"w1"
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["scheduler", "--json", "--strict", "--window", "5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected strict scheduler failure on critical halt; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("scheduler json");
+    let reasons = v
+        .get("severity_reasons")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|x| x.as_str().map(ToOwned::to_owned))
+        .collect::<Vec<String>>()
+        .join(",");
+    assert!(
+        reasons.contains("critical_halts_detected"),
+        "expected critical_halts_detected reason, got: {reasons}"
+    );
+}
+
+#[test]
 fn broker_benchmark_json_reports_backend_stats() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
