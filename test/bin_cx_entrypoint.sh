@@ -10,9 +10,18 @@ fail() {
 }
 
 out="$(./bin/cx cxversion)" || fail "bin/cx cxversion failed"
-printf '%s\n' "$out" | rg -q '^version: ' || fail "cxversion missing version field"
-printf '%s\n' "$out" | rg -q '^execution_path: rust:bin/cx$' || fail "expected rust execution path"
-printf '%s\n' "$out" | rg -q '^log_file: ' || fail "cxversion missing log_file"
+contains_line() {
+  local pattern="$1"
+  if command -v rg >/dev/null 2>&1; then
+    printf '%s\n' "$out" | rg -q "$pattern"
+  else
+    printf '%s\n' "$out" | grep -Eq "$pattern"
+  fi
+}
+
+contains_line '^version: ' || fail "cxversion missing version field"
+contains_line '^execution_path: rust:bin/cx$' || fail "expected rust execution path"
+contains_line '^log_file: ' || fail "cxversion missing log_file"
 
 # Rust should handle known compat command.
 ./bin/cx cxversion >/dev/null || fail "rust routing for cxversion failed"

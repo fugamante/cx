@@ -51,7 +51,7 @@ jobs:
           cargo fmt --check
           cargo check
           cargo clippy --all-targets -- -D warnings
-          cargo test --tests
+          cargo test --tests -- --test-threads=1
 
       - name: Reliability Suite
         run: |
