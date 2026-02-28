@@ -19,7 +19,7 @@ impl LlmRunError {
         }
     }
 
-    fn message(message: String) -> Self {
+    pub(crate) fn message(message: String) -> Self {
         Self {
             message,
             timeout: None,
@@ -123,6 +123,101 @@ pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, LlmRunError
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+fn run_http_request(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sS",
+        "-f",
+        "-X",
+        "POST",
+        url,
+        "-H",
+        "Content-Type: text/plain; charset=utf-8",
+        "--data-binary",
+        "@-",
+    ]);
+    if let Some(t) = token.filter(|v| !v.trim().is_empty()) {
+        cmd.args(["-H", &format!("Authorization: Bearer {t}")]);
+    }
+    let out = run_command_with_stdin_output_with_timeout_meta(cmd, prompt, "http provider curl")
+        .map_err(LlmRunError::from_process)?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let kind = classify_http_curl_error(&stderr);
+        return Err(LlmRunError::message(if stderr.is_empty() {
+            format!("http provider [{kind}] exited with status {}", out.status)
+        } else {
+            format!(
+                "http provider [{kind}] exited with status {}: {}",
+                out.status, stderr
+            )
+        }));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn run_http_raw(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    run_http_request(prompt, url, token)
+}
+
+pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    let body = run_http_request(prompt, url, token)?;
+    Ok(parse_http_provider_body(&body))
+}
+
+fn classify_http_curl_error(stderr: &str) -> &'static str {
+    let s = stderr.to_ascii_lowercase();
+    if s.contains("could not resolve host")
+        || s.contains("failed to connect")
+        || s.contains("connection refused")
+        || s.contains("connection timed out")
+    {
+        return "transport_unreachable";
+    }
+    if s.contains("requested url returned error") || s.contains("http/") {
+        return "http_status";
+    }
+    if s.trim().is_empty() {
+        return "transport_error";
+    }
+    "provider_error"
+}
+
+fn parse_http_provider_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+        return body.to_string();
+    };
+    if let Some(s) = v.get("text").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(s) = v.get("response").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(s) = v.get("output").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(arr) = v.get("content").and_then(Value::as_array) {
+        let mut joined = Vec::new();
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                joined.push(s.to_string());
+                continue;
+            }
+            if let Some(s) = item.get("text").and_then(Value::as_str) {
+                joined.push(s.to_string());
+            }
+        }
+        if !joined.is_empty() {
+            return joined.join("\n");
+        }
+    }
+    body.to_string()
+}
+
 pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
     let wrapped = json!({
       "type":"item.completed",
@@ -130,4 +225,49 @@ pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
     });
     serde_json::to_string(&wrapped)
         .map_err(|e| format!("failed to serialize ollama JSONL wrapper: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_http_curl_error, parse_http_provider_body};
+
+    #[test]
+    fn http_body_parser_prefers_text_field() {
+        let parsed = parse_http_provider_body("{\"text\":\"hello\"}");
+        assert_eq!(parsed, "hello");
+    }
+
+    #[test]
+    fn http_body_parser_supports_content_array_objects() {
+        let parsed =
+            parse_http_provider_body("{\"content\":[{\"text\":\"line1\"},{\"text\":\"line2\"}]}");
+        assert_eq!(parsed, "line1\nline2");
+    }
+
+    #[test]
+    fn http_body_parser_falls_back_to_raw_body() {
+        let raw = "plain response";
+        let parsed = parse_http_provider_body(raw);
+        assert_eq!(parsed, raw);
+    }
+
+    #[test]
+    fn http_body_parser_unknown_json_envelope_falls_back_to_raw() {
+        let raw = r#"{"unexpected":"shape"}"#;
+        let parsed = parse_http_provider_body(raw);
+        assert_eq!(parsed, raw);
+    }
+
+    #[test]
+    fn http_error_classifier_categorizes_curl_patterns() {
+        assert_eq!(
+            classify_http_curl_error("curl: (7) Failed to connect to 127.0.0.1"),
+            "transport_unreachable"
+        );
+        assert_eq!(
+            classify_http_curl_error("curl: (22) The requested URL returned error: 503"),
+            "http_status"
+        );
+        assert_eq!(classify_http_curl_error(""), "transport_error");
+    }
 }

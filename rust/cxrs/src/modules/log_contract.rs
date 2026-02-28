@@ -1,8 +1,11 @@
-pub const REQUIRED_STRICT_FIELDS: [&str; 30] = [
+pub const REQUIRED_STRICT_FIELDS: [&str; 33] = [
     "execution_id",
     "timestamp",
     "command",
     "backend_used",
+    "adapter_type",
+    "provider_transport",
+    "provider_status",
     "capture_provider",
     "execution_mode",
     "duration_ms",

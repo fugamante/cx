@@ -72,7 +72,7 @@ fn parse_ci_args(app_name: &str, args: &[String]) -> Result<CiArgs, i32> {
     }
     Ok(CiArgs {
         strict: args.iter().any(|a| a == "--strict"),
-        legacy_ok: args.iter().any(|a| a == "--legacy-ok"),
+        legacy_ok: args.iter().any(|a| a == "--legacy-ok") || !args.iter().any(|a| a == "--strict"),
         json_out: args.iter().any(|a| a == "--json"),
     })
 }

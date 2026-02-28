@@ -5,6 +5,51 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
+  - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
+  - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
+  - execution core now resolves a provider adapter and routes plain/JSONL calls through the adapter contract (no behavior change intended).
+  - added adapter-focused unit coverage for backend normalization and Ollama JSONL wrapping.
+  - added centralized adapter invocation helpers for current backend selection.
+  - surfaced `provider_adapter` in `cxversion` and `cxcore` runtime introspection output.
+  - telemetry contract expanded with adapter transport fields:
+    - `adapter_type`
+    - `provider_transport`
+    - `provider_status`
+  - strict log contract, migration, and integration assertions updated for the new fields.
+  - added adapter telemetry parity smoke tests covering codex and ollama run paths.
+  - added mock-adapter integration tests for schema success and schema-failure quarantine paths without provider binaries.
+  - provider capability surface added (`jsonl_native`, `schema_strict`, `transport`) and exposed in `cxversion`/`cxcore`.
+  - added `CX_PROVIDER_ADAPTER=http-stub` fail-fast path for future HTTP transport work:
+    - adapter resolves with `provider_transport=http`.
+    - run logs now tag `provider_status=stub_unimplemented` for this path.
+    - added integration coverage for failure behavior + telemetry tagging.
+  - added `CX_PROVIDER_ADAPTER=http-curl` experimental scaffold:
+    - requires `CX_HTTP_PROVIDER_URL` (optional bearer token: `CX_HTTP_PROVIDER_TOKEN`).
+    - supports `CX_HTTP_PROVIDER_FORMAT=text|json|jsonl` (default `text`).
+    - sends prompt payload through `curl` over HTTP transport.
+    - accepts provider responses as plain text or JSON envelopes (`text`, `response`, `output`, `content[]`).
+    - telemetry tags this path as `provider_transport=http`, `provider_status=experimental`.
+    - added integration coverage for URL-missing failure path + telemetry tagging, successful JSON response parsing, and live local HTTP fixture round-trip (request method/path/auth/body assertions).
+    - curl HTTP failures are now deterministically classified as:
+      - `transport_unreachable`
+      - `http_status`
+      - `transport_error`
+      - `provider_error`
+    - added integration coverage for non-200 and transport-failure classification, malformed-envelope raw fallback, JSON schema-command flow, JSONL passthrough, and invalid-JSONL rejection.
+    - run logs now include HTTP-mode telemetry fields:
+      - `http_provider_format`
+      - `http_parser_mode`
+  - `telemetry --json` / `logs stats --json` now include grouped `http_mode_stats` derived from:
+      - `http_provider_format`
+      - `http_parser_mode`
+      with per-mode run counts and health rates.
+  - added telemetry JSON fixture contract coverage (`telemetry_json_contract.json`) to guard `http_mode_stats` and retry/drift sections.
+  - expanded parity catalog coverage to include structured command surfaces:
+    - `cxdiffsum`
+    - `cxfix_run`
+  - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
+  - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

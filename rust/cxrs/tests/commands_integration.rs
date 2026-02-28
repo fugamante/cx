@@ -3,8 +3,12 @@ mod common;
 use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
@@ -14,6 +18,100 @@ fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
         }
     }
     None
+}
+
+#[derive(Clone, Debug, Default)]
+struct FixtureHttpRequest {
+    method: String,
+    path: String,
+    authorization: Option<String>,
+    body: String,
+}
+
+fn run_fixture_http_server_once(
+    response_json: &str,
+) -> (
+    String,
+    Arc<Mutex<Option<FixtureHttpRequest>>>,
+    JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture http server");
+    let addr = listener.local_addr().expect("fixture local addr");
+    let captured = Arc::new(Mutex::new(None));
+    let captured_bg = Arc::clone(&captured);
+    let response = response_json.to_string();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("fixture accept");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("fixture set read timeout");
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut req = Vec::new();
+        loop {
+            let n = stream.read(&mut buf).expect("fixture read");
+            if n == 0 {
+                break;
+            }
+            req.extend_from_slice(&buf[..n]);
+            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let headers_end = req
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| i + 4)
+            .expect("fixture request headers");
+        let head = String::from_utf8_lossy(&req[..headers_end]).to_string();
+        let mut lines = head.lines();
+        let req_line = lines.next().unwrap_or_default();
+        let mut req_parts = req_line.split_whitespace();
+        let method = req_parts.next().unwrap_or_default().to_string();
+        let path = req_parts.next().unwrap_or_default().to_string();
+        let mut content_len = 0usize;
+        let mut auth = None;
+        for line in lines {
+            let lower = line.to_ascii_lowercase();
+            if lower.starts_with("content-length:")
+                && let Some(v) = line.split(':').nth(1)
+            {
+                content_len = v.trim().parse::<usize>().unwrap_or(0);
+            }
+            if lower.starts_with("authorization:")
+                && let Some(v) = line.split(':').nth(1)
+            {
+                auth = Some(v.trim().to_string());
+            }
+        }
+        let mut body = req[headers_end..].to_vec();
+        while body.len() < content_len {
+            let n = stream.read(&mut buf).expect("fixture read body");
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&buf[..n]);
+        }
+        let body = String::from_utf8_lossy(&body).to_string();
+        if let Ok(mut slot) = captured_bg.lock() {
+            *slot = Some(FixtureHttpRequest {
+                method,
+                path,
+                authorization: auth,
+                body,
+            });
+        }
+        let response_bytes = response.as_bytes();
+        let http = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_bytes.len(),
+            response
+        );
+        stream
+            .write_all(http.as_bytes())
+            .expect("fixture write response");
+        let _ = stream.flush();
+    });
+    (format!("http://{}/infer", addr), captured, handle)
 }
 
 fn load_fixture_json(name: &str) -> Value {
@@ -1005,6 +1103,74 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     assert!(retry.get("rows_with_retry_metadata").is_some());
     assert!(retry.get("rows_after_retry_success_rate").is_some());
     assert!(retry.get("attempt_histogram").is_some());
+    let http_modes = v
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats");
+    assert!(
+        http_modes.is_empty()
+            || http_modes.iter().all(|m| {
+                m.get("format").is_some()
+                    && m.get("parser_mode").is_some()
+                    && m.get("runs").and_then(Value::as_u64).is_some()
+                    && m.get("success_rate").is_some()
+            }),
+        "invalid http_mode_stats shape: {v}"
+    );
+}
+
+#[test]
+fn telemetry_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"tf1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"tf2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":12,"schema_enforced":false,"schema_valid":true
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["telemetry", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("telemetry json");
+    let fixture = load_fixture_json("telemetry_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "telemetry");
+    let drift_keys = fixture_keys(&fixture, "contract_drift_keys");
+    assert_has_keys(
+        payload.get("contract_drift").expect("contract_drift"),
+        &drift_keys,
+        "telemetry.contract_drift",
+    );
+    let retry_keys = fixture_keys(&fixture, "retry_keys");
+    assert_has_keys(
+        payload.get("retry_telemetry").expect("retry_telemetry"),
+        &retry_keys,
+        "telemetry.retry_telemetry",
+    );
+    let item_keys = fixture_keys(&fixture, "http_mode_item_keys");
+    let modes = payload
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats array");
+    for item in modes {
+        assert_has_keys(item, &item_keys, "telemetry.http_mode_stats[*]");
+    }
 }
 
 #[test]
@@ -1041,7 +1207,20 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
     assert!(sev_out.contains("severity:"), "{sev_out}");
     assert!(!sev_out.contains("field_population"), "{sev_out}");
 
-    let validate = repo.run(&["logs", "validate"]);
+    let validate_default = repo.run(&["logs", "validate"]);
+    assert!(
+        validate_default.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&validate_default),
+        stderr_str(&validate_default)
+    );
+    let validate_default_out = stdout_str(&validate_default);
+    assert!(
+        validate_default_out.contains("status: ok_with_warnings"),
+        "{validate_default_out}"
+    );
+
+    let validate = repo.run(&["logs", "validate", "--strict"]);
     assert_eq!(
         validate.status.code(),
         Some(1),
@@ -1073,7 +1252,71 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
         issue_count, strict_violations,
         "logs validate and telemetry strict violation counts diverged"
     );
-    assert_eq!(required, 30, "unexpected strict contract field count");
+    assert_eq!(required, 33, "unexpected strict contract field count");
+}
+
+#[test]
+fn telemetry_json_groups_http_mode_stats() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"h1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"h2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":12,"schema_enforced":false,"schema_valid":false,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"h3","timestamp":"2026-01-01T00:00:02Z","command":"cxj","tool":"cxj",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":14,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"jsonl","http_parser_mode":"jsonl_passthrough"
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["telemetry", "10", "--json"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("telemetry json");
+    let modes = v
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats array");
+    assert!(!modes.is_empty(), "expected grouped http_mode_stats: {v}");
+
+    let text_mode = modes
+        .iter()
+        .find(|m| {
+            m.get("format").and_then(Value::as_str) == Some("text")
+                && m.get("parser_mode").and_then(Value::as_str) == Some("envelope")
+        })
+        .expect("text/envelope mode");
+    assert_eq!(text_mode.get("runs").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        text_mode.get("schema_invalid").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        text_mode.get("healthy_runs").and_then(Value::as_u64),
+        Some(1)
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -1104,6 +1347,633 @@ fn telemetry_json_output_is_stable_on_macos() {
         "unexpected telemetry window: {v1}"
     );
     assert_eq!(v1, v2, "telemetry output drifted on repeated invocation");
+}
+
+#[test]
+fn adapter_telemetry_fields_present_for_codex_runs() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock_codex(
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":1,"output_tokens":2}}'
+"#,
+    );
+    let out = repo.run(&["cxo", "echo", "adapter-codex"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .expect("cxo row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("codex-cli"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("process"),
+        "row={row}"
+    );
+    assert!(
+        row.get("provider_status").is_some()
+            && row.get("provider_status").is_some_and(Value::is_null),
+        "expected provider_status=null, row={row}"
+    );
+    assert!(
+        row.get("http_provider_format").is_some()
+            && row.get("http_provider_format").is_some_and(Value::is_null),
+        "expected http_provider_format=null, row={row}"
+    );
+    assert!(
+        row.get("http_parser_mode").is_some()
+            && row.get("http_parser_mode").is_some_and(Value::is_null),
+        "expected http_parser_mode=null, row={row}"
+    );
+}
+
+#[test]
+fn adapter_telemetry_fields_present_for_ollama_runs() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "list" ]; then
+  printf '%s\n' "NAME ID SIZE MODIFIED"
+  printf '%s\n' "llama3.1 abc 4GB now"
+  exit 0
+fi
+cat >/dev/null
+printf '%s\n' "ok"
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "adapter-ollama"],
+        &[
+            ("CX_LLM_BACKEND", "ollama"),
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .expect("cxo row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("ollama-cli"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("process"),
+        "row={row}"
+    );
+    assert!(
+        row.get("provider_status").is_some()
+            && row.get("provider_status").is_some_and(Value::is_null),
+        "expected provider_status=null, row={row}"
+    );
+    assert!(
+        row.get("http_provider_format").is_some()
+            && row.get("http_provider_format").is_some_and(Value::is_null),
+        "expected http_provider_format=null, row={row}"
+    );
+    assert!(
+        row.get("http_parser_mode").is_some()
+            && row.get("http_parser_mode").is_some_and(Value::is_null),
+        "expected http_parser_mode=null, row={row}"
+    );
+}
+
+#[test]
+fn mock_adapter_next_schema_success_without_provider_binaries() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["next", "echo", "mock-adapter"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            (
+                "CX_MOCK_PLAIN_RESPONSE",
+                "{\"commands\":[\"echo ok-from-mock\"]}",
+            ),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(
+        stdout.contains("echo ok-from-mock"),
+        "unexpected stdout: {stdout}"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxrs_next"))
+        .expect("cxrs_next row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("mock"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("mock"),
+        "row={row}"
+    );
+}
+
+#[test]
+fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["next", "echo", "mock-fail"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            ("CX_MOCK_PLAIN_RESPONSE", "not-json"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected schema failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let qdir = repo.quarantine_dir();
+    let entries = fs::read_dir(&qdir)
+        .expect("read quarantine dir")
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    assert!(
+        !entries.is_empty(),
+        "expected quarantine entries in {}",
+        qdir.display()
+    );
+    let schema_fail_log = repo.schema_fail_log();
+    let last_fail = common::parse_jsonl(&schema_fail_log)
+        .into_iter()
+        .last()
+        .expect("schema failure log row");
+    let qid = last_fail
+        .get("quarantine_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(!qid.is_empty(), "schema failure log missing quarantine_id");
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("schema_valid").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("mock")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("mock")
+    );
+}
+
+#[test]
+fn schema_command_parity_next_between_codex_cli_and_mock_adapter() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock_codex(
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"commands\":[\"echo parity-next\"]}"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":14,"cached_input_tokens":2,"output_tokens":4}}'
+"#,
+    );
+
+    let codex_out = repo.run(&["next", "echo", "parity-next"]);
+    assert!(
+        codex_out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&codex_out),
+        stderr_str(&codex_out)
+    );
+    let codex_stdout = stdout_str(&codex_out);
+    let codex_lines: Vec<String> = codex_stdout
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(codex_lines, vec!["echo parity-next".to_string()]);
+
+    let mock_out = repo.run_with_env(
+        &["next", "echo", "parity-next"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            (
+                "CX_MOCK_PLAIN_RESPONSE",
+                "{\"commands\":[\"echo parity-next\"]}",
+            ),
+        ],
+    );
+    assert!(
+        mock_out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&mock_out),
+        stderr_str(&mock_out)
+    );
+    let mock_stdout = stdout_str(&mock_out);
+    let mock_lines: Vec<String> = mock_stdout
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(mock_lines, vec!["echo parity-next".to_string()]);
+    assert_eq!(
+        codex_lines, mock_lines,
+        "next output diverged between codex-cli and mock adapter"
+    );
+}
+
+#[test]
+fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-stub"],
+        &[("CX_PROVIDER_ADAPTER", "http-stub")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http-stub adapter selected"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-stub")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        run_last.get("provider_status").and_then(Value::as_str),
+        Some("stub_unimplemented")
+    );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
+    );
+}
+
+#[test]
+fn http_curl_adapter_requires_url_and_logs_experimental_status() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-curl"],
+        &[("CX_PROVIDER_ADAPTER", "http-curl")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("CX_HTTP_PROVIDER_URL"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-curl")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        run_last.get("provider_status").and_then(Value::as_str),
+        Some("experimental")
+    );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
+    );
+}
+
+#[test]
+fn http_curl_adapter_parses_json_text_payload_from_curl() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"text":"http adapter ok"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-curl"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), "http adapter ok");
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-curl")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
+    );
+}
+
+#[test]
+fn http_curl_adapter_hits_local_server_and_sends_auth_and_prompt() {
+    if std::process::Command::new("curl")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let repo = TempRepo::new("cxrs-it");
+    let (url, captured, handle) = run_fixture_http_server_once(r#"{"text":"fixture-http-ok"}"#);
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-live"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", &url),
+            ("CX_HTTP_PROVIDER_TOKEN", "token-123"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), "fixture-http-ok");
+    handle.join().expect("fixture join");
+
+    let req = captured
+        .lock()
+        .expect("fixture lock")
+        .clone()
+        .expect("captured request");
+    assert_eq!(req.method, "POST");
+    assert_eq!(req.path, "/infer");
+    assert_eq!(req.authorization.as_deref(), Some("Bearer token-123"));
+    assert!(
+        req.body.contains("http-live"),
+        "expected prompt/body to include command output context, body={}",
+        req.body
+    );
+}
+
+#[test]
+fn http_curl_adapter_non_200_is_classified_as_http_status() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo "curl: (22) The requested URL returned error: 503" >&2
+exit 22
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-503"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http provider [http_status]"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn http_curl_adapter_transport_failure_is_classified_as_unreachable() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo "curl: (7) Failed to connect to 127.0.0.1 port 9999: Connection refused" >&2
+exit 7
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-down"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http provider [transport_unreachable]"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn http_curl_adapter_unknown_json_envelope_falls_back_to_raw_text() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"unexpected":"shape"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-raw-fallback"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), r#"{"unexpected":"shape"}"#);
+}
+
+#[test]
+fn http_curl_adapter_json_format_supports_schema_commands() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"commands":["echo via-http-json"]}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["next", "echo", "http-json-schema"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "json"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), "echo via-http-json");
+}
+
+#[test]
+fn http_curl_adapter_jsonl_format_passthrough_for_cxj() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"jsonl-ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":1,"output_tokens":1}}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxj", "echo", "http-jsonl"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "jsonl"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains(r#""type":"item.completed""#), "{stdout}");
+    assert!(stdout.contains(r#""type":"turn.completed""#), "{stdout}");
+}
+
+#[test]
+fn http_curl_adapter_jsonl_format_rejects_non_jsonl_payload() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"unexpected":"shape"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxj", "echo", "http-jsonl-bad"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "jsonl"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("jsonl payload missing item.completed"),
+        "stderr={}",
+        stderr_str(&out)
+    );
 }
 
 #[test]

@@ -76,7 +76,8 @@ fn validate_outcome_status(outcome: &LogValidateOutcome) -> i32 {
 }
 
 fn handle_validate(app_name: &str, args: &[String]) -> i32 {
-    let legacy_ok = args.iter().any(|a| a == "--legacy-ok");
+    let strict = args.iter().any(|a| a == "--strict");
+    let legacy_ok = args.iter().any(|a| a == "--legacy-ok") || !strict;
     let Some(log_file) = resolve_log_file() else {
         crate::cx_eprintln!("{app_name} logs validate: unable to resolve log file");
         return 1;
