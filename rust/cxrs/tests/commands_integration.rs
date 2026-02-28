@@ -628,6 +628,82 @@ fn mixed_run_all_errors_when_pool_has_no_available_backends() {
 }
 
 #[test]
+fn run_all_retries_timeout_then_succeeds_and_logs_attempts() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+attempt="${CX_TASK_RETRY_ATTEMPT:-1}"
+if [ "$attempt" = "1" ]; then
+  sleep 2
+  exit 0
+fi
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+
+    let add = repo.run(&[
+        "task",
+        "add",
+        "cxo echo retry-timeout-once",
+        "--role",
+        "implementer",
+        "--backend",
+        "codex",
+        "--max-retries",
+        "1",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    let task_id = stdout_str(&add).trim().to_string();
+
+    let out = repo.run_with_env(
+        &["task", "run-all", "--status", "pending"],
+        &[("CX_TIMEOUT_LLM_SECS", "1")],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let summary = stdout_str(&out);
+    assert!(summary.contains("complete=1"), "{summary}");
+    assert!(summary.contains("failed=0"), "{summary}");
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    assert!(
+        rows.len() >= 2,
+        "expected at least two cxo attempts for task {task_id}, got {} rows: {rows:?}",
+        rows.len(),
+    );
+
+    let attempts: std::collections::BTreeSet<u64> = rows
+        .iter()
+        .filter_map(|v| v.get("retry_attempt").and_then(Value::as_u64))
+        .collect();
+    assert!(
+        attempts.contains(&1),
+        "missing retry attempt 1 in rows: {rows:?}"
+    );
+    assert!(
+        attempts.contains(&2),
+        "missing retry attempt 2 in rows: {rows:?}"
+    );
+
+    let first_timeout = rows.iter().any(|v| {
+        v.get("retry_attempt").and_then(Value::as_u64) == Some(1)
+            && v.get("timed_out").and_then(Value::as_bool) == Some(true)
+    });
+    assert!(first_timeout, "expected timed_out=true on attempt 1");
+}
+
+#[test]
 fn judge_convergence_uses_model_path_and_logs_decision_source() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(

@@ -1,9 +1,14 @@
 use serde_json::Value;
 use std::env;
 use std::fmt;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::logs::file_len;
+use crate::paths::resolve_log_file;
 use crate::runlog::{RunLogInput, log_codex_run};
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskRecord, TaskSpec};
 
@@ -170,6 +175,44 @@ fn run_objective_subprocess(
     Ok(status.code().unwrap_or(1))
 }
 
+fn capture_log_cursor() -> Option<(PathBuf, u64)> {
+    let log_file = resolve_log_file()?;
+    Some((log_file.clone(), file_len(&log_file)))
+}
+
+fn recover_execution_id_from_log(log_file: &Path, offset: u64) -> Option<String> {
+    let file = File::open(log_file).ok()?;
+    let mut reader = BufReader::new(file);
+    if offset > 0 && reader.seek(SeekFrom::Start(offset)).is_err() {
+        return None;
+    }
+    let mut line = String::new();
+    let mut latest: Option<String> = None;
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line).ok()?;
+        if n == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        if let Some(exec_id) = v
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            latest = Some(exec_id.to_string());
+        }
+    }
+    latest
+}
+
 fn dispatch_task_command(
     runner: &TaskRunner,
     words: &[String],
@@ -228,8 +271,17 @@ fn run_task_objective(
     mode_override: Option<&str>,
     backend_override: Option<&str>,
 ) -> Result<(i32, Option<String>), String> {
+    let log_cursor = capture_log_cursor();
     let words = parse_words(&task.objective);
-    dispatch_task_command(runner, &words, task, mode_override, backend_override)
+    let (status, execution_id) =
+        dispatch_task_command(runner, &words, task, mode_override, backend_override)?;
+    if execution_id.is_some() {
+        return Ok((status, execution_id));
+    }
+    let recovered = log_cursor
+        .as_ref()
+        .and_then(|(p, offset)| recover_execution_id_from_log(p, *offset));
+    Ok((status, recovered))
 }
 
 fn normalize_converge_mode(raw: &str) -> String {
@@ -577,7 +629,7 @@ pub fn run_task_by_id(
         .iter()
         .position(|t| t.id == id)
         .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task not found: {id}")))?;
-    if matches!(tasks[idx].status.as_str(), "complete" | "failed") {
+    if tasks[idx].status == "complete" {
         return Ok((0, None));
     }
     if !managed_by_parent {

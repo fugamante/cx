@@ -14,6 +14,11 @@ All notable changes to this project are documented in this file.
     - `retry_reason`
     - `retry_backoff_ms`
   - strict log contract and migration normalize these retry fields across telemetry and validation paths.
+  - `task run` execution-id surfacing hardened:
+    - recover execution id from newly appended run-log rows when objective dispatch path does not return one directly.
+    - retries no longer short-circuit on interim `failed` status; only `complete` is terminal for `run_task_by_id`.
+  - integration coverage added for retry success on timeout:
+    - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
