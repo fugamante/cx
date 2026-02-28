@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V retry/backoff semantics for `task run-all`:
+  - task-level retries now honor `max_retries` for both sequential and mixed worker execution paths.
+  - retryable failures are retried with deterministic bounded backoff (250ms → 2000ms cap).
+  - per-attempt telemetry is now recorded in run logs:
+    - `retry_attempt`
+    - `retry_max`
+    - `retry_reason`
+    - `retry_backoff_ms`
+  - strict log contract and migration normalize these retry fields across telemetry and validation paths.
 - Phase IV broker + mixed routing controls:
   - `cx broker set --policy latency|quality|cost|balanced` persisted to `.codex/state.json`.
   - `cx task run-all --mode mixed` now accepts:

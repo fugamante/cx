@@ -1,9 +1,10 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::process::Command;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::cmdctx::CmdCtx;
 use crate::config::app_config;
@@ -206,6 +207,12 @@ enum FailureClass {
     Blocked,
 }
 
+#[derive(Debug, Clone)]
+struct FailureInfo {
+    class: FailureClass,
+    reason: String,
+}
+
 #[derive(Debug, Clone, Default)]
 struct RunAllSummary {
     ok: usize,
@@ -230,15 +237,24 @@ impl RunAllSummary {
     }
 }
 
-fn classify_failure_for_execution(execution_id: Option<&str>) -> FailureClass {
+fn classify_failure_for_execution(execution_id: Option<&str>) -> FailureInfo {
     let Some(exec_id) = execution_id else {
-        return FailureClass::NonRetryable;
+        return FailureInfo {
+            class: FailureClass::NonRetryable,
+            reason: "missing_execution_id".to_string(),
+        };
     };
     let Some(log_file) = resolve_log_file() else {
-        return FailureClass::NonRetryable;
+        return FailureInfo {
+            class: FailureClass::NonRetryable,
+            reason: "missing_log_file".to_string(),
+        };
     };
     let Ok(content) = fs::read_to_string(log_file) else {
-        return FailureClass::NonRetryable;
+        return FailureInfo {
+            class: FailureClass::NonRetryable,
+            reason: "unreadable_log_file".to_string(),
+        };
     };
     for line in content.lines().rev() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
@@ -248,14 +264,31 @@ fn classify_failure_for_execution(execution_id: Option<&str>) -> FailureClass {
             continue;
         }
         if v.get("policy_blocked").and_then(Value::as_bool) == Some(true) {
-            return FailureClass::Blocked;
+            let reason = v
+                .get("policy_reason")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| "policy_blocked".to_string());
+            return FailureInfo {
+                class: FailureClass::Blocked,
+                reason,
+            };
         }
         if v.get("timed_out").and_then(Value::as_bool) == Some(true) {
-            return FailureClass::Retryable;
+            return FailureInfo {
+                class: FailureClass::Retryable,
+                reason: "timed_out".to_string(),
+            };
         }
-        return FailureClass::NonRetryable;
+        return FailureInfo {
+            class: FailureClass::NonRetryable,
+            reason: "non_retryable_failure".to_string(),
+        };
     }
-    FailureClass::NonRetryable
+    FailureInfo {
+        class: FailureClass::NonRetryable,
+        reason: "execution_not_found_in_log".to_string(),
+    }
 }
 
 fn parse_execution_id(stdout: &str) -> Option<String> {
@@ -268,27 +301,112 @@ fn parse_execution_id(stdout: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn retry_backoff_ms(retry_index: u32) -> u64 {
+    let power = retry_index.min(4);
+    250u64.saturating_mul(1u64 << power).min(2000)
+}
+
+fn with_retry_env<F, T>(
+    attempt: u32,
+    retry_max: u32,
+    retry_reason: Option<&str>,
+    retry_backoff_ms: Option<u64>,
+    f: F,
+) -> T
+where
+    F: FnOnce() -> T,
+{
+    let prev_attempt = env::var("CX_TASK_RETRY_ATTEMPT").ok();
+    let prev_max = env::var("CX_TASK_RETRY_MAX").ok();
+    let prev_reason = env::var("CX_TASK_RETRY_REASON").ok();
+    let prev_backoff = env::var("CX_TASK_RETRY_BACKOFF_MS").ok();
+    unsafe {
+        env::set_var("CX_TASK_RETRY_ATTEMPT", attempt.to_string());
+        env::set_var("CX_TASK_RETRY_MAX", retry_max.to_string());
+    }
+    match retry_reason {
+        Some(v) if !v.trim().is_empty() => unsafe { env::set_var("CX_TASK_RETRY_REASON", v) },
+        _ => unsafe { env::remove_var("CX_TASK_RETRY_REASON") },
+    }
+    match retry_backoff_ms {
+        Some(v) => unsafe { env::set_var("CX_TASK_RETRY_BACKOFF_MS", v.to_string()) },
+        None => unsafe { env::remove_var("CX_TASK_RETRY_BACKOFF_MS") },
+    }
+    let out = f();
+    match prev_attempt {
+        Some(v) => unsafe { env::set_var("CX_TASK_RETRY_ATTEMPT", v) },
+        None => unsafe { env::remove_var("CX_TASK_RETRY_ATTEMPT") },
+    }
+    match prev_max {
+        Some(v) => unsafe { env::set_var("CX_TASK_RETRY_MAX", v) },
+        None => unsafe { env::remove_var("CX_TASK_RETRY_MAX") },
+    }
+    match prev_reason {
+        Some(v) => unsafe { env::set_var("CX_TASK_RETRY_REASON", v) },
+        None => unsafe { env::remove_var("CX_TASK_RETRY_REASON") },
+    }
+    match prev_backoff {
+        Some(v) => unsafe { env::set_var("CX_TASK_RETRY_BACKOFF_MS", v) },
+        None => unsafe { env::remove_var("CX_TASK_RETRY_BACKOFF_MS") },
+    }
+    out
+}
+
+fn should_retry(failure: FailureClass, attempt: u32, retry_max: u32) -> bool {
+    matches!(failure, FailureClass::Retryable) && attempt <= retry_max
+}
+
 fn run_task_managed_subprocess(
     id: String,
     backend: String,
     queue_ms: u64,
     worker_id: String,
     task_parent_id: Option<String>,
+    max_retries: u32,
 ) -> Result<(i32, Option<String>), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("task run-all: current_exe: {e}"))?;
-    let mut cmd = Command::new(exe);
-    cmd.args(["task", "run", &id, "--managed-by-parent"]);
-    cmd.args(["--backend", &backend]);
-    cmd.env("CX_TASK_ID", &id);
-    cmd.env("CX_TASK_QUEUE_MS", queue_ms.to_string());
-    cmd.env("CX_TASK_WORKER_ID", worker_id);
-    if let Some(parent_id) = task_parent_id {
-        cmd.env("CX_TASK_PARENT_ID", parent_id);
+    let mut retry_reason: Option<String> = None;
+    let mut retry_backoff: Option<u64> = None;
+    for attempt in 1..=(max_retries + 1) {
+        let exe = std::env::current_exe().map_err(|e| format!("task run-all: current_exe: {e}"))?;
+        let mut cmd = Command::new(exe);
+        cmd.args(["task", "run", &id, "--managed-by-parent"]);
+        cmd.args(["--backend", &backend]);
+        cmd.env("CX_TASK_ID", &id);
+        cmd.env("CX_TASK_QUEUE_MS", queue_ms.to_string());
+        cmd.env("CX_TASK_WORKER_ID", &worker_id);
+        cmd.env("CX_TASK_RETRY_ATTEMPT", attempt.to_string());
+        cmd.env("CX_TASK_RETRY_MAX", max_retries.to_string());
+        if let Some(reason) = retry_reason.as_deref() {
+            cmd.env("CX_TASK_RETRY_REASON", reason);
+        } else {
+            cmd.env_remove("CX_TASK_RETRY_REASON");
+        }
+        if let Some(backoff_ms) = retry_backoff {
+            cmd.env("CX_TASK_RETRY_BACKOFF_MS", backoff_ms.to_string());
+        } else {
+            cmd.env_remove("CX_TASK_RETRY_BACKOFF_MS");
+        }
+        if let Some(parent_id) = task_parent_id.as_deref() {
+            cmd.env("CX_TASK_PARENT_ID", parent_id);
+        }
+        let output = run_command_output_with_timeout(cmd, "task run-all worker")?;
+        let status = output.status.code().unwrap_or(1);
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let execution_id = parse_execution_id(&stdout);
+        if status == 0 {
+            return Ok((status, execution_id));
+        }
+        let failure = classify_failure_for_execution(execution_id.as_deref());
+        if should_retry(failure.class, attempt, max_retries) {
+            let next_backoff = retry_backoff_ms(attempt - 1);
+            retry_reason = Some(failure.reason);
+            retry_backoff = Some(next_backoff);
+            thread::sleep(Duration::from_millis(next_backoff));
+            continue;
+        }
+        return Ok((status, execution_id));
     }
-    let output = run_command_output_with_timeout(cmd, "task run-all worker")?;
-    let status = output.status.code().unwrap_or(1);
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok((status, parse_execution_id(&stdout)))
+    Ok((1, None))
 }
 
 fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
@@ -372,31 +490,59 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         let mut summary = RunAllSummary::default();
         for (idx, id) in schedule.iter().enumerate() {
             let task = task_index.get(id);
+            let max_retries = task.and_then(|t| t.max_retries).unwrap_or(0);
             let backend_selected = fallback_backend(
                 choose_backend_for_task(task, &options.backend_pool, idx),
                 &available_pool(&options.backend_pool),
             );
-            match (deps.run_task_by_id)(
-                &(deps.make_task_runner)(),
-                id,
-                None,
-                backend_selected.as_deref(),
-                false,
-            ) {
-                Ok((code, execution_id)) => {
-                    if code == 0 {
-                        summary.record_success();
-                    } else {
-                        summary.record_failure(classify_failure_for_execution(
-                            execution_id.as_deref(),
-                        ));
+            let mut retry_reason: Option<String> = None;
+            let mut retry_backoff: Option<u64> = None;
+            let mut finished = false;
+            for attempt in 1..=(max_retries + 1) {
+                let run_result = with_retry_env(
+                    attempt,
+                    max_retries,
+                    retry_reason.as_deref(),
+                    retry_backoff,
+                    || {
+                        (deps.run_task_by_id)(
+                            &(deps.make_task_runner)(),
+                            id,
+                            None,
+                            backend_selected.as_deref(),
+                            false,
+                        )
+                    },
+                );
+                match run_result {
+                    Ok((code, execution_id)) => {
+                        if code == 0 {
+                            summary.record_success();
+                            finished = true;
+                            break;
+                        }
+                        let failure = classify_failure_for_execution(execution_id.as_deref());
+                        if should_retry(failure.class, attempt, max_retries) {
+                            let next_backoff = retry_backoff_ms(attempt - 1);
+                            retry_reason = Some(failure.reason);
+                            retry_backoff = Some(next_backoff);
+                            thread::sleep(Duration::from_millis(next_backoff));
+                            continue;
+                        }
+                        summary.record_failure(failure.class);
                         crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
+                        finished = true;
+                        break;
+                    }
+                    Err(e) => {
+                        crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
+                        return 1;
                     }
                 }
-                Err(e) => {
-                    crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
-                    return 1;
-                }
+            }
+            if !finished {
+                summary.record_failure(FailureClass::NonRetryable);
+                crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
             }
         }
         summary
@@ -749,8 +895,16 @@ fn run_schedule_parallel(
             let id = launch.id.clone();
             let backend = launch.backend.clone();
             let task_parent_id = task_index.get(&id).and_then(|t| t.parent_id.clone());
+            let max_retries = task_index.get(&id).and_then(|t| t.max_retries).unwrap_or(0);
             let join = thread::spawn(move || {
-                run_task_managed_subprocess(id, backend, queue_ms, worker_id, task_parent_id)
+                run_task_managed_subprocess(
+                    id,
+                    backend,
+                    queue_ms,
+                    worker_id,
+                    task_parent_id,
+                    max_retries,
+                )
             });
             active.push(ActiveLaunch {
                 id: launch.id,
@@ -780,9 +934,9 @@ fn run_schedule_parallel(
                         summary.record_success();
                         let _ = set_task_status_quiet(&done.id, "complete");
                     } else {
-                        summary.record_failure(classify_failure_for_execution(
-                            execution_id.as_deref(),
-                        ));
+                        summary.record_failure(
+                            classify_failure_for_execution(execution_id.as_deref()).class,
+                        );
                         let _ = set_task_status_quiet(&done.id, "failed");
                         crate::cx_eprintln!("cxrs task run-all: task failed: {}", done.id);
                     }
@@ -975,5 +1129,24 @@ mod tests {
         let selected =
             choose_backend_for_task(Some(&task), &["codex".to_string(), "ollama".to_string()], 0);
         assert_eq!(selected.as_deref(), Some("ollama"));
+    }
+
+    #[test]
+    fn retry_backoff_is_bounded() {
+        assert_eq!(retry_backoff_ms(0), 250);
+        assert_eq!(retry_backoff_ms(1), 500);
+        assert_eq!(retry_backoff_ms(2), 1000);
+        assert_eq!(retry_backoff_ms(3), 2000);
+        assert_eq!(retry_backoff_ms(4), 2000);
+        assert_eq!(retry_backoff_ms(10), 2000);
+    }
+
+    #[test]
+    fn should_retry_only_retryable_and_within_budget() {
+        assert!(should_retry(FailureClass::Retryable, 1, 2));
+        assert!(should_retry(FailureClass::Retryable, 2, 2));
+        assert!(!should_retry(FailureClass::Retryable, 3, 2));
+        assert!(!should_retry(FailureClass::NonRetryable, 1, 2));
+        assert!(!should_retry(FailureClass::Blocked, 1, 2));
     }
 }

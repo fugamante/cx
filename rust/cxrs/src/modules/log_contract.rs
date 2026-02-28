@@ -1,4 +1,4 @@
-pub const REQUIRED_STRICT_FIELDS: [&str; 26] = [
+pub const REQUIRED_STRICT_FIELDS: [&str; 30] = [
     "execution_id",
     "timestamp",
     "command",
@@ -25,4 +25,8 @@ pub const REQUIRED_STRICT_FIELDS: [&str; 26] = [
     "timed_out",
     "timeout_secs",
     "command_label",
+    "retry_attempt",
+    "retry_max",
+    "retry_reason",
+    "retry_backoff_ms",
 ];

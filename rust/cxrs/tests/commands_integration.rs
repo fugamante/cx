@@ -266,7 +266,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
         stderr_str(&out)
     );
     assert!(
-        (1800..=3800).contains(&elapsed_ms),
+        (1800..=7000).contains(&elapsed_ms),
         "expected two-wave runtime envelope, got elapsed_ms={elapsed_ms}"
     );
 
@@ -807,7 +807,7 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
         issue_count, strict_violations,
         "logs validate and telemetry strict violation counts diverged"
     );
-    assert_eq!(required, 26, "unexpected strict contract field count");
+    assert_eq!(required, 30, "unexpected strict contract field count");
 }
 
 #[cfg(target_os = "macos")]

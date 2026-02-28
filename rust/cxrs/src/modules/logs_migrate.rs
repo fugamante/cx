@@ -142,6 +142,16 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.prompt_preview = get_opt_str(obj, "prompt_preview");
     row.policy_blocked = get_opt_bool(obj, "policy_blocked");
     row.policy_reason = get_opt_str(obj, "policy_reason");
+    row.retry_attempt = obj
+        .get("retry_attempt")
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok());
+    row.retry_max = obj
+        .get("retry_max")
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok());
+    row.retry_reason = get_opt_str(obj, "retry_reason");
+    row.retry_backoff_ms = get_opt_u64(obj, "retry_backoff_ms");
 }
 
 fn normalize_run_log_row(v: &Value) -> CxResult<(String, bool)> {

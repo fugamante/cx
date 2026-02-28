@@ -111,6 +111,19 @@ fn base_execution_log(
     let queue_ms = env::var("CX_TASK_QUEUE_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
+    let retry_attempt = env::var("CX_TASK_RETRY_ATTEMPT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let retry_max = env::var("CX_TASK_RETRY_MAX")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let retry_reason = env::var("CX_TASK_RETRY_REASON")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let retry_backoff_ms = env::var("CX_TASK_RETRY_BACKOFF_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
     let (task_id, task_parent_id) = current_task_fields();
     let mut row = ExecutionLog {
         execution_id: make_execution_id(tool),
@@ -135,6 +148,10 @@ fn base_execution_log(
         converge_winner,
         converge_votes,
         queue_ms,
+        retry_attempt,
+        retry_max,
+        retry_reason,
+        retry_backoff_ms,
         task_id,
         task_parent_id,
         ..Default::default()

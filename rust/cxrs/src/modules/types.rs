@@ -99,6 +99,14 @@ pub struct RunEntry {
     pub policy_blocked: Option<bool>,
     #[serde(default)]
     pub policy_reason: Option<String>,
+    #[serde(default)]
+    pub retry_attempt: Option<u32>,
+    #[serde(default)]
+    pub retry_max: Option<u32>,
+    #[serde(default)]
+    pub retry_reason: Option<String>,
+    #[serde(default)]
+    pub retry_backoff_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -271,6 +279,10 @@ pub struct ExecutionLog {
     pub prompt_preview: Option<String>,
     pub policy_blocked: Option<bool>,
     pub policy_reason: Option<String>,
+    pub retry_attempt: Option<u32>,
+    pub retry_max: Option<u32>,
+    pub retry_reason: Option<String>,
+    pub retry_backoff_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
