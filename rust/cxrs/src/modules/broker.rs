@@ -63,6 +63,8 @@ struct BenchmarkArgs {
     backends: Vec<String>,
     window: usize,
     as_json: bool,
+    strict: bool,
+    min_runs: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +81,8 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
     let mut backends: Vec<String> = Vec::new();
     let mut window = 200usize;
     let mut as_json = false;
+    let mut strict = false;
+    let mut min_runs = 1usize;
     while i < args.len() {
         match args[i].as_str() {
             "--backend" => {
@@ -113,6 +117,25 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
                 as_json = true;
                 i += 1;
             }
+            "--strict" => {
+                strict = true;
+                i += 1;
+            }
+            "--min-runs" => {
+                let Some(v) = args.get(i + 1) else {
+                    return Err("cxrs broker benchmark: --min-runs requires a value".to_string());
+                };
+                min_runs = v.parse::<usize>().map_err(|_| {
+                    format!(
+                        "cxrs broker benchmark: --min-runs expects a positive integer, got '{}'",
+                        v
+                    )
+                })?;
+                if min_runs == 0 {
+                    return Err("cxrs broker benchmark: --min-runs must be >= 1".to_string());
+                }
+                i += 2;
+            }
             other => {
                 return Err(format!("cxrs broker benchmark: unknown flag '{other}'"));
             }
@@ -125,6 +148,8 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
         backends,
         window,
         as_json,
+        strict,
+        min_runs,
     })
 }
 
@@ -193,7 +218,7 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!(
-                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json]"
+                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N]"
             );
             return 2;
         }
@@ -215,6 +240,53 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
     for backend in &parsed.backends {
         entries.push((backend.clone(), compute_backend_stats(&rows, backend)));
     }
+    if parsed.strict {
+        let mut violations: Vec<String> = Vec::new();
+        for (backend, s) in &entries {
+            if s.runs < parsed.min_runs as u64 {
+                violations.push(format!(
+                    "{backend}: runs={} below min_runs={}",
+                    s.runs, parsed.min_runs
+                ));
+            }
+        }
+        if !violations.is_empty() {
+            if parsed.as_json {
+                let out = json!({
+                    "window": parsed.window,
+                    "log_file": log_file.display().to_string(),
+                    "summary": entries.iter().map(|(backend, s)| {
+                        json!({
+                            "backend": backend,
+                            "runs": s.runs,
+                            "avg_duration_ms": s.avg_duration_ms,
+                            "p95_duration_ms": s.p95_duration_ms,
+                            "avg_effective_input_tokens": s.avg_effective_input_tokens,
+                            "avg_output_tokens": s.avg_output_tokens
+                        })
+                    }).collect::<Vec<Value>>(),
+                    "strict": true,
+                    "min_runs": parsed.min_runs,
+                    "violations": violations
+                });
+                match serde_json::to_string_pretty(&out) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => {
+                        crate::cx_eprintln!("cxrs broker benchmark: failed to render json: {e}");
+                    }
+                }
+            } else {
+                crate::cx_eprintln!(
+                    "cxrs broker benchmark: strict check failed (min_runs={})",
+                    parsed.min_runs
+                );
+                for v in violations {
+                    crate::cx_eprintln!("  - {v}");
+                }
+            }
+            return 1;
+        }
+    }
 
     if parsed.as_json {
         let summary: Vec<Value> = entries
@@ -233,7 +305,10 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
         let out = json!({
             "window": parsed.window,
             "log_file": log_file.display().to_string(),
-            "summary": summary
+            "summary": summary,
+            "strict": parsed.strict,
+            "min_runs": parsed.min_runs,
+            "violations": []
         });
         match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
@@ -259,6 +334,10 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
             s.avg_effective_input_tokens
         );
         println!("  avg_output_tokens: {}", s.avg_output_tokens);
+    }
+    if parsed.strict {
+        println!();
+        println!("strict: pass (min_runs={})", parsed.min_runs);
     }
     0
 }
@@ -336,7 +415,7 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
         "benchmark" => cmd_broker_benchmark(app_name, &args[1..]),
         other => {
             crate::cx_eprintln!(
-                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json]>"
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N]>"
             );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2

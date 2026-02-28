@@ -265,6 +265,7 @@ Stage II runtime commands:
 ./bin/cx scheduler --json --window 50 | jq .
 ./bin/cx broker show --json | jq .
 ./bin/cx broker benchmark --backend codex --backend ollama --window 200 --json | jq .
+./bin/cx broker benchmark --backend codex --backend ollama --window 200 --strict --min-runs 5 --json | jq .
 
 ./bin/cx policy show
 ./bin/cx logs validate --fix=false

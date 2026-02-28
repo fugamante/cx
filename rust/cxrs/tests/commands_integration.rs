@@ -1479,9 +1479,68 @@ fn broker_benchmark_json_matches_contract_fixture() {
         .and_then(Value::as_array)
         .expect("summary array");
     assert!(!summary.is_empty(), "summary array is empty");
+    assert_eq!(payload.get("strict").and_then(Value::as_bool), Some(false));
+    assert_eq!(payload.get("min_runs").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        payload
+            .get("violations")
+            .and_then(Value::as_array)
+            .map(|v| v.len()),
+        Some(0)
+    );
     for item in summary {
         assert_has_keys(item, &item_keys, "broker.benchmark.summary[*]");
     }
+}
+
+#[test]
+fn broker_benchmark_strict_fails_when_backend_samples_are_insufficient() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row = serde_json::json!({
+        "execution_id":"bs1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+        "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":1200,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
+    });
+    let mut text = serde_json::to_string(&row).expect("serialize row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&[
+        "broker",
+        "benchmark",
+        "--backend",
+        "codex",
+        "--backend",
+        "ollama",
+        "--window",
+        "10",
+        "--strict",
+        "--min-runs",
+        "1",
+        "--json",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected strict failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("broker benchmark json");
+    assert_eq!(payload.get("strict").and_then(Value::as_bool), Some(true));
+    let violations = payload
+        .get("violations")
+        .and_then(Value::as_array)
+        .expect("violations array");
+    assert!(
+        violations
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|s| s.contains("ollama") && s.contains("below min_runs")),
+        "violations={violations:?}"
+    );
 }
 
 #[test]

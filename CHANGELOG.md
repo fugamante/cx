@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `broker benchmark` strict sample gate:
+  - new flags: `--strict` and `--min-runs N` (default `1`).
+  - strict mode returns non-zero when any requested backend has fewer than `min_runs` samples.
+  - JSON output now includes `strict`, `min_runs`, and `violations`.
 - Broker benchmark contract hardening:
   - added fixture `rust/cxrs/tests/fixtures/broker_benchmark_json_contract.json`.
   - added integration coverage to validate `broker benchmark --json` top-level and summary item key contract.

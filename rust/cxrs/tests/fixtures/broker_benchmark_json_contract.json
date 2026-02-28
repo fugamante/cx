@@ -2,7 +2,10 @@
   "top_level_keys": [
     "window",
     "log_file",
-    "summary"
+    "summary",
+    "strict",
+    "min_runs",
+    "violations"
   ],
   "summary_item_keys": [
     "backend",
