@@ -1368,6 +1368,74 @@ fn scheduler_json_strict_reports_severity() {
 }
 
 #[test]
+fn diag_json_strict_fails_on_retry_recovery_degradation() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let mut text = String::new();
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"rr1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":11,"schema_enforced":false,"schema_valid":true,"queue_ms":50,"worker_id":"w1",
+            "retry_attempt":1,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"rr2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":11,"schema_enforced":false,"schema_valid":true,"queue_ms":50,"worker_id":"w1",
+            "retry_attempt":2,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"rr3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":11,"schema_enforced":false,"schema_valid":true,"queue_ms":50,"worker_id":"w1",
+            "retry_attempt":2,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"rr4","timestamp":"2026-01-01T00:00:03Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":11,"schema_enforced":false,"schema_valid":true,"queue_ms":50,"worker_id":"w1",
+            "retry_attempt":2,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"rr5","timestamp":"2026-01-01T00:00:04Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":11,"schema_enforced":false,"schema_valid":true,"queue_ms":50,"worker_id":"w1",
+            "retry_attempt":2,"timed_out":false
+        }),
+    ];
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["diag", "--json", "--strict", "--window", "5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected strict failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
+    let reasons = v
+        .get("severity_reasons")
+        .and_then(Value::as_array)
+        .expect("severity reasons array");
+    let joined = reasons
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<&str>>()
+        .join(",");
+    assert!(
+        joined.contains("retry_recovery_low"),
+        "expected retry_recovery_low reason, got: {joined}"
+    );
+}
+
+#[test]
 fn scheduler_json_matches_contract_fixture() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

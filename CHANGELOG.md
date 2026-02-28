@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `diag --json --strict` severity now incorporates retry degradation signals:
+  - `retry_recovery_low` when post-retry success is weak over sufficient retry volume.
+  - `retry_pressure_high` when retry metadata density is elevated over the diagnostics window.
+- integration coverage for strict retry degradation:
+  - new test verifies `diag --json --strict` exits non-zero and reports `retry_recovery_low` under poor retry recovery conditions.
 - Guardrail hardening for local pushes and argument-count discipline:
   - added repo-local `pre-push` hook under `.githooks/pre-push`.
   - added `rust/cxrs/scripts/guardrails.sh` to run:

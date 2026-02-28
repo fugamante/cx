@@ -433,7 +433,7 @@ fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
     Ok((as_json, window, strict))
 }
 
-fn scheduler_severity(scheduler: &Value) -> (&'static str, Vec<String>) {
+fn scheduler_severity(scheduler: &Value, retry: &Value) -> (&'static str, Vec<String>) {
     let mut reasons: Vec<String> = Vec::new();
     let queue_p95 = scheduler
         .get("queue_ms_p95")
@@ -478,6 +478,25 @@ fn scheduler_severity(scheduler: &Value) -> (&'static str, Vec<String>) {
         .unwrap_or(0);
     if window_runs >= 6 && workers_seen <= 1 {
         reasons.push("worker_spread_low".to_string());
+    }
+
+    let retry_rows = retry
+        .get("rows_after_retry")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let retry_rows_success_rate = retry
+        .get("rows_after_retry_success_rate")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+    if retry_rows >= 3 && retry_rows_success_rate < 0.50 {
+        reasons.push("retry_recovery_low".to_string());
+    }
+    let retry_rows_with_meta = retry
+        .get("rows_with_retry_metadata")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if window_runs >= 10 && retry_rows_with_meta * 100 >= window_runs * 30 {
+        reasons.push("retry_pressure_high".to_string());
     }
 
     let severity = if reasons.len() >= 2 {
@@ -532,7 +551,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     } else {
         "no rust route and no bash fallback".to_string()
     };
-    let (severity, severity_reasons) = scheduler_severity(&scheduler);
+    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry);
 
     if as_json {
         let payload = serde_json::json!({
@@ -619,7 +638,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let scheduler = scheduler_diag_value(&log_file, window);
     let retry = retry_diag_value(&log_file, window);
-    let (severity, severity_reasons) = scheduler_severity(&scheduler);
+    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry);
 
     if as_json {
         let payload = serde_json::json!({
