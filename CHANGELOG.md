@@ -19,6 +19,17 @@ All notable changes to this project are documented in this file.
     - retries no longer short-circuit on interim `failed` status; only `complete` is terminal for `run_task_by_id`.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
+- Observability expansion for retries in `logs stats` / `telemetry`:
+  - added `retry_telemetry` section (human + JSON output) with:
+    - `rows_with_retry_metadata`
+    - `rows_after_retry`
+    - `rows_after_retry_success`
+    - `rows_after_retry_success_rate`
+    - `tasks_with_retry`
+    - `tasks_retry_recovered`
+    - `tasks_retry_recovery_rate`
+    - `attempt_histogram`
+  - integration tests now assert retry telemetry presence and shape in JSON output.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).

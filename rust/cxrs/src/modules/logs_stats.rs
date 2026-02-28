@@ -2,6 +2,7 @@ use crate::log_contract::REQUIRED_STRICT_FIELDS;
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -104,6 +105,19 @@ struct StatsComputed {
     new_in_second: Vec<String>,
     missing_in_second: Vec<String>,
     severity: &'static str,
+    retry: RetryStats,
+}
+
+#[derive(Debug, Default, Clone)]
+struct RetryStats {
+    rows_with_retry_metadata: usize,
+    rows_after_retry: usize,
+    rows_after_retry_success: usize,
+    rows_after_retry_success_rate: f64,
+    tasks_with_retry: usize,
+    tasks_retry_recovered: usize,
+    tasks_retry_recovery_rate: f64,
+    attempt_histogram: BTreeMap<u64, usize>,
 }
 
 fn severity_label(strict_violations: usize, new_keys: usize, missing_keys: usize) -> &'static str {
@@ -143,12 +157,90 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         new_in_second.len(),
         missing_in_second.len(),
     );
+    let retry = compute_retry_stats(rows);
     StatsComputed {
         lines,
         strict_violations,
         new_in_second,
         missing_in_second,
         severity,
+        retry,
+    }
+}
+
+fn compute_retry_stats(rows: &[Value]) -> RetryStats {
+    let mut attempt_histogram: BTreeMap<u64, usize> = BTreeMap::new();
+    let mut rows_with_retry_metadata = 0usize;
+    let mut rows_after_retry = 0usize;
+    let mut rows_after_retry_success = 0usize;
+    let mut task_timeout_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut task_recovered: BTreeMap<String, bool> = BTreeMap::new();
+
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        let attempt = obj.get("retry_attempt").and_then(Value::as_u64);
+        if let Some(a) = attempt {
+            rows_with_retry_metadata += 1;
+            *attempt_histogram.entry(a).or_insert(0) += 1;
+            if a > 1 {
+                rows_after_retry += 1;
+                let timed_out = obj.get("timed_out").and_then(Value::as_bool) == Some(true);
+                let schema_valid = obj.get("schema_valid").and_then(Value::as_bool) != Some(false);
+                let policy_blocked =
+                    obj.get("policy_blocked").and_then(Value::as_bool) == Some(true);
+                if !timed_out && schema_valid && !policy_blocked {
+                    rows_after_retry_success += 1;
+                }
+            }
+        }
+        let task_id = obj
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        if let Some(tid) = task_id {
+            let timed_out = obj.get("timed_out").and_then(Value::as_bool) == Some(true);
+            if attempt.is_some() {
+                task_timeout_seen.entry(tid.clone()).or_insert(false);
+                task_recovered.entry(tid.clone()).or_insert(false);
+            }
+            if timed_out {
+                task_timeout_seen.insert(tid, true);
+            } else if attempt.unwrap_or(0) > 1 {
+                task_recovered.insert(tid, true);
+            }
+        }
+    }
+
+    let rows_after_retry_success_rate = if rows_after_retry == 0 {
+        0.0
+    } else {
+        rows_after_retry_success as f64 / rows_after_retry as f64
+    };
+
+    let tasks_with_retry = task_timeout_seen.iter().filter(|(_, saw)| **saw).count();
+    let tasks_retry_recovered = task_timeout_seen
+        .iter()
+        .filter(|(tid, saw_timeout)| **saw_timeout && task_recovered.get(*tid) == Some(&true))
+        .count();
+    let tasks_retry_recovery_rate = if tasks_with_retry == 0 {
+        0.0
+    } else {
+        tasks_retry_recovered as f64 / tasks_with_retry as f64
+    };
+
+    RetryStats {
+        rows_with_retry_metadata,
+        rows_after_retry,
+        rows_after_retry_success,
+        rows_after_retry_success_rate,
+        tasks_with_retry,
+        tasks_retry_recovered,
+        tasks_retry_recovery_rate,
+        attempt_histogram,
     }
 }
 
@@ -168,6 +260,41 @@ fn print_stats_human(
     if severity_only {
         return;
     }
+    println!("retry_telemetry:");
+    println!(
+        "- rows_with_retry_metadata: {}",
+        stats.retry.rows_with_retry_metadata
+    );
+    println!("- rows_after_retry: {}", stats.retry.rows_after_retry);
+    println!(
+        "- rows_after_retry_success: {}",
+        stats.retry.rows_after_retry_success
+    );
+    println!(
+        "- rows_after_retry_success_rate: {:.2}",
+        stats.retry.rows_after_retry_success_rate
+    );
+    println!("- tasks_with_retry: {}", stats.retry.tasks_with_retry);
+    println!(
+        "- tasks_retry_recovered: {}",
+        stats.retry.tasks_retry_recovered
+    );
+    println!(
+        "- tasks_retry_recovery_rate: {:.2}",
+        stats.retry.tasks_retry_recovery_rate
+    );
+    let attempt_hist = if stats.retry.attempt_histogram.is_empty() {
+        "<none>".to_string()
+    } else {
+        stats
+            .retry
+            .attempt_histogram
+            .iter()
+            .map(|(attempt, count)| format!("{attempt}:{count}"))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    println!("- retry_attempt_histogram: {}", attempt_hist);
     println!("field_population:");
     for line in &stats.lines {
         println!("- {line}");
@@ -214,7 +341,17 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
         "contract_drift": {
             "new_keys_second_half": stats.new_in_second,
             "missing_keys_second_half": stats.missing_in_second
-        }
+        },
+        "retry_telemetry": {
+            "rows_with_retry_metadata": stats.retry.rows_with_retry_metadata,
+            "rows_after_retry": stats.retry.rows_after_retry,
+            "rows_after_retry_success": stats.retry.rows_after_retry_success,
+            "rows_after_retry_success_rate": stats.retry.rows_after_retry_success_rate,
+            "tasks_with_retry": stats.retry.tasks_with_retry,
+            "tasks_retry_recovered": stats.retry.tasks_retry_recovered,
+            "tasks_retry_recovery_rate": stats.retry.tasks_retry_recovery_rate,
+            "attempt_histogram": stats.retry.attempt_histogram
+        },
     });
     match serde_json::to_string_pretty(&payload) {
         Ok(s) => {

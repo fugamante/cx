@@ -934,7 +934,8 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     let row2 = serde_json::json!({
         "execution_id":"e2","timestamp":"2026-01-01T00:00:01Z","command":"next",
         "backend_used":"codex","capture_provider":"native","execution_mode":"deterministic",
-        "duration_ms":20,"schema_enforced":true,"schema_valid":true,"task_id":"task_001"
+        "duration_ms":20,"schema_enforced":true,"schema_valid":true,"task_id":"task_001",
+        "retry_attempt":2,"timed_out":false
     });
     let mut text = serde_json::to_string(&row1).expect("row1");
     text.push('\n');
@@ -946,6 +947,8 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     assert!(out.status.success(), "stderr={}", stderr_str(&out));
     let stdout = stdout_str(&out);
     assert!(stdout.contains("logs stats"), "{stdout}");
+    assert!(stdout.contains("retry_telemetry"), "{stdout}");
+    assert!(stdout.contains("retry_attempt_histogram"), "{stdout}");
     assert!(stdout.contains("field_population"), "{stdout}");
     assert!(stdout.contains("contract_drift"), "{stdout}");
     assert!(stdout.contains("new_keys_second_half"), "{stdout}");
@@ -980,6 +983,10 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     let drift = v.get("contract_drift").expect("contract_drift");
     assert!(drift.get("new_keys_second_half").is_some());
     assert!(drift.get("missing_keys_second_half").is_some());
+    let retry = v.get("retry_telemetry").expect("retry_telemetry");
+    assert!(retry.get("rows_with_retry_metadata").is_some());
+    assert!(retry.get("rows_after_retry_success_rate").is_some());
+    assert!(retry.get("attempt_histogram").is_some());
 }
 
 #[test]
