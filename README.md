@@ -258,6 +258,8 @@ Stage II runtime commands:
 ./bin/cx task run <task_id> --mode deterministic --backend codex
 ./bin/cx task run-all --status pending
 ./bin/cx task run-all --status pending --mode mixed
+./bin/cx task run-all --status pending --mode mixed --halt-on-critical
+CX_TASK_HALT_ON_CRITICAL=1 ./bin/cx task run-all --status pending
 
 ./bin/cx optimize 200
 ./bin/cx optimize 200 --json | jq .

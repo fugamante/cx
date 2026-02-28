@@ -41,6 +41,7 @@ pub struct AppConfig {
     pub capture_provider: String,
     pub broker_policy: String,
     pub cmd_timeout_secs: usize,
+    pub task_halt_on_critical: bool,
 }
 
 static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
@@ -128,6 +129,7 @@ impl AppConfig {
                 .unwrap_or_else(|_| "auto".to_string()),
             broker_policy: resolve_broker_policy(&state),
             cmd_timeout_secs: env_usize("CX_CMD_TIMEOUT_SECS", DEFAULT_CMD_TIMEOUT_SECS).max(1),
+            task_halt_on_critical: env_bool("CX_TASK_HALT_ON_CRITICAL", false),
         }
     }
 }

@@ -313,6 +313,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
     assert!(stdout.contains("blocked="), "{stdout}");
     assert!(stdout.contains("retryable_failures="), "{stdout}");
     assert!(stdout.contains("non_retryable_failures="), "{stdout}");
+    assert!(stdout.contains("critical_errors="), "{stdout}");
 }
 
 #[test]

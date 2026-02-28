@@ -220,6 +220,7 @@ struct RunAllSummary {
     retryable_failed: usize,
     non_retryable_failed: usize,
     blocked: usize,
+    critical_errors: usize,
 }
 
 impl RunAllSummary {
@@ -234,6 +235,12 @@ impl RunAllSummary {
             FailureClass::NonRetryable => self.non_retryable_failed += 1,
             FailureClass::Blocked => self.blocked += 1,
         }
+    }
+
+    fn record_critical_error(&mut self) {
+        self.failed += 1;
+        self.non_retryable_failed += 1;
+        self.critical_errors += 1;
     }
 }
 
@@ -453,13 +460,14 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         let pool = options.backend_pool.join(",");
         let cap_notes = render_backend_caps(&options.backend_caps);
         println!(
-            "run-all mode=mixed waves={} runnable={} backend_pool={} max_workers={} backend_caps={} fairness={}",
+            "run-all mode=mixed waves={} runnable={} backend_pool={} max_workers={} backend_caps={} fairness={} halt_on_critical={}",
             plan.waves.len(),
             ids.len(),
             pool,
             options.max_workers,
             cap_notes,
-            options.fairness
+            options.fairness,
+            options.halt_on_critical
         );
         for wave in &plan.waves {
             println!(
@@ -536,7 +544,12 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                     }
                     Err(e) => {
                         crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
-                        return 1;
+                        summary.record_critical_error();
+                        if options.halt_on_critical {
+                            return 1;
+                        }
+                        finished = true;
+                        break;
                     }
                 }
             }
@@ -548,13 +561,14 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         summary
     };
     println!(
-        "run-all summary: mode={}, complete={}, failed={}, blocked={}, retryable_failures={}, non_retryable_failures={}",
+        "run-all summary: mode={}, complete={}, failed={}, blocked={}, retryable_failures={}, non_retryable_failures={}, critical_errors={}",
         options.run_mode,
         summary.ok,
         summary.failed,
         summary.blocked,
         summary.retryable_failed,
-        summary.non_retryable_failed
+        summary.non_retryable_failed,
+        summary.critical_errors
     );
     if summary.failed > 0 { 1 } else { 0 }
 }
@@ -567,6 +581,7 @@ struct RunAllOptions {
     backend_caps: HashMap<String, usize>,
     max_workers: usize,
     fairness: String,
+    halt_on_critical: bool,
 }
 
 fn normalize_backend(v: &str) -> Option<String> {
@@ -662,7 +677,7 @@ fn fallback_backend(selected: Option<String>, available: &[String]) -> Option<St
 
 fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOptions, i32> {
     let usage = format!(
-        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded]"
+        "Usage: {app_name} task run-all [--status pending|in_progress|complete|failed] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded] [--halt-on-critical|--continue-on-critical]"
     );
     let mut status_filter = "pending".to_string();
     let mut run_mode = "sequential".to_string();
@@ -670,6 +685,7 @@ fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOption
     let mut backend_caps: HashMap<String, usize> = HashMap::new();
     let mut max_workers = 1usize;
     let mut fairness = "round_robin".to_string();
+    let mut halt_on_critical = app_config().task_halt_on_critical;
     let mut i = 1usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -756,6 +772,14 @@ fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOption
                 fairness = fv;
                 i += 2;
             }
+            "--halt-on-critical" => {
+                halt_on_critical = true;
+                i += 1;
+            }
+            "--continue-on-critical" => {
+                halt_on_critical = false;
+                i += 1;
+            }
             other => {
                 crate::cx_eprintln!("cxrs task run-all: unknown flag '{other}'");
                 return Err(2);
@@ -769,6 +793,7 @@ fn parse_run_all_options(app_name: &str, args: &[String]) -> Result<RunAllOption
         backend_caps,
         max_workers,
         fairness,
+        halt_on_critical,
     })
 }
 
@@ -942,9 +967,15 @@ fn run_schedule_parallel(
                     }
                 }
                 Err(e) => {
-                    summary.record_failure(FailureClass::NonRetryable);
+                    summary.record_critical_error();
                     let _ = set_task_status_quiet(&done.id, "failed");
                     crate::cx_eprintln!("cxrs task run-all: critical error for {}: {e}", done.id);
+                    if options.halt_on_critical {
+                        return Err(format!(
+                            "task run-all: halted on critical error for {}",
+                            done.id
+                        ));
+                    }
                 }
             }
         }
@@ -1121,6 +1152,22 @@ mod tests {
         assert_eq!(opts.backend_caps.get("codex"), Some(&2usize));
         assert_eq!(opts.max_workers, 3);
         assert_eq!(opts.fairness, "least_loaded");
+        assert!(!opts.halt_on_critical);
+    }
+
+    #[test]
+    fn parse_run_all_options_accepts_critical_policy_flags() {
+        let args = vec![
+            "run-all".to_string(),
+            "--halt-on-critical".to_string(),
+            "--continue-on-critical".to_string(),
+        ];
+        let opts = parse_run_all_options("cx", &args).expect("parse options");
+        assert!(!opts.halt_on_critical);
+
+        let args = vec!["run-all".to_string(), "--halt-on-critical".to_string()];
+        let opts = parse_run_all_options("cx", &args).expect("parse options");
+        assert!(opts.halt_on_critical);
     }
 
     #[test]
