@@ -84,6 +84,10 @@ pub struct RunEntry {
     #[serde(default)]
     pub provider_status: Option<String>,
     #[serde(default)]
+    pub http_provider_format: Option<String>,
+    #[serde(default)]
+    pub http_parser_mode: Option<String>,
+    #[serde(default)]
     pub worker_id: Option<String>,
     #[serde(default)]
     pub converge_mode: Option<String>,
@@ -240,6 +244,8 @@ pub struct ExecutionLog {
     pub adapter_type: Option<String>,
     pub provider_transport: Option<String>,
     pub provider_status: Option<String>,
+    pub http_provider_format: Option<String>,
+    pub http_parser_mode: Option<String>,
     pub backend_selected: Option<String>,
     pub model_selected: Option<String>,
     pub route_policy: Option<String>,

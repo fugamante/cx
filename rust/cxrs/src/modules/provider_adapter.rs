@@ -62,6 +62,22 @@ pub fn selected_http_provider_format() -> &'static str {
     }
 }
 
+pub fn selected_http_provider_format_opt() -> Option<&'static str> {
+    if selected_provider_transport() != "http" {
+        return None;
+    }
+    Some(selected_http_provider_format())
+}
+
+pub fn selected_http_parser_mode_opt() -> Option<&'static str> {
+    let format = selected_http_provider_format_opt()?;
+    match format {
+        "jsonl" => Some("jsonl_passthrough"),
+        "json" => Some("json_payload"),
+        _ => Some("envelope"),
+    }
+}
+
 pub fn selected_provider_status() -> Option<&'static str> {
     provider_status_for_adapter(selected_adapter_name())
 }

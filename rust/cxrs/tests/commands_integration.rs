@@ -1255,6 +1255,16 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input
             && row.get("provider_status").is_some_and(Value::is_null),
         "expected provider_status=null, row={row}"
     );
+    assert!(
+        row.get("http_provider_format").is_some()
+            && row.get("http_provider_format").is_some_and(Value::is_null),
+        "expected http_provider_format=null, row={row}"
+    );
+    assert!(
+        row.get("http_parser_mode").is_some()
+            && row.get("http_parser_mode").is_some_and(Value::is_null),
+        "expected http_parser_mode=null, row={row}"
+    );
 }
 
 #[test]
@@ -1305,6 +1315,16 @@ printf '%s\n' "ok"
         row.get("provider_status").is_some()
             && row.get("provider_status").is_some_and(Value::is_null),
         "expected provider_status=null, row={row}"
+    );
+    assert!(
+        row.get("http_provider_format").is_some()
+            && row.get("http_provider_format").is_some_and(Value::is_null),
+        "expected http_provider_format=null, row={row}"
+    );
+    assert!(
+        row.get("http_parser_mode").is_some()
+            && row.get("http_parser_mode").is_some_and(Value::is_null),
+        "expected http_parser_mode=null, row={row}"
     );
 }
 
@@ -1500,6 +1520,14 @@ fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
         run_last.get("provider_status").and_then(Value::as_str),
         Some("stub_unimplemented")
     );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
+    );
 }
 
 #[test]
@@ -1536,6 +1564,14 @@ fn http_curl_adapter_requires_url_and_logs_experimental_status() {
     assert_eq!(
         run_last.get("provider_status").and_then(Value::as_str),
         Some("experimental")
+    );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
     );
 }
 
@@ -1575,6 +1611,14 @@ printf '%s\n' '{"text":"http adapter ok"}'
     assert_eq!(
         run_last.get("provider_transport").and_then(Value::as_str),
         Some("http")
+    );
+    assert_eq!(
+        run_last.get("http_provider_format").and_then(Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        run_last.get("http_parser_mode").and_then(Value::as_str),
+        Some("envelope")
     );
 }
 

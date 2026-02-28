@@ -37,6 +37,9 @@ All notable changes to this project are documented in this file.
       - `transport_error`
       - `provider_error`
     - added integration coverage for non-200 and transport-failure classification, malformed-envelope raw fallback, JSON schema-command flow, JSONL passthrough, and invalid-JSONL rejection.
+    - run logs now include HTTP-mode telemetry fields:
+      - `http_provider_format`
+      - `http_parser_mode`
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
   - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:

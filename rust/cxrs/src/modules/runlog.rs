@@ -7,7 +7,8 @@ use crate::llm::effective_input_tokens;
 use crate::logs::{append_jsonl, validate_execution_log_row};
 use crate::paths::{repo_root, resolve_log_file, resolve_schema_fail_log_file};
 use crate::provider_adapter::{
-    selected_adapter_name, selected_provider_status, selected_provider_transport,
+    selected_adapter_name, selected_http_parser_mode_opt, selected_http_provider_format_opt,
+    selected_provider_status, selected_provider_transport,
 };
 use crate::quarantine::quarantine_store_with_attempts;
 use crate::runtime::{llm_backend, llm_model};
@@ -144,6 +145,8 @@ fn base_execution_log(
         adapter_type: Some(adapter_type),
         provider_transport: Some(selected_provider_transport().to_string()),
         provider_status: selected_provider_status().map(str::to_string),
+        http_provider_format: selected_http_provider_format_opt().map(str::to_string),
+        http_parser_mode: selected_http_parser_mode_opt().map(str::to_string),
         backend_selected: Some(backend_selected),
         model_selected: model_opt,
         route_policy: Some(broker_policy),
