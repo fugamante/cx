@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+if [[ "${CX_SKIP_PREPUSH_GUARDS:-0}" == "1" ]]; then
+  echo "pre-push: skipped (CX_SKIP_PREPUSH_GUARDS=1)" >&2
+  exit 0
+fi
+
+if [[ ! -x "./rust/cxrs/scripts/guardrails.sh" ]]; then
+  echo "pre-push: missing executable ./rust/cxrs/scripts/guardrails.sh; refusing push" >&2
+  exit 1
+fi
+
+echo "pre-push: running cxrs guardrails (fmt + clippy + tests)" >&2
+./rust/cxrs/scripts/guardrails.sh

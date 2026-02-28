@@ -276,6 +276,14 @@ cd ../..
 ./test/core_pipeline.sh
 ```
 
+Local push guardrails:
+
+```bash
+./bin/cx-enable-githooks
+# pre-push now enforces fmt + clippy (including too_many_arguments) + tests
+git push
+```
+
 ## Notes
 
 - No automatic checks run during shell startup.

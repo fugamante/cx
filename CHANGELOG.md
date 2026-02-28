@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Guardrail hardening for local pushes and argument-count discipline:
+  - added repo-local `pre-push` hook under `.githooks/pre-push`.
+  - added `rust/cxrs/scripts/guardrails.sh` to run:
+    - `cargo fmt --check`
+    - `cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments`
+    - `cargo test --tests -- --test-threads=1`
+  - documented one-shot bypass env for emergencies: `CX_SKIP_PREPUSH_GUARDS=1`.
+  - CI Rust check now explicitly enforces `clippy::too_many_arguments`.
 - Phase V retry/backoff semantics for `task run-all`:
   - task-level retries now honor `max_retries` for both sequential and mixed worker execution paths.
   - retryable failures are retried with deterministic bounded backoff (250ms → 2000ms cap).

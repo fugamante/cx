@@ -50,7 +50,7 @@ jobs:
           cd rust/cxrs
           cargo fmt --check
           cargo check
-          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments
           cargo test --tests -- --test-threads=1
 
       - name: Reliability Suite
