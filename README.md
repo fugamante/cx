@@ -204,7 +204,15 @@ Telemetry health:
 ./bin/cx logs stats 200
 ./bin/cx logs stats 200 --json | jq .
 ./bin/cx telemetry 50 --json | jq .
+./bin/cx diag --json --window 50 | jq .
+./bin/cx scheduler --json --window 50 | jq .
+./bin/cx optimize 200 --json | jq .
 ```
+
+Retry-health JSON surfaces:
+- `diag --json`: top-level `retry`
+- `scheduler --json`: top-level `retry`
+- `optimize --json`: `scoreboard.retry_health`
 
 ## Task Graph + Safety + Optimization
 
@@ -221,6 +229,8 @@ Stage II runtime commands:
 
 ./bin/cx optimize 200
 ./bin/cx optimize 200 --json | jq .
+./bin/cx diag --json --window 50 | jq .
+./bin/cx scheduler --json --window 50 | jq .
 
 ./bin/cx policy show
 ./bin/cx logs validate --fix=false
