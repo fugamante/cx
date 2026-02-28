@@ -68,8 +68,8 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "broker",
-        usage: "broker show [--json]",
-        description: "Show backend broker policy, active selection, and provider availability",
+        usage: "broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json]>",
+        description: "Show/set broker policy and benchmark backend performance from local run logs",
     },
     CommandHelp {
         name: "task",

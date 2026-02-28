@@ -103,6 +103,7 @@ Current implementation status on `codex/orchestration-mode-phase`:
 - Milestone B operator tooling now includes `diag --json` for machine-readable scheduler telemetry snapshots.
 - `diag --window N` scopes scheduler telemetry analysis to a recent run window.
 - `diag --json --strict` enables CI-style severity gating on scheduler signals.
+- broker operator tooling includes `cx broker benchmark` for local run-log backend latency/token snapshots.
 - Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented, including deterministic `judge`/`score` scoring fallback; model-based judge remains pending)
 
 Milestone A: Routing Substrate

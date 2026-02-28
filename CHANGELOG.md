@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `broker benchmark` command for local backend telemetry comparison:
+  - `cx broker benchmark [--backend codex|ollama]... [--window N] [--json]`
+  - computes per-backend run count, average duration, p95 duration, average effective input tokens, and average output tokens from `runs.jsonl`.
+  - supports deterministic machine-readable output for operator/CI tooling.
+- integration test coverage for broker benchmark JSON output and metric aggregation.
 - `diag --json --strict` severity now incorporates retry degradation signals:
   - `retry_recovery_low` when post-retry success is weak over sufficient retry volume.
   - `retry_pressure_high` when retry metadata density is elevated over the diagnostics window.

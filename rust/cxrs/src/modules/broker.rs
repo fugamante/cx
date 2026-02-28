@@ -3,6 +3,8 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use crate::config::app_config;
+use crate::logs::load_values;
+use crate::paths::resolve_log_file;
 use crate::runtime::{llm_backend, llm_model};
 use crate::state::set_state_path;
 
@@ -54,6 +56,211 @@ fn backend_available(name: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[derive(Debug, Clone)]
+struct BenchmarkArgs {
+    backends: Vec<String>,
+    window: usize,
+    as_json: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BackendStats {
+    runs: u64,
+    avg_duration_ms: u64,
+    p95_duration_ms: u64,
+    avg_effective_input_tokens: u64,
+    avg_output_tokens: u64,
+}
+
+fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
+    let mut i = 0usize;
+    let mut backends: Vec<String> = Vec::new();
+    let mut window = 200usize;
+    let mut as_json = false;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--backend" => {
+                let Some(v) = args.get(i + 1) else {
+                    return Err("cxrs broker benchmark: --backend requires a value".to_string());
+                };
+                let b = v.trim().to_lowercase();
+                if !matches!(b.as_str(), "codex" | "ollama") {
+                    return Err(format!("cxrs broker benchmark: invalid backend '{b}'"));
+                }
+                if !backends.iter().any(|x| x == &b) {
+                    backends.push(b);
+                }
+                i += 2;
+            }
+            "--window" => {
+                let Some(v) = args.get(i + 1) else {
+                    return Err("cxrs broker benchmark: --window requires a value".to_string());
+                };
+                window = v.parse::<usize>().map_err(|_| {
+                    format!(
+                        "cxrs broker benchmark: --window expects a positive integer, got '{}'",
+                        v
+                    )
+                })?;
+                if window == 0 {
+                    return Err("cxrs broker benchmark: --window must be >= 1".to_string());
+                }
+                i += 2;
+            }
+            "--json" => {
+                as_json = true;
+                i += 1;
+            }
+            other => {
+                return Err(format!("cxrs broker benchmark: unknown flag '{other}'"));
+            }
+        }
+    }
+    if backends.is_empty() {
+        backends = vec!["codex".to_string(), "ollama".to_string()];
+    }
+    Ok(BenchmarkArgs {
+        backends,
+        window,
+        as_json,
+    })
+}
+
+fn field_backend(row: &Value) -> Option<String> {
+    row.get("backend_selected")
+        .and_then(Value::as_str)
+        .or_else(|| row.get("backend_used").and_then(Value::as_str))
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+}
+
+fn metric_u64(row: &Value, key: &str) -> Option<u64> {
+    row.get(key).and_then(Value::as_u64).or_else(|| {
+        row.get(key)
+            .and_then(Value::as_i64)
+            .and_then(|n| u64::try_from(n).ok())
+    })
+}
+
+fn average_u64(sum: u128, count: usize) -> u64 {
+    if count == 0 {
+        return 0;
+    }
+    u64::try_from(sum / count as u128).unwrap_or(u64::MAX)
+}
+
+fn percentile_95(values: &mut [u64]) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    let idx = ((values.len() - 1) * 95) / 100;
+    values[idx]
+}
+
+fn compute_backend_stats(rows: &[Value], backend: &str) -> BackendStats {
+    let mut durations: Vec<u64> = Vec::new();
+    let mut sum_duration = 0u128;
+    let mut sum_eff = 0u128;
+    let mut sum_out = 0u128;
+    for row in rows {
+        if field_backend(row).as_deref() != Some(backend) {
+            continue;
+        }
+        let duration = metric_u64(row, "duration_ms").unwrap_or(0);
+        let eff = metric_u64(row, "effective_input_tokens").unwrap_or(0);
+        let out = metric_u64(row, "output_tokens").unwrap_or(0);
+        durations.push(duration);
+        sum_duration += duration as u128;
+        sum_eff += eff as u128;
+        sum_out += out as u128;
+    }
+    let runs = durations.len() as u64;
+    let p95_duration_ms = percentile_95(&mut durations);
+    BackendStats {
+        runs,
+        avg_duration_ms: average_u64(sum_duration, runs as usize),
+        p95_duration_ms,
+        avg_effective_input_tokens: average_u64(sum_eff, runs as usize),
+        avg_output_tokens: average_u64(sum_out, runs as usize),
+    }
+}
+
+fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
+    let parsed = match parse_benchmark_args(args) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::cx_eprintln!(
+                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json]"
+            );
+            return 2;
+        }
+    };
+
+    let Some(log_file) = resolve_log_file() else {
+        crate::cx_eprintln!("cxrs broker benchmark: unable to resolve log file");
+        return 1;
+    };
+    let rows = match load_values(&log_file, parsed.window) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::cx_eprintln!("cxrs broker benchmark: {e}");
+            return 1;
+        }
+    };
+
+    let mut entries: Vec<(String, BackendStats)> = Vec::new();
+    for backend in &parsed.backends {
+        entries.push((backend.clone(), compute_backend_stats(&rows, backend)));
+    }
+
+    if parsed.as_json {
+        let summary: Vec<Value> = entries
+            .iter()
+            .map(|(backend, s)| {
+                json!({
+                    "backend": backend,
+                    "runs": s.runs,
+                    "avg_duration_ms": s.avg_duration_ms,
+                    "p95_duration_ms": s.p95_duration_ms,
+                    "avg_effective_input_tokens": s.avg_effective_input_tokens,
+                    "avg_output_tokens": s.avg_output_tokens
+                })
+            })
+            .collect();
+        let out = json!({
+            "window": parsed.window,
+            "log_file": log_file.display().to_string(),
+            "summary": summary
+        });
+        match serde_json::to_string_pretty(&out) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                crate::cx_eprintln!("cxrs broker benchmark: failed to render json: {e}");
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    println!("== cx broker benchmark ==");
+    println!("window: {}", parsed.window);
+    println!("log_file: {}", log_file.display());
+    for (backend, s) in entries {
+        println!();
+        println!("backend: {backend}");
+        println!("  runs: {}", s.runs);
+        println!("  avg_duration_ms: {}", s.avg_duration_ms);
+        println!("  p95_duration_ms: {}", s.p95_duration_ms);
+        println!(
+            "  avg_effective_input_tokens: {}",
+            s.avg_effective_input_tokens
+        );
+        println!("  avg_output_tokens: {}", s.avg_output_tokens);
+    }
+    0
 }
 
 pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
@@ -126,9 +333,10 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
             println!("broker_policy: {policy}");
             0
         }
+        "benchmark" => cmd_broker_benchmark(app_name, &args[1..]),
         other => {
             crate::cx_eprintln!(
-                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced>"
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json]>"
             );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2
