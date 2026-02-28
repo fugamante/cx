@@ -1,7 +1,7 @@
 # Provider Adapter Plan (Experimental)
 
 Branch: `codex/provider-adapter-phase1`
-Status: active (Phase 1-4 complete, Phase 5 scaffold in progress)
+Status: active (Phase 1-5 complete, Phase 6 rollout criteria in progress)
 Owner: CX runtime
 
 ## Objective
@@ -97,6 +97,24 @@ Acceptance:
 - flag off: no behavior change
 - flag on: targeted smoke tests pass
 
+### HTTP Contract v1 (Current)
+
+Request:
+- transport: `curl` (`POST`, `Content-Type: text/plain; charset=utf-8`)
+- body: prompt text
+- auth: optional `Authorization: Bearer <token>` when `CX_HTTP_PROVIDER_TOKEN` is set
+
+Response modes (`CX_HTTP_PROVIDER_FORMAT`):
+- `text` (default): parse envelope fields (`text`, `response`, `output`, `content[]`) or fallback to raw body
+- `json`: expect valid JSON payload; for schema commands this payload is used directly
+- `jsonl`: expect JSONL stream containing at least one `item.completed` event
+
+Error classification:
+- `transport_unreachable`
+- `http_status`
+- `transport_error`
+- `provider_error`
+
 ### Phase 6: Rollout Criteria
 
 Tasks:
@@ -149,9 +167,9 @@ Required before merge discussion:
 
 ## Immediate Next Actions
 
-1. Implement Phase 5 HTTP transport execution path (currently `http-curl` experimental scaffold + `http-stub` fail-fast path).
-2. Add adapter parity for additional structured command surfaces (`diffsum`, `fixrun`) under mock/provider overrides.
-3. Define rollout policy for transport promotion (`process` default, explicit opt-in for HTTP).
+1. Finalize Phase 6 rollout policy and merge checklist for main.
+2. Keep HTTP transport opt-in by default (`process` remains default path).
+3. Track stability via `http_mode_stats` and strict CI contract gates.
 
 ## Current Progress Snapshot
 
@@ -160,7 +178,10 @@ Required before merge discussion:
   - Phase 2 execution-core wiring through adapter contract.
   - Phase 3 telemetry extension (`adapter_type`, `provider_transport`, `provider_status`).
   - Phase 4 mock adapter + schema/quarantine integration tests.
+  - Phase 5 optional HTTP transport (`http-curl` + `http-stub`) with:
+    - local fixture round-trip tests
+    - schema/json/jsonl mode validation
+    - deterministic error classification
+    - telemetry breakdown by HTTP format/parser mode
 - In progress:
-  - Phase 5 optional HTTP transport (`http-curl` scaffold, opt-in by `CX_PROVIDER_ADAPTER=http-curl` and `CX_HTTP_PROVIDER_URL`).
-- Pending:
-  - Full HTTP provider protocol contract and end-to-end transport tests against a controlled local server fixture.
+  - Phase 6 rollout criteria + merge policy.

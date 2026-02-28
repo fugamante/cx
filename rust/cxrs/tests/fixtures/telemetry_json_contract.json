@@ -1,0 +1,37 @@
+{
+  "top_level_keys": [
+    "log_file",
+    "window_runs",
+    "required_fields",
+    "severity",
+    "strict_violations",
+    "fields",
+    "contract_drift",
+    "retry_telemetry",
+    "http_mode_stats"
+  ],
+  "contract_drift_keys": [
+    "new_keys_second_half",
+    "missing_keys_second_half"
+  ],
+  "retry_keys": [
+    "rows_with_retry_metadata",
+    "rows_after_retry",
+    "rows_after_retry_success",
+    "rows_after_retry_success_rate",
+    "tasks_with_retry",
+    "tasks_retry_recovered",
+    "tasks_retry_recovery_rate",
+    "attempt_histogram"
+  ],
+  "http_mode_item_keys": [
+    "format",
+    "parser_mode",
+    "runs",
+    "healthy_runs",
+    "success_rate",
+    "schema_invalid",
+    "timed_out",
+    "policy_blocked"
+  ]
+}

@@ -112,7 +112,9 @@ fn parity_overlap(repo: &std::path::Path) -> Vec<ParityCase> {
         ("cxol", vec!["echo", "hi"], None),
         ("cxcopy", vec!["echo", "hi"], None),
         ("cxnext", vec!["echo", "hi"], None),
+        ("cxdiffsum", vec![], None),
         ("cxdiffsum_staged", vec![], None),
+        ("cxfix_run", vec!["echo", "parity-fix"], None),
         ("cxcommitmsg", vec![], None),
         (
             "cxcommitjson",

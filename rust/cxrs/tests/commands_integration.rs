@@ -1120,6 +1120,60 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
 }
 
 #[test]
+fn telemetry_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"tf1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"tf2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":12,"schema_enforced":false,"schema_valid":true
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["telemetry", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("telemetry json");
+    let fixture = load_fixture_json("telemetry_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "telemetry");
+    let drift_keys = fixture_keys(&fixture, "contract_drift_keys");
+    assert_has_keys(
+        payload.get("contract_drift").expect("contract_drift"),
+        &drift_keys,
+        "telemetry.contract_drift",
+    );
+    let retry_keys = fixture_keys(&fixture, "retry_keys");
+    assert_has_keys(
+        payload.get("retry_telemetry").expect("retry_telemetry"),
+        &retry_keys,
+        "telemetry.retry_telemetry",
+    );
+    let item_keys = fixture_keys(&fixture, "http_mode_item_keys");
+    let modes = payload
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats array");
+    for item in modes {
+        assert_has_keys(item, &item_keys, "telemetry.http_mode_stats[*]");
+    }
+}
+
+#[test]
 fn logs_stats_strict_and_severity_flags_behave_as_expected() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
