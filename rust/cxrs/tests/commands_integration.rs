@@ -878,7 +878,7 @@ fi
 }
 
 #[test]
-fn judge_convergence_falls_back_to_scoring_when_model_output_is_invalid() {
+fn judge_convergence_falls_back_on_invalid_model_output() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
