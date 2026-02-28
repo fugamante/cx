@@ -143,17 +143,36 @@ pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<St
         .map_err(LlmRunError::from_process)?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let kind = classify_http_curl_error(&stderr);
         return Err(LlmRunError::message(if stderr.is_empty() {
-            format!("http provider exited with status {}", out.status)
+            format!("http provider [{kind}] exited with status {}", out.status)
         } else {
             format!(
-                "http provider exited with status {}: {}",
+                "http provider [{kind}] exited with status {}: {}",
                 out.status, stderr
             )
         }));
     }
     let body = String::from_utf8_lossy(&out.stdout).to_string();
     Ok(parse_http_provider_body(&body))
+}
+
+fn classify_http_curl_error(stderr: &str) -> &'static str {
+    let s = stderr.to_ascii_lowercase();
+    if s.contains("could not resolve host")
+        || s.contains("failed to connect")
+        || s.contains("connection refused")
+        || s.contains("connection timed out")
+    {
+        return "transport_unreachable";
+    }
+    if s.contains("requested url returned error") || s.contains("http/") {
+        return "http_status";
+    }
+    if s.trim().is_empty() {
+        return "transport_error";
+    }
+    "provider_error"
 }
 
 fn parse_http_provider_body(body: &str) -> String {
@@ -202,7 +221,7 @@ pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_http_provider_body;
+    use super::{classify_http_curl_error, parse_http_provider_body};
 
     #[test]
     fn http_body_parser_prefers_text_field() {
@@ -222,5 +241,25 @@ mod tests {
         let raw = "plain response";
         let parsed = parse_http_provider_body(raw);
         assert_eq!(parsed, raw);
+    }
+
+    #[test]
+    fn http_body_parser_unknown_json_envelope_falls_back_to_raw() {
+        let raw = r#"{"unexpected":"shape"}"#;
+        let parsed = parse_http_provider_body(raw);
+        assert_eq!(parsed, raw);
+    }
+
+    #[test]
+    fn http_error_classifier_categorizes_curl_patterns() {
+        assert_eq!(
+            classify_http_curl_error("curl: (7) Failed to connect to 127.0.0.1"),
+            "transport_unreachable"
+        );
+        assert_eq!(
+            classify_http_curl_error("curl: (22) The requested URL returned error: 503"),
+            "http_status"
+        );
+        assert_eq!(classify_http_curl_error(""), "transport_error");
     }
 }

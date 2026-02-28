@@ -30,6 +30,12 @@ All notable changes to this project are documented in this file.
     - accepts provider responses as plain text or JSON envelopes (`text`, `response`, `output`, `content[]`).
     - telemetry tags this path as `provider_transport=http`, `provider_status=experimental`.
     - added integration coverage for URL-missing failure path + telemetry tagging, successful JSON response parsing, and live local HTTP fixture round-trip (request method/path/auth/body assertions).
+    - curl HTTP failures are now deterministically classified as:
+      - `transport_unreachable`
+      - `http_status`
+      - `transport_error`
+      - `provider_error`
+    - added integration coverage for non-200 and transport-failure classification, plus malformed-envelope raw fallback.
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
   - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:

@@ -1622,6 +1622,96 @@ fn http_curl_adapter_hits_local_server_and_sends_auth_and_prompt() {
 }
 
 #[test]
+fn http_curl_adapter_non_200_is_classified_as_http_status() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo "curl: (22) The requested URL returned error: 503" >&2
+exit 22
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-503"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http provider [http_status]"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn http_curl_adapter_transport_failure_is_classified_as_unreachable() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+echo "curl: (7) Failed to connect to 127.0.0.1 port 9999: Connection refused" >&2
+exit 7
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-down"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http provider [transport_unreachable]"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn http_curl_adapter_unknown_json_envelope_falls_back_to_raw_text() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"unexpected":"shape"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-raw-fallback"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), r#"{"unexpected":"shape"}"#);
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
