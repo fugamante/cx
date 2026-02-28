@@ -46,6 +46,73 @@ fn print_capture_compression(sb: &Value) {
     }
 }
 
+fn print_retry_health(sb: &Value) {
+    let Some(rh) = sb.get("retry_health") else {
+        println!("retry_health: n/a");
+        return;
+    };
+    let rows_after_retry = rh
+        .get("rows_after_retry")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let rows_after_retry_success = rh
+        .get("rows_after_retry_success")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let rows_after_retry_rate = rh
+        .get("rows_after_retry_rate")
+        .and_then(Value::as_f64)
+        .map(|v| format!("{}%", (v * 100.0).round() as i64))
+        .unwrap_or_else(|| "n/a".to_string());
+    let rows_after_retry_success_rate = rh
+        .get("rows_after_retry_success_rate")
+        .and_then(Value::as_f64)
+        .map(|v| format!("{}%", (v * 100.0).round() as i64))
+        .unwrap_or_else(|| "n/a".to_string());
+    let tasks_with_timeout = rh
+        .get("tasks_with_timeout")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let tasks_recovered = rh
+        .get("tasks_recovered")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let tasks_recovery_rate = rh
+        .get("tasks_recovery_rate")
+        .and_then(Value::as_f64)
+        .map(|v| format!("{}%", (v * 100.0).round() as i64))
+        .unwrap_or_else(|| "n/a".to_string());
+
+    println!(
+        "retry_health: rows_after_retry={} ({rows_after_retry_rate}), success={} ({rows_after_retry_success_rate}), tasks_recovered={}/{} ({tasks_recovery_rate})",
+        rows_after_retry, rows_after_retry_success, tasks_recovered, tasks_with_timeout
+    );
+    let hist = rh
+        .get("attempt_histogram")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|row| {
+                    row.as_array().and_then(|pair| {
+                        if pair.len() == 2 {
+                            Some(format!(
+                                "{}:{}",
+                                pair[0].as_u64().unwrap_or(0),
+                                pair[1].as_u64().unwrap_or(0)
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect::<Vec<String>>()
+                .join(",")
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "<none>".to_string());
+    println!("retry_attempt_histogram: {hist}");
+}
+
 fn print_timeout_frequency(sb: &Value) {
     let Some(tf) = sb.get("timeout_frequency") else {
         println!("timeout_frequency: n/a");
@@ -125,6 +192,7 @@ fn print_scoreboard(sb: &Value) {
         }
     }
     print_timeout_frequency(sb);
+    print_retry_health(sb);
     print_capture_compression(sb);
 }
 

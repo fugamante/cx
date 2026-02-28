@@ -1393,3 +1393,123 @@ fn scheduler_json_matches_contract_fixture() {
         "scheduler.scheduler",
     );
 }
+
+#[test]
+fn optimize_json_includes_retry_health_metrics() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"o1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1000,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_001","retry_attempt":1,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"o2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":800,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_001","retry_attempt":2,"timed_out":false
+        }),
+        serde_json::json!({
+            "execution_id":"o3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":700,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_002","retry_attempt":1,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"o4","timestamp":"2026-01-01T00:00:03Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":650,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_002","retry_attempt":2,"timed_out":true
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["optimize", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("optimize json");
+    let scoreboard = payload.get("scoreboard").expect("scoreboard");
+    let retry = scoreboard.get("retry_health").expect("retry_health");
+    assert_eq!(
+        retry.get("rows_after_retry").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        retry
+            .get("rows_after_retry_success")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        retry.get("tasks_with_timeout").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        retry.get("tasks_recovered").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(retry.get("attempt_histogram").is_some(), "retry={retry}");
+}
+
+#[test]
+fn optimize_recommendations_include_retry_actions_when_recovery_is_low() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"or1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1200,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_101","retry_attempt":1,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"or2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1100,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_101","retry_attempt":2,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"or3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1050,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_102","retry_attempt":1,"timed_out":true
+        }),
+        serde_json::json!({
+            "execution_id":"or4","timestamp":"2026-01-01T00:00:03Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1000,"schema_enforced":false,"schema_valid":true,
+            "task_id":"task_102","retry_attempt":2,"timed_out":true
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["optimize", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("optimize json");
+    let recs = payload
+        .get("recommendations")
+        .and_then(Value::as_array)
+        .expect("recommendations array");
+    let joined = recs
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<&str>>()
+        .join("\n");
+    assert!(
+        joined.contains("Retry recovery is low"),
+        "expected retry recovery recommendation, got:\n{joined}"
+    );
+}

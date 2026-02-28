@@ -38,6 +38,15 @@ All notable changes to this project are documented in this file.
     - task retry recovery counts/rates
     - retry attempt histogram
   - diagnostics JSON contract fixture updated to require retry keys.
+- `optimize` retry intelligence expansion:
+  - scoreboard now includes `retry_health` metrics:
+    - rows after retry + success rate
+    - task timeout recovery counts/rates
+    - retry attempt histogram
+  - anomaly/recommendation engine now emits retry-focused guidance when:
+    - attempt>1 rate is elevated
+    - timeout-to-recovery rate is low
+  - integration tests added for optimize retry-health JSON shape and retry recommendation generation.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).

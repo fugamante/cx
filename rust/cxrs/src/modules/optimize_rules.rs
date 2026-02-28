@@ -67,6 +67,29 @@ pub fn push_timeout_anomaly(anomalies: &mut Vec<String>, timeout_freq: Option<f6
     }
 }
 
+pub fn push_retry_anomaly(
+    anomalies: &mut Vec<String>,
+    retry_rows_rate: Option<f64>,
+    retry_recovery_rate: Option<f64>,
+) {
+    if let Some(rate) = retry_rows_rate
+        && rate > 0.10
+    {
+        anomalies.push(format!(
+            "Retry pressure elevated: {}% of runs are attempt>1",
+            (rate * 100.0).round() as i64
+        ));
+    }
+    if let Some(rate) = retry_recovery_rate
+        && rate < 0.70
+    {
+        anomalies.push(format!(
+            "Retry recovery weak: only {}% of timed-out tasks recover",
+            (rate * 100.0).round() as i64
+        ));
+    }
+}
+
 pub fn build_recommendations(
     top_eff: &[(String, u64)],
     first_cache: Option<f64>,
@@ -74,6 +97,8 @@ pub fn build_recommendations(
     schema_fails: u64,
     timeout_count: u64,
     top_timeout_labels: &[(String, u64)],
+    retry_rows_rate: Option<f64>,
+    retry_recovery_rate: Option<f64>,
 ) -> Vec<String> {
     let mut recommendations: Vec<String> = Vec::new();
     if let Some((tool, avg_eff)) = top_eff.first() {
@@ -102,6 +127,22 @@ pub fn build_recommendations(
             .unwrap_or("long-running command");
         recommendations.push(format!(
             "Timeouts detected around '{label}'; increase CX_CMD_TIMEOUT_SECS/CX_TIMEOUT_* or reduce prompt/capture scope."
+        ));
+    }
+    if let Some(rate) = retry_rows_rate
+        && rate > 0.10
+    {
+        recommendations.push(format!(
+            "Retry attempt volume is high ({}% rows with attempt>1); reduce flaky commands and narrow captured context per task.",
+            (rate * 100.0).round() as i64
+        ));
+    }
+    if let Some(rate) = retry_recovery_rate
+        && rate < 0.70
+    {
+        recommendations.push(format!(
+            "Retry recovery is low ({}%); tune timeout overrides per command label and split heavy objectives into smaller tasks.",
+            (rate * 100.0).round() as i64
         ));
     }
     if recommendations.is_empty() {

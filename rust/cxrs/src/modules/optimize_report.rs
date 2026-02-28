@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::logs::load_runs;
 use crate::optimize_rules::{
     build_recommendations, push_cache_anomaly, push_clip_anomaly, push_latency_anomaly,
-    push_schema_anomaly, push_timeout_anomaly, push_token_anomaly,
+    push_retry_anomaly, push_schema_anomaly, push_timeout_anomaly, push_token_anomaly,
 };
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
@@ -60,6 +60,11 @@ struct Agg {
     timeout_count: u64,
     sum_in: u64,
     sum_cached: u64,
+    retry_rows_after_retry: u64,
+    retry_rows_after_retry_success: u64,
+    retry_task_timeout_seen: HashMap<String, bool>,
+    retry_task_recovered: HashMap<String, bool>,
+    retry_attempt_histogram: HashMap<u64, u64>,
 }
 
 impl Agg {
@@ -89,6 +94,33 @@ impl Agg {
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
             *self.timeout_labels.entry(label).or_insert(0) += 1;
+        }
+        if let Some(attempt) = r.retry_attempt.map(u64::from) {
+            *self.retry_attempt_histogram.entry(attempt).or_insert(0) += 1;
+            if attempt > 1 {
+                self.retry_rows_after_retry += 1;
+                if !r.timed_out.unwrap_or(false)
+                    && r.policy_blocked != Some(true)
+                    && r.schema_valid != Some(false)
+                {
+                    self.retry_rows_after_retry_success += 1;
+                }
+            }
+            if let Some(task_id) = r.task_id.as_ref()
+                && !task_id.trim().is_empty()
+            {
+                self.retry_task_timeout_seen
+                    .entry(task_id.clone())
+                    .or_insert(false);
+                self.retry_task_recovered
+                    .entry(task_id.clone())
+                    .or_insert(false);
+                if r.timed_out.unwrap_or(false) {
+                    self.retry_task_timeout_seen.insert(task_id.clone(), true);
+                } else if attempt > 1 {
+                    self.retry_task_recovered.insert(task_id.clone(), true);
+                }
+            }
         }
         if r.clipped.is_some() {
             self.clipped_total += 1;
@@ -179,6 +211,8 @@ struct AnomalyInput<'a> {
     schema_fail_freq: Option<f64>,
     clip_freq: Option<f64>,
     timeout_freq: Option<f64>,
+    retry_rows_rate: Option<f64>,
+    retry_recovery_rate: Option<f64>,
 }
 
 fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
@@ -192,6 +226,8 @@ fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
         schema_fail_freq,
         clip_freq,
         timeout_freq,
+        retry_rows_rate,
+        retry_recovery_rate,
     } = input;
     let mut anomalies: Vec<String> = Vec::new();
     push_latency_anomaly(&mut anomalies, top_dur, max_ms);
@@ -200,6 +236,7 @@ fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
     push_schema_anomaly(&mut anomalies, schema_fail_freq);
     push_clip_anomaly(&mut anomalies, clip_freq);
     push_timeout_anomaly(&mut anomalies, timeout_freq);
+    push_retry_anomaly(&mut anomalies, retry_rows_rate, retry_recovery_rate);
     anomalies
 }
 
@@ -214,6 +251,12 @@ struct Derived {
     schema_fail_freq: Option<f64>,
     timeout_freq: Option<f64>,
     compression: Vec<Value>,
+    retry_rows_rate: Option<f64>,
+    retry_rows_success_rate: Option<f64>,
+    retry_tasks_recovery_rate: Option<f64>,
+    retry_tasks_with_timeout: u64,
+    retry_tasks_recovered: u64,
+    retry_attempt_histogram: Vec<(u64, u64)>,
 }
 
 fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
@@ -230,6 +273,25 @@ fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
     let schema_fail_freq =
         (agg.schema_total > 0).then_some(agg.schema_fails as f64 / agg.schema_total as f64);
     let timeout_freq = (!runs.is_empty()).then_some(agg.timeout_count as f64 / runs.len() as f64);
+    let retry_rows_rate =
+        (!runs.is_empty()).then_some(agg.retry_rows_after_retry as f64 / runs.len() as f64);
+    let retry_rows_success_rate = (agg.retry_rows_after_retry > 0)
+        .then_some(agg.retry_rows_after_retry_success as f64 / agg.retry_rows_after_retry as f64);
+    let retry_tasks_with_timeout = agg
+        .retry_task_timeout_seen
+        .iter()
+        .filter(|(_, saw)| **saw)
+        .count() as u64;
+    let retry_tasks_recovered = agg
+        .retry_task_timeout_seen
+        .iter()
+        .filter(|(task, saw)| **saw && agg.retry_task_recovered.get(*task) == Some(&true))
+        .count() as u64;
+    let retry_tasks_recovery_rate = (retry_tasks_with_timeout > 0)
+        .then_some(retry_tasks_recovered as f64 / retry_tasks_with_timeout as f64);
+    let mut retry_attempt_histogram: Vec<(u64, u64)> =
+        agg.retry_attempt_histogram.clone().into_iter().collect();
+    retry_attempt_histogram.sort_by(|a, b| a.0.cmp(&b.0));
     let compression = compression_rows(agg.provider_stats.clone());
     (
         agg,
@@ -244,6 +306,12 @@ fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
             schema_fail_freq,
             timeout_freq,
             compression,
+            retry_rows_rate,
+            retry_rows_success_rate,
+            retry_tasks_recovery_rate,
+            retry_tasks_with_timeout,
+            retry_tasks_recovered,
+            retry_attempt_histogram,
         },
     )
 }
@@ -281,6 +349,16 @@ fn build_scoreboard(total: u64, agg: &Agg, d: &Derived) -> Value {
             "timeout_runs": agg.timeout_count,
             "rate": d.timeout_freq,
             "top_labels": d.top_timeout_labels
+        },
+        "retry_health": {
+            "rows_after_retry": agg.retry_rows_after_retry,
+            "rows_after_retry_success": agg.retry_rows_after_retry_success,
+            "rows_after_retry_rate": d.retry_rows_rate,
+            "rows_after_retry_success_rate": d.retry_rows_success_rate,
+            "tasks_with_timeout": d.retry_tasks_with_timeout,
+            "tasks_recovered": d.retry_tasks_recovered,
+            "tasks_recovery_rate": d.retry_tasks_recovery_rate,
+            "attempt_histogram": d.retry_attempt_histogram
         },
         "capture_provider_compression": d.compression,
         "budget_clipping_frequency": {
@@ -335,6 +413,8 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         schema_fail_freq: d.schema_fail_freq,
         clip_freq: d.clip_freq,
         timeout_freq: d.timeout_freq,
+        retry_rows_rate: d.retry_rows_rate,
+        retry_recovery_rate: d.retry_tasks_recovery_rate,
     });
     let recommendations = build_recommendations(
         &d.top_eff,
@@ -343,6 +423,8 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         agg.schema_fails,
         agg.timeout_count,
         &d.top_timeout_labels,
+        d.retry_rows_rate,
+        d.retry_tasks_recovery_rate,
     );
 
     let total = runs.len() as u64;
