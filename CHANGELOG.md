@@ -64,6 +64,9 @@ All notable changes to this project are documented in this file.
   - `scheduler --json` now includes a `retry` section (parity with `diag --json` retry summary).
   - scheduler JSON fixture extended with retry keys (`tests/fixtures/scheduler_json_contract.json`).
   - contract tests now use a shared fixture assertion helper to validate nested sections consistently across diag/scheduler surfaces.
+- CI diagnostics gate hardening:
+  - `Phase IV Scheduler Gate` now asserts retry-summary presence for both `diag --json` and `scheduler --json` payloads.
+  - keeps diagnostics surfaces aligned with retry contract expectations.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).

@@ -93,8 +93,10 @@ jobs:
           test "$rc" -eq 1
           echo "$out" | jq -e '.severity != "ok"' >/dev/null
           echo "$out" | jq -e '.scheduler.queue_rows == 3' >/dev/null
+          echo "$out" | jq -e '.retry.rows_with_retry_metadata == 0' >/dev/null
           sched="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- scheduler --json --window 3)"
           echo "$sched" | jq -e '.scheduler_window_requested == 3' >/dev/null
+          echo "$sched" | jq -e '.retry.rows_with_retry_metadata == 0' >/dev/null
 
       - name: Optimize Retry Contract Gate
         run: |
