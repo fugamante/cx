@@ -1,16 +1,24 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(not(test))]
 use std::sync::OnceLock;
 
 use crate::process::run_command_output_with_timeout;
 
 pub fn repo_root() -> Option<PathBuf> {
-    static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
-    if env::var("CX_NO_CACHE").ok().as_deref() == Some("1") {
-        return repo_root_uncached();
+    #[cfg(test)]
+    {
+        repo_root_uncached()
     }
-    CACHED.get_or_init(repo_root_uncached).as_ref().cloned()
+    #[cfg(not(test))]
+    {
+        static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
+        if env::var("CX_NO_CACHE").ok().as_deref() == Some("1") {
+            return repo_root_uncached();
+        }
+        CACHED.get_or_init(repo_root_uncached).as_ref().cloned()
+    }
 }
 
 pub fn repo_root_hint() -> Option<PathBuf> {
