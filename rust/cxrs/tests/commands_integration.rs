@@ -3,6 +3,7 @@ mod common;
 use common::{TempRepo, read_json, stderr_str, stdout_str};
 use serde_json::Value;
 use std::fs;
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,34 @@ fn parse_labeled_u64(s: &str, label: &str) -> Option<u64> {
         }
     }
     None
+}
+
+fn load_fixture_json(name: &str) -> Value {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests");
+    path.push("fixtures");
+    path.push(name);
+    let content = fs::read_to_string(path).expect("read fixture file");
+    serde_json::from_str(&content).expect("parse fixture json")
+}
+
+fn fixture_keys(fixture: &Value, key: &str) -> Vec<String> {
+    fixture
+        .get(key)
+        .and_then(Value::as_array)
+        .expect("fixture key array")
+        .iter()
+        .map(|v| v.as_str().expect("fixture key string").to_string())
+        .collect()
+}
+
+fn assert_has_keys(obj: &Value, keys: &[String], context: &str) {
+    for key in keys {
+        assert!(
+            obj.get(key).is_some(),
+            "{context} missing key '{key}' in payload: {obj}"
+        );
+    }
 }
 
 #[test]
@@ -126,6 +155,48 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
         assert!(row.get("worker_id").is_some(), "missing worker_id: {row}");
         assert!(row.get("queue_ms").is_some(), "missing queue_ms: {row}");
     }
+}
+
+#[test]
+fn run_all_summary_includes_failure_taxonomy_fields() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+prompt="$(cat)"
+if printf '%s' "$prompt" | grep -q "fail-case"; then
+  exit 1
+fi
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    for objective in ["cxo echo ok-case", "cxo echo fail-case"] {
+        let add = repo.run(&[
+            "task",
+            "add",
+            objective,
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let out = repo.run(&["task", "run-all", "--status", "pending"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected one task failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("run-all summary:"), "{stdout}");
+    assert!(stdout.contains("blocked="), "{stdout}");
+    assert!(stdout.contains("retryable_failures="), "{stdout}");
+    assert!(stdout.contains("non_retryable_failures="), "{stdout}");
 }
 
 #[test]
@@ -860,6 +931,43 @@ fn diag_json_reports_scheduler_object() {
 }
 
 #[test]
+fn diag_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row = serde_json::json!({
+        "execution_id":"diagfx1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+        "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":10,"schema_enforced":false,"schema_valid":true,"queue_ms":250,"worker_id":"w1"
+    });
+    let mut text = serde_json::to_string(&row).expect("serialize row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["diag", "--json", "--window", "1"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
+    let fixture = load_fixture_json("diag_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "diag");
+
+    let routing_keys = fixture_keys(&fixture, "routing_trace_keys");
+    assert_has_keys(
+        payload.get("routing_trace").expect("routing_trace"),
+        &routing_keys,
+        "diag.routing_trace",
+    );
+
+    let scheduler_keys = fixture_keys(&fixture, "scheduler_keys");
+    assert_has_keys(
+        payload.get("scheduler").expect("scheduler"),
+        &scheduler_keys,
+        "diag.scheduler",
+    );
+}
+
+#[test]
 fn diag_json_window_scopes_scheduler_rows() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
@@ -989,4 +1097,37 @@ fn scheduler_json_strict_reports_severity() {
         Some(4)
     );
     assert_ne!(v.get("severity").and_then(Value::as_str), Some("ok"));
+}
+
+#[test]
+fn scheduler_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let mut text = String::new();
+    for i in 1..=2u64 {
+        let row = serde_json::json!({
+            "execution_id":format!("schfx{i}"),"timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10 + i,"schema_enforced":false,"schema_valid":true,"queue_ms":i * 100,"worker_id":"w1"
+        });
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["scheduler", "--json", "--window", "2"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("scheduler json");
+    let fixture = load_fixture_json("scheduler_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "scheduler");
+
+    let scheduler_keys = fixture_keys(&fixture, "scheduler_keys");
+    assert_has_keys(
+        payload.get("scheduler").expect("scheduler"),
+        &scheduler_keys,
+        "scheduler.scheduler",
+    );
 }

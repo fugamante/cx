@@ -1,0 +1,40 @@
+{
+  "top_level_keys": [
+    "timestamp",
+    "version",
+    "mode",
+    "backend",
+    "active_model",
+    "capture_provider_config",
+    "capture_provider_resolved",
+    "rtk_available",
+    "rtk_version",
+    "budget_chars",
+    "budget_lines",
+    "clip_mode",
+    "clip_footer",
+    "log_file",
+    "last_run_id",
+    "schema_registry_dir",
+    "schema_registry_files",
+    "scheduler",
+    "scheduler_window_requested",
+    "severity",
+    "severity_reasons",
+    "routing_trace"
+  ],
+  "routing_trace_keys": [
+    "sample",
+    "route",
+    "reason"
+  ],
+  "scheduler_keys": [
+    "window_runs",
+    "queue_rows",
+    "queue_ms_avg",
+    "queue_ms_p95",
+    "workers_seen",
+    "worker_distribution",
+    "backend_distribution"
+  ]
+}
