@@ -1,3 +1,14 @@
+pub struct RecommendationInput<'a> {
+    pub top_eff: &'a [(String, u64)],
+    pub first_cache: Option<f64>,
+    pub second_cache: Option<f64>,
+    pub schema_fails: u64,
+    pub timeout_count: u64,
+    pub top_timeout_labels: &'a [(String, u64)],
+    pub retry_rows_rate: Option<f64>,
+    pub retry_recovery_rate: Option<f64>,
+}
+
 pub fn push_latency_anomaly(anomalies: &mut Vec<String>, top_dur: &[(String, u64)], max_ms: u64) {
     if let Some((tool, avg)) = top_dur.first()
         && *avg > max_ms / 2
@@ -90,16 +101,17 @@ pub fn push_retry_anomaly(
     }
 }
 
-pub fn build_recommendations(
-    top_eff: &[(String, u64)],
-    first_cache: Option<f64>,
-    second_cache: Option<f64>,
-    schema_fails: u64,
-    timeout_count: u64,
-    top_timeout_labels: &[(String, u64)],
-    retry_rows_rate: Option<f64>,
-    retry_recovery_rate: Option<f64>,
-) -> Vec<String> {
+pub fn build_recommendations(input: RecommendationInput<'_>) -> Vec<String> {
+    let RecommendationInput {
+        top_eff,
+        first_cache,
+        second_cache,
+        schema_fails,
+        timeout_count,
+        top_timeout_labels,
+        retry_rows_rate,
+        retry_recovery_rate,
+    } = input;
     let mut recommendations: Vec<String> = Vec::new();
     if let Some((tool, avg_eff)) = top_eff.first() {
         recommendations.push(format!(

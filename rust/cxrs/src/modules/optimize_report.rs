@@ -3,8 +3,9 @@ use std::collections::HashMap;
 
 use crate::logs::load_runs;
 use crate::optimize_rules::{
-    build_recommendations, push_cache_anomaly, push_clip_anomaly, push_latency_anomaly,
-    push_retry_anomaly, push_schema_anomaly, push_timeout_anomaly, push_token_anomaly,
+    RecommendationInput, build_recommendations, push_cache_anomaly, push_clip_anomaly,
+    push_latency_anomaly, push_retry_anomaly, push_schema_anomaly, push_timeout_anomaly,
+    push_token_anomaly,
 };
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
@@ -416,16 +417,16 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         retry_rows_rate: d.retry_rows_rate,
         retry_recovery_rate: d.retry_tasks_recovery_rate,
     });
-    let recommendations = build_recommendations(
-        &d.top_eff,
-        d.first_cache,
-        d.second_cache,
-        agg.schema_fails,
-        agg.timeout_count,
-        &d.top_timeout_labels,
-        d.retry_rows_rate,
-        d.retry_tasks_recovery_rate,
-    );
+    let recommendations = build_recommendations(RecommendationInput {
+        top_eff: &d.top_eff,
+        first_cache: d.first_cache,
+        second_cache: d.second_cache,
+        schema_fails: agg.schema_fails,
+        timeout_count: agg.timeout_count,
+        top_timeout_labels: &d.top_timeout_labels,
+        retry_rows_rate: d.retry_rows_rate,
+        retry_recovery_rate: d.retry_tasks_recovery_rate,
+    });
 
     let total = runs.len() as u64;
     let scoreboard = build_scoreboard(total, &agg, &d);
