@@ -181,6 +181,160 @@ fn print_scheduler_diag(log_file_path: &str, window: usize) {
     println!("scheduler_backend_distribution: {backend_distribution}");
 }
 
+fn retry_diag_value(log_file_path: &str, window: usize) -> Value {
+    let path = Path::new(log_file_path);
+    if !path.exists() {
+        return serde_json::json!({
+            "window_runs": 0,
+            "rows_with_retry_metadata": 0,
+            "rows_after_retry": 0,
+            "rows_after_retry_success": 0,
+            "rows_after_retry_success_rate": 0.0,
+            "tasks_with_retry": 0,
+            "tasks_retry_recovered": 0,
+            "tasks_retry_recovery_rate": 0.0,
+            "attempt_histogram": {}
+        });
+    }
+    let rows = load_values(path, window).unwrap_or_default();
+    let mut attempt_histogram: BTreeMap<String, usize> = BTreeMap::new();
+    let mut rows_with_retry_metadata = 0usize;
+    let mut rows_after_retry = 0usize;
+    let mut rows_after_retry_success = 0usize;
+    let mut task_timeout_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut task_recovered: BTreeMap<String, bool> = BTreeMap::new();
+
+    for v in &rows {
+        let attempt = v.get("retry_attempt").and_then(Value::as_u64);
+        if let Some(a) = attempt {
+            rows_with_retry_metadata += 1;
+            *attempt_histogram.entry(a.to_string()).or_insert(0) += 1;
+            if a > 1 {
+                rows_after_retry += 1;
+                let timed_out = v.get("timed_out").and_then(Value::as_bool) == Some(true);
+                let schema_valid = v.get("schema_valid").and_then(Value::as_bool) != Some(false);
+                let policy_blocked = v.get("policy_blocked").and_then(Value::as_bool) == Some(true);
+                if !timed_out && schema_valid && !policy_blocked {
+                    rows_after_retry_success += 1;
+                }
+            }
+        }
+        let task_id = v
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        if let Some(tid) = task_id {
+            if attempt.is_some() {
+                task_timeout_seen.entry(tid.clone()).or_insert(false);
+                task_recovered.entry(tid.clone()).or_insert(false);
+            }
+            if v.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                task_timeout_seen.insert(tid, true);
+            } else if attempt.unwrap_or(0) > 1 {
+                task_recovered.insert(tid, true);
+            }
+        }
+    }
+
+    let rows_after_retry_success_rate = if rows_after_retry == 0 {
+        0.0
+    } else {
+        rows_after_retry_success as f64 / rows_after_retry as f64
+    };
+    let tasks_with_retry = task_timeout_seen.iter().filter(|(_, saw)| **saw).count();
+    let tasks_retry_recovered = task_timeout_seen
+        .iter()
+        .filter(|(tid, saw)| **saw && task_recovered.get(*tid) == Some(&true))
+        .count();
+    let tasks_retry_recovery_rate = if tasks_with_retry == 0 {
+        0.0
+    } else {
+        tasks_retry_recovered as f64 / tasks_with_retry as f64
+    };
+
+    serde_json::json!({
+        "window_runs": rows.len(),
+        "rows_with_retry_metadata": rows_with_retry_metadata,
+        "rows_after_retry": rows_after_retry,
+        "rows_after_retry_success": rows_after_retry_success,
+        "rows_after_retry_success_rate": rows_after_retry_success_rate,
+        "tasks_with_retry": tasks_with_retry,
+        "tasks_retry_recovered": tasks_retry_recovered,
+        "tasks_retry_recovery_rate": tasks_retry_recovery_rate,
+        "attempt_histogram": attempt_histogram
+    })
+}
+
+fn print_retry_diag(log_file_path: &str, window: usize) {
+    let retry = retry_diag_value(log_file_path, window);
+    let hist = retry
+        .get("attempt_histogram")
+        .and_then(Value::as_object)
+        .map(|m| {
+            if m.is_empty() {
+                "<none>".to_string()
+            } else {
+                m.iter()
+                    .map(|(k, v)| format!("{k}={}", v.as_u64().unwrap_or(0)))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            }
+        })
+        .unwrap_or_else(|| "<none>".to_string());
+    println!(
+        "retry_rows_with_metadata: {}",
+        retry
+            .get("rows_with_retry_metadata")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "retry_rows_after_retry: {}",
+        retry
+            .get("rows_after_retry")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "retry_rows_after_retry_success: {}",
+        retry
+            .get("rows_after_retry_success")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "retry_rows_after_retry_success_rate: {:.2}",
+        retry
+            .get("rows_after_retry_success_rate")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    );
+    println!(
+        "retry_tasks_with_retry: {}",
+        retry
+            .get("tasks_with_retry")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "retry_tasks_recovered: {}",
+        retry
+            .get("tasks_retry_recovered")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "retry_tasks_recovery_rate: {:.2}",
+        retry
+            .get("tasks_retry_recovery_rate")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    );
+    println!("retry_attempt_histogram: {hist}");
+}
+
 fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
     let backend = llm_backend();
     let model = llm_model();
@@ -360,6 +514,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
         model
     };
     let scheduler = scheduler_diag_value(&log_file, window);
+    let retry = retry_diag_value(&log_file, window);
     let sample_cmd = "cxo git status";
     let rust_handles = route_handler_for("cxo");
     let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
@@ -399,6 +554,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "schema_registry_dir": schema_dir.display().to_string(),
             "schema_registry_files": schema_count(&schema_dir),
             "scheduler": scheduler,
+            "retry": retry,
             "scheduler_window_requested": window,
             "severity": severity,
             "severity_reasons": severity_reasons,
@@ -435,6 +591,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     println!("schema_registry_dir: {}", schema_dir.display());
     println!("schema_registry_files: {}", schema_count(&schema_dir));
     print_scheduler_diag(&log_file, window);
+    print_retry_diag(&log_file, window);
     println!("scheduler_window_requested: {window}");
     println!("severity: {severity}");
     if !severity_reasons.is_empty() {

@@ -1136,6 +1136,8 @@ fn diag_reports_scheduler_distribution_fields() {
         stdout.contains("scheduler_backend_distribution: codex=2,ollama=1"),
         "{stdout}"
     );
+    assert!(stdout.contains("retry_rows_with_metadata:"), "{stdout}");
+    assert!(stdout.contains("retry_attempt_histogram:"), "{stdout}");
 }
 
 #[test]
@@ -1176,6 +1178,12 @@ fn diag_json_reports_scheduler_object() {
         Some(1),
         "unexpected scheduler object: {scheduler}"
     );
+    let retry = v.get("retry").expect("retry");
+    assert_eq!(retry.get("window_runs").and_then(Value::as_u64), Some(1));
+    assert!(
+        retry.get("attempt_histogram").is_some(),
+        "unexpected retry object: {retry}"
+    );
 }
 
 #[test]
@@ -1212,6 +1220,12 @@ fn diag_json_matches_contract_fixture() {
         payload.get("scheduler").expect("scheduler"),
         &scheduler_keys,
         "diag.scheduler",
+    );
+    let retry_keys = fixture_keys(&fixture, "retry_keys");
+    assert_has_keys(
+        payload.get("retry").expect("retry"),
+        &retry_keys,
+        "diag.retry",
     );
 }
 

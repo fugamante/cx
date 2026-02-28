@@ -30,6 +30,14 @@ All notable changes to this project are documented in this file.
     - `tasks_retry_recovery_rate`
     - `attempt_histogram`
   - integration tests now assert retry telemetry presence and shape in JSON output.
+- `diag` observability expansion:
+  - `cx diag --json` now includes a `retry` object summarizing retry health over the requested window.
+  - human `cx diag` output now prints retry summary lines:
+    - rows with retry metadata
+    - post-retry success counts/rates
+    - task retry recovery counts/rates
+    - retry attempt histogram
+  - diagnostics JSON contract fixture updated to require retry keys.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
