@@ -3,6 +3,7 @@
     "log_file",
     "scheduler_window_requested",
     "scheduler",
+    "retry",
     "severity",
     "severity_reasons"
   ],
@@ -14,5 +15,16 @@
     "workers_seen",
     "worker_distribution",
     "backend_distribution"
+  ],
+  "retry_keys": [
+    "window_runs",
+    "rows_with_retry_metadata",
+    "rows_after_retry",
+    "rows_after_retry_success",
+    "rows_after_retry_success_rate",
+    "tasks_with_retry",
+    "tasks_retry_recovered",
+    "tasks_retry_recovery_rate",
+    "attempt_histogram"
   ]
 }

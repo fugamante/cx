@@ -618,6 +618,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved>".to_string());
     let scheduler = scheduler_diag_value(&log_file, window);
+    let retry = retry_diag_value(&log_file, window);
     let (severity, severity_reasons) = scheduler_severity(&scheduler);
 
     if as_json {
@@ -625,6 +626,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
             "log_file": log_file,
             "scheduler_window_requested": window,
             "scheduler": scheduler,
+            "retry": retry,
             "severity": severity,
             "severity_reasons": severity_reasons
         });
@@ -641,6 +643,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
     println!("== cxscheduler ==");
     println!("log_file: {log_file}");
     print_scheduler_diag(&log_file, window);
+    print_retry_diag(&log_file, window);
     println!("scheduler_window_requested: {window}");
     println!("severity: {severity}");
     if !severity_reasons.is_empty() {

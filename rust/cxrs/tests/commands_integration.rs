@@ -44,6 +44,24 @@ fn assert_has_keys(obj: &Value, keys: &[String], context: &str) {
     }
 }
 
+fn assert_fixture_contract(
+    payload: &Value,
+    fixture: &Value,
+    top_level_key_field: &str,
+    sections: &[(&str, &str, &str)],
+) {
+    let top_keys = fixture_keys(fixture, top_level_key_field);
+    assert_has_keys(payload, &top_keys, "contract.top");
+    for (payload_section, fixture_keys_field, context) in sections {
+        let keys = fixture_keys(fixture, fixture_keys_field);
+        assert_has_keys(
+            payload.get(payload_section).expect("fixture section"),
+            &keys,
+            context,
+        );
+    }
+}
+
 #[test]
 fn task_lifecycle_add_claim_complete() {
     let repo = TempRepo::new("cxrs-it");
@@ -1205,27 +1223,15 @@ fn diag_json_matches_contract_fixture() {
     let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
     let fixture = load_fixture_json("diag_json_contract.json");
 
-    let top_keys = fixture_keys(&fixture, "top_level_keys");
-    assert_has_keys(&payload, &top_keys, "diag");
-
-    let routing_keys = fixture_keys(&fixture, "routing_trace_keys");
-    assert_has_keys(
-        payload.get("routing_trace").expect("routing_trace"),
-        &routing_keys,
-        "diag.routing_trace",
-    );
-
-    let scheduler_keys = fixture_keys(&fixture, "scheduler_keys");
-    assert_has_keys(
-        payload.get("scheduler").expect("scheduler"),
-        &scheduler_keys,
-        "diag.scheduler",
-    );
-    let retry_keys = fixture_keys(&fixture, "retry_keys");
-    assert_has_keys(
-        payload.get("retry").expect("retry"),
-        &retry_keys,
-        "diag.retry",
+    assert_fixture_contract(
+        &payload,
+        &fixture,
+        "top_level_keys",
+        &[
+            ("routing_trace", "routing_trace_keys", "diag.routing_trace"),
+            ("scheduler", "scheduler_keys", "diag.scheduler"),
+            ("retry", "retry_keys", "diag.retry"),
+        ],
     );
 }
 
@@ -1383,14 +1389,14 @@ fn scheduler_json_matches_contract_fixture() {
     let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("scheduler json");
     let fixture = load_fixture_json("scheduler_json_contract.json");
 
-    let top_keys = fixture_keys(&fixture, "top_level_keys");
-    assert_has_keys(&payload, &top_keys, "scheduler");
-
-    let scheduler_keys = fixture_keys(&fixture, "scheduler_keys");
-    assert_has_keys(
-        payload.get("scheduler").expect("scheduler"),
-        &scheduler_keys,
-        "scheduler.scheduler",
+    assert_fixture_contract(
+        &payload,
+        &fixture,
+        "top_level_keys",
+        &[
+            ("scheduler", "scheduler_keys", "scheduler.scheduler"),
+            ("retry", "retry_keys", "scheduler.retry"),
+        ],
     );
 }
 

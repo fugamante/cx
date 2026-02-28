@@ -52,6 +52,10 @@ All notable changes to this project are documented in this file.
     - `tests/fixtures/optimize_json_contract.json`
     - integration test validates top-level keys, scoreboard keys, and retry-health keys.
   - CI workflow now includes `Optimize Retry Contract Gate` smoke check asserting retry-health fields in `optimize --json`.
+- Diagnostics contract parity hardening:
+  - `scheduler --json` now includes a `retry` section (parity with `diag --json` retry summary).
+  - scheduler JSON fixture extended with retry keys (`tests/fixtures/scheduler_json_contract.json`).
+  - contract tests now use a shared fixture assertion helper to validate nested sections consistently across diag/scheduler surfaces.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
