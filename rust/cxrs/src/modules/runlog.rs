@@ -71,6 +71,46 @@ fn base_execution_log(
 ) -> ExecutionLog {
     let backend = llm_backend();
     let model = llm_model();
+    let model_opt = if model.is_empty() {
+        None
+    } else {
+        Some(model.clone())
+    };
+    let backend_selected = backend.clone();
+    let broker_policy = app_config().broker_policy.clone();
+    let route_reason = if backend == "ollama" {
+        if model.is_empty() {
+            "ollama_selected_model_unset".to_string()
+        } else {
+            "ollama_selected".to_string()
+        }
+    } else {
+        "codex_selected".to_string()
+    };
+    let replica_index = env::var("CX_TASK_REPLICA_INDEX")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let replica_count = env::var("CX_TASK_REPLICA_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok());
+    let converge_mode = env::var("CX_TASK_CONVERGE_MODE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let worker_id = env::var("CX_TASK_WORKER_ID")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let converge_winner = env::var("CX_TASK_CONVERGE_WINNER")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let converge_votes = env::var("CX_TASK_CONVERGE_VOTES")
+        .ok()
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+    let queue_ms = env::var("CX_TASK_QUEUE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
     let (task_id, task_parent_id) = current_task_fields();
     let mut row = ExecutionLog {
         execution_id: make_execution_id(tool),
@@ -83,7 +123,18 @@ fn base_execution_log(
         repo_root: root,
         backend_used: backend.clone(),
         llm_backend: backend,
-        llm_model: if model.is_empty() { None } else { Some(model) },
+        llm_model: model_opt.clone(),
+        backend_selected: Some(backend_selected),
+        model_selected: model_opt,
+        route_policy: Some(broker_policy),
+        route_reason: Some(route_reason),
+        worker_id,
+        replica_index,
+        replica_count,
+        converge_mode,
+        converge_winner,
+        converge_votes,
+        queue_ms,
         task_id,
         task_parent_id,
         ..Default::default()

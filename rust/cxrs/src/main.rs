@@ -13,6 +13,8 @@ mod bench_parity;
 mod bench_parity_mocks;
 #[path = "modules/bench_parity_support.rs"]
 mod bench_parity_support;
+#[path = "modules/broker.rs"]
+mod broker;
 #[path = "modules/capture.rs"]
 mod capture;
 #[path = "modules/cmdctx.rs"]
@@ -97,6 +99,8 @@ mod task_cmds;
 mod taskrun;
 #[path = "modules/tasks.rs"]
 mod tasks;
+#[path = "modules/tasks_plan.rs"]
+mod tasks_plan;
 #[path = "modules/types.rs"]
 mod types;
 #[path = "modules/util.rs"]

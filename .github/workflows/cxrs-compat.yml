@@ -75,6 +75,28 @@ jobs:
           echo "$out" | jq -e '.fields | type == "array"' >/dev/null
           echo "$out" | jq -e '.contract_drift.new_keys_second_half | type == "array"' >/dev/null
 
+      - name: Phase IV Scheduler Gate
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          trap 'rm -rf "$repo"' EXIT
+          git -C "$repo" init -q
+          mkdir -p "$repo/.codex/cxlogs"
+          cat > "$repo/.codex/cxlogs/runs.jsonl" <<'JSONL'
+          {"execution_id":"s1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":12,"schema_enforced":false,"schema_valid":true,"queue_ms":3000,"worker_id":"w1"}
+          {"execution_id":"s2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":14,"schema_enforced":false,"schema_valid":true,"queue_ms":3200,"worker_id":"w1"}
+          {"execution_id":"s3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo","backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":16,"schema_enforced":false,"schema_valid":true,"queue_ms":3400,"worker_id":"w1"}
+          JSONL
+          set +e
+          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- diag --json --strict --window 3)"
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+          echo "$out" | jq -e '.severity != "ok"' >/dev/null
+          echo "$out" | jq -e '.scheduler.queue_rows == 3' >/dev/null
+          sched="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- scheduler --json --window 3)"
+          echo "$sched" | jq -e '.scheduler_window_requested == 3' >/dev/null
+
       - name: Quality gate
         run: |
           cd rust/cxrs

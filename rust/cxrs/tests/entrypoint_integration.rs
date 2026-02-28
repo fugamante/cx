@@ -2,9 +2,19 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
+    let mut cur = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for _ in 0..6 {
+        if cur.join(".codex").join("schemas").is_dir() && cur.join("bin").join("cx").is_file() {
+            return cur;
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    panic!(
+        "unable to resolve repo root from {}",
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).display()
+    );
 }
 
 #[test]

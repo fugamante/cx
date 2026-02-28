@@ -214,8 +214,10 @@ Stage II runtime commands:
 ./bin/cx task add "Implement parser hardening" --role implementer
 ./bin/cx task list --status pending
 ./bin/cx task fanout "Ship release notes improvements" --from staged-diff
+./bin/cx task run-plan --status pending
 ./bin/cx task run <task_id> --mode deterministic --backend codex
 ./bin/cx task run-all --status pending
+./bin/cx task run-all --status pending --mode mixed
 
 ./bin/cx optimize 200
 ./bin/cx optimize 200 --json | jq .
@@ -223,6 +225,30 @@ Stage II runtime commands:
 ./bin/cx policy show
 ./bin/cx logs validate --fix=false
 ```
+
+## Migration Phase III (Orchestration Modes)
+
+Current status:
+- task graph and runner exist (`task add/list/fanout/run/run-all`), with sequential execution as the default.
+
+Next migration phase (active on feature branch, not yet merged to main behavior):
+- add switchable orchestration modes so tasks can be explicitly sequential or parallelizable.
+- introduce execution-policy metadata on tasks (`run_mode`, `depends_on`, `resource_keys`, optional retries/timeouts).
+- introduce `task run-plan` for deterministic schedule preview before execution.
+- keep safety/determinism contracts unchanged:
+  - policy gates still enforced for execution paths,
+  - schema commands remain deterministic by default,
+  - telemetry/log contracts remain append-only and validated.
+
+## Phase IV Preview (Multi-Model Tandem)
+
+Planned next migration focus:
+- broker-managed backend/model routing for tasks (`codex`, `ollama`, `auto`)
+- tandem execution convergence (`first_valid`, `majority`, `judge`, `score`)
+- backend pool scheduling for mixed-mode run-all with deterministic planning constraints
+
+Design and schedule:
+- `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`
 
 ## Validation
 

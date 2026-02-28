@@ -41,6 +41,22 @@ fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
     panic!("git init failed after retries: {:?}", last);
 }
 
+fn repo_root() -> PathBuf {
+    let mut cur = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for _ in 0..6 {
+        if cur.join(".codex").join("schemas").is_dir() && cur.join("bin").join("cx").is_file() {
+            return cur;
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    panic!(
+        "unable to resolve repo root from {}",
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).display()
+    );
+}
+
 pub struct TempRepo {
     pub root: PathBuf,
     pub home: PathBuf,
@@ -78,11 +94,7 @@ impl TempRepo {
     }
 
     pub fn copy_schema_registry(&self) {
-        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join(".codex")
-            .join("schemas");
+        let src = repo_root().join(".codex").join("schemas");
         let dst = self.root.join(".codex").join("schemas");
         fs::create_dir_all(&dst).expect("create schema dst dir");
         for entry in fs::read_dir(&src).expect("read schema src dir") {

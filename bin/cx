@@ -22,7 +22,10 @@ _cx_needs_build() {
   [[ ! -x "$bin" ]] && return 0
   [[ "$CXRS_MANIFEST" -nt "$bin" ]] && return 0
   [[ "$REPO_ROOT/rust/cxrs/Cargo.lock" -nt "$bin" ]] && return 0
-  [[ "$REPO_ROOT/rust/cxrs/src/main.rs" -nt "$bin" ]] && return 0
+  if find "$REPO_ROOT/rust/cxrs/src" -type f -name '*.rs' -newer "$bin" -print -quit 2>/dev/null \
+    | grep -q .; then
+    return 0
+  fi
   return 1
 }
 
@@ -35,6 +38,9 @@ _cx_run_rust() {
     fi
     cxrs_bin="$CXRS_BIN_RELEASE"
   elif [[ -x "$CXRS_BIN_DEBUG" ]]; then
+    if _cx_needs_build "$CXRS_BIN_DEBUG" && command -v cargo >/dev/null 2>&1; then
+      cargo build --quiet --manifest-path "$CXRS_MANIFEST" 1>&2
+    fi
     cxrs_bin="$CXRS_BIN_DEBUG"
   elif [[ -f "$CXRS_MANIFEST" ]] && command -v cargo >/dev/null 2>&1; then
     # Build once, then execute the compiled binary. Avoid `cargo run` to prevent compile warnings

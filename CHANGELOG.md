@@ -5,6 +5,87 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase IV broker + mixed routing controls:
+  - `cx broker set --policy latency|quality|cost|balanced` persisted to `.codex/state.json`.
+  - `cx task run-all --mode mixed` now accepts:
+    - `--backend-pool codex,ollama`
+    - `--backend-cap backend=limit`
+    - `--max-workers N` (planner metadata; single-worker execution remains current behavior)
+  - deterministic backend selection per scheduled task using task backend preference + broker policy fallback.
+  - `task run-all --mode mixed` now executes with bounded worker scheduling when `--max-workers > 1`:
+    - enforces per-backend caps (`--backend-cap`).
+    - uses parent-managed task status transitions to avoid concurrent task-file races.
+    - records queue telemetry via `queue_ms` and worker identity via `worker_id`.
+- task-run command tests for backend-pool parsing and task backend preference routing.
+- Phase IV convergence metadata scaffold:
+  - task schema now supports:
+    - `converge` (`none|first_valid|majority|judge|score`)
+    - `replicas` (default `1`)
+    - `max_concurrency` (optional)
+  - `cx task add` parses and validates the new convergence flags.
+  - run logs can now carry replica/convergence telemetry context:
+    - `replica_index`, `replica_count`, `converge_mode`, `converge_winner`, `converge_votes`, `queue_ms`.
+- Phase IV convergence execution baseline:
+  - `task run` now executes task replicas sequentially when `replicas > 1` and convergence mode is enabled.
+  - supported convergence selection behavior:
+    - `first_valid`: first successful replica wins (early stop)
+    - `majority`: winner selected by success/failure majority with deterministic tie-break
+    - `judge` / `score`: currently mapped to deterministic `first_valid` fallback
+  - replica execution context is exported for telemetry (`CX_TASK_REPLICA_INDEX`, `CX_TASK_REPLICA_COUNT`, `CX_TASK_CONVERGE_MODE`).
+- convergence summary log rows (`tool=cxtask_converge`) now materialize:
+  - `converge_winner`
+  - `converge_votes` (ok/fail/executed counts)
+- convergence strategies upgraded:
+  - `judge` and `score` now use deterministic scoring-based winner selection (no LLM judge yet).
+  - score factors: success status, execution id presence, and error-size penalty.
+  - deterministic tie-break: lowest replica index.
+- mixed-mode scheduler reliability coverage expanded:
+  - backend cap enforcement test for codex-limited worker scheduling.
+  - dependency-wave ordering test with queue telemetry assertions.
+  - balanced backend-pool fairness test (codex + ollama) to ensure no backend starvation.
+  - queue growth stress test under strict backend cap (`codex=1`) validating deferred-task `queue_ms`.
+- `cxdiag` scheduler diagnostics section:
+  - reports recent-window queue telemetry (`scheduler_queue_ms_avg`, `scheduler_queue_ms_p95`),
+  - worker distribution (`scheduler_workers_seen`, `scheduler_worker_distribution`),
+  - backend distribution (`scheduler_backend_distribution`).
+  - added `diag --json` for machine-readable diagnostics output (including scheduler block).
+  - added `diag --window N` to scope scheduler diagnostics to the most recent N runs.
+  - added `diag --json --strict` severity gating:
+    - emits `severity` + `severity_reasons`,
+    - returns non-zero when severity is not `ok` in strict mode.
+- added dedicated scheduler diagnostics command:
+  - `cx scheduler [--json] [--window N] [--strict]`
+  - emits queue/worker/backend telemetry and severity gate output without full `diag` payload.
+- mixed scheduler execution polish:
+  - `task run-all --mode mixed` now supports `--fairness round_robin|least_loaded`.
+  - backend selection now gracefully falls back to available providers when a pooled backend is unavailable.
+  - backend availability checks now honor explicit disable env flags:
+    - `CX_DISABLE_CODEX=1`
+    - `CX_DISABLE_OLLAMA=1`
+- convergence `judge` mode upgraded from deterministic scoring fallback to model-assisted selection:
+  - judge path runs schema-enforced JSON winner selection (`winner_index`, `reason`) with deterministic fallback on parse/validation failure.
+  - convergence telemetry now logs richer vote metadata:
+    - `decision_source` (`judge_model|fallback`),
+    - `decision_reason`,
+    - candidate-level score details.
+- CI added scheduler strictness gate in `.github/workflows/cxrs-compat.yml`:
+  - validates `diag --json --strict --window 3` non-zero behavior for high queue pressure.
+  - validates `scheduler --json --window 3` output contract.
+
+- Phase III orchestration substrate (first executable step):
+  - `cx task run-plan [--status ...] [--json]` for deterministic execution-wave planning.
+  - new planner module: `rust/cxrs/src/modules/tasks_plan.rs`.
+  - planner computes sequential + parallel waves, dependency ordering, resource-lock gating, and blocked-task reporting.
+- Task metadata extended for switchable orchestration policy:
+  - `run_mode` (`sequential|parallel`)
+  - `depends_on` (task id list)
+  - `resource_keys` (logical lock domains)
+  - `max_retries` (optional)
+  - `timeout_secs` (optional)
+- Task planning tests in `tasks_plan.rs`:
+  - dependency ordering
+  - parallel lock conflict handling
+  - blocked/cycle detection
 - Rust integration entrypoint coverage:
   - `rust/cxrs/tests/entrypoint_integration.rs`
   - validates `bin/cx version` execution path and `lib/cx.sh` sourceability/function export.
@@ -110,6 +191,19 @@ All notable changes to this project are documented in this file.
     - added macOS-only deterministic output stability test for `telemetry --json`
 
 ### Changed
+- `task run-all` now supports `--mode sequential|mixed`:
+  - `sequential` preserves prior behavior.
+  - `mixed` executes deterministic run-plan waves (single-worker execution, parallel-ready ordering).
+- `task add` now accepts orchestration policy flags:
+  - `--mode`
+  - `--depends-on`
+  - `--resource` / `--resource-keys`
+  - `--max-retries`
+  - `--timeout-secs`
+- fanout-created tasks now carry explicit execution policy defaults:
+  - parent fanout task is sequential,
+  - child subtasks default to parallel with parent dependency and role-based resource keys.
+- task help now includes `task run-plan`.
 - `rust/cxrs/src/modules/help.rs` reduced to facade + shared data/render modules.
 - `rust/cxrs/src/modules/compat_cmd.rs` and `rust/cxrs/src/modules/native_cmd.rs` reduced to deps + thin handler facades.
 - `.github/workflows/cxrs-compat.yml` now runs release metadata check (`python3 rust/cxrs/tools/release_check.py --repo-root "$GITHUB_WORKSPACE"`).

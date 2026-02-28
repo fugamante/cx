@@ -18,8 +18,13 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "diag",
-        usage: "diag",
+        usage: "diag [--json] [--window N] [--strict]",
         description: "Non-interactive diagnostic report",
+    },
+    CommandHelp {
+        name: "scheduler",
+        usage: "scheduler [--json] [--window N] [--strict]",
+        description: "Scheduler-focused diagnostics summary",
     },
     CommandHelp {
         name: "parity",
@@ -60,6 +65,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         name: "core",
         usage: "core",
         description: "Show execution-core pipeline config",
+    },
+    CommandHelp {
+        name: "broker",
+        usage: "broker show [--json]",
+        description: "Show backend broker policy, active selection, and provider availability",
     },
     CommandHelp {
         name: "task",
@@ -286,8 +296,8 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
 pub const TASK_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "task add",
-        usage: "cx task add \"<objective>\" --role <architect|implementer|reviewer|tester|doc>",
-        description: "Create a task with role and objective",
+        usage: "cx task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--backend <auto|codex|ollama>] [--model <name>] [--profile <fast|balanced|quality|schema_strict>] [--converge <none|first_valid|majority|judge|score>] [--replicas <n>] [--max-concurrency <n>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
+        description: "Create a task with role, routing, and orchestration metadata",
     },
     CommandHelp {
         name: "task list",
@@ -320,13 +330,18 @@ pub const TASK_COMMANDS: &[CommandHelp] = &[
         description: "Generate role-tagged subtasks",
     },
     CommandHelp {
+        name: "task run-plan",
+        usage: "cx task run-plan [--status pending|in_progress|complete|failed] [--json]",
+        description: "Preview deterministic execution waves before run-all",
+    },
+    CommandHelp {
         name: "task run",
         usage: "cx task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]",
         description: "Run one task objective",
     },
     CommandHelp {
         name: "task run-all",
-        usage: "cx task run-all [--status pending]",
-        description: "Run pending tasks sequentially",
+        usage: "cx task run-all [--status pending] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N]",
+        description: "Run tasks by status (sequential default; mixed uses run-plan waves and broker-aware backend routing)",
     },
 ];

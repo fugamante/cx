@@ -6,6 +6,7 @@ mod deps;
 use crate::agentcmds;
 use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
 use crate::bench_parity;
+use crate::broker::cmd_broker as broker_cmd;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};
 use crate::cmdctx::CmdCtx;
 use crate::command_names::{is_compat_name, is_native_name};
@@ -14,7 +15,7 @@ use crate::config::{
     APP_DESC, APP_NAME, APP_VERSION, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW, app_config,
     init_app_config,
 };
-use crate::diagnostics::cmd_diag;
+use crate::diagnostics::{cmd_diag, cmd_scheduler};
 use crate::doctor;
 use crate::execmeta::utc_now_iso;
 use crate::help::{render_help, render_task_help};
@@ -200,8 +201,12 @@ fn compat_cmd_where(args: &[String]) -> i32 {
     print_where(args, APP_VERSION)
 }
 
-fn compat_cmd_diag() -> i32 {
-    cmd_diag(APP_VERSION)
+fn compat_cmd_diag(args: &[String]) -> i32 {
+    cmd_diag(APP_VERSION, args)
+}
+
+fn compat_cmd_scheduler(args: &[String]) -> i32 {
+    cmd_scheduler(args)
 }
 
 fn compat_cmd_core() -> i32 {
@@ -214,6 +219,10 @@ fn compat_cmd_logs(args: &[String]) -> i32 {
 
 fn compat_cmd_policy(args: &[String]) -> i32 {
     cmd_policy(args, APP_NAME)
+}
+
+fn compat_cmd_broker(args: &[String]) -> i32 {
+    broker_cmd(APP_NAME, args)
 }
 
 fn compat_cmd_llm(args: &[String]) -> i32 {
@@ -252,8 +261,12 @@ fn native_cmd_where(args: &[String]) -> i32 {
     print_where(args, APP_VERSION)
 }
 
-fn native_cmd_diag() -> i32 {
-    cmd_diag(APP_VERSION)
+fn native_cmd_diag(args: &[String]) -> i32 {
+    cmd_diag(APP_VERSION, args)
+}
+
+fn native_cmd_scheduler(args: &[String]) -> i32 {
+    cmd_scheduler(args)
 }
 
 fn native_cmd_core() -> i32 {
@@ -266,6 +279,10 @@ fn native_cmd_llm(args: &[String]) -> i32 {
 
 fn native_cmd_policy(args: &[String]) -> i32 {
     cmd_policy(args, APP_NAME)
+}
+
+fn native_cmd_broker(args: &[String]) -> i32 {
+    broker_cmd(APP_NAME, args)
 }
 
 fn native_cmd_doctor() -> i32 {

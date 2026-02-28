@@ -78,6 +78,16 @@ pub struct RunEntry {
     #[serde(default)]
     pub llm_model: Option<String>,
     #[serde(default)]
+    pub worker_id: Option<String>,
+    #[serde(default)]
+    pub converge_mode: Option<String>,
+    #[serde(default)]
+    pub converge_winner: Option<String>,
+    #[serde(default)]
+    pub converge_votes: Option<Value>,
+    #[serde(default)]
+    pub queue_ms: Option<u64>,
+    #[serde(default)]
     pub task_id: Option<String>,
     #[serde(default)]
     pub task_parent_id: Option<String>,
@@ -213,6 +223,17 @@ pub struct ExecutionLog {
     pub backend_used: String,
     pub llm_backend: String,
     pub llm_model: Option<String>,
+    pub backend_selected: Option<String>,
+    pub model_selected: Option<String>,
+    pub route_policy: Option<String>,
+    pub route_reason: Option<String>,
+    pub worker_id: Option<String>,
+    pub replica_index: Option<u32>,
+    pub replica_count: Option<u32>,
+    pub converge_mode: Option<String>,
+    pub converge_winner: Option<String>,
+    pub converge_votes: Option<Value>,
+    pub queue_ms: Option<u64>,
     pub capture_provider: Option<String>,
     pub execution_mode: String,
     pub duration_ms: Option<u64>,
@@ -259,7 +280,49 @@ pub struct TaskRecord {
     pub role: String,
     pub objective: String,
     pub context_ref: String,
+    #[serde(default = "default_task_backend")]
+    pub backend: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_task_profile")]
+    pub profile: String,
+    #[serde(default = "default_task_converge")]
+    pub converge: String,
+    #[serde(default = "default_task_replicas")]
+    pub replicas: u32,
+    #[serde(default)]
+    pub max_concurrency: Option<u32>,
+    #[serde(default = "default_task_run_mode")]
+    pub run_mode: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub resource_keys: Vec<String>,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_task_run_mode() -> String {
+    "sequential".to_string()
+}
+
+fn default_task_backend() -> String {
+    "auto".to_string()
+}
+
+fn default_task_profile() -> String {
+    "balanced".to_string()
+}
+
+fn default_task_converge() -> String {
+    "none".to_string()
+}
+
+fn default_task_replicas() -> u32 {
+    1
 }

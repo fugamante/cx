@@ -6,6 +6,9 @@
 - Increase Rust command parity with Bash fallback paths.
 - Stabilize replay determinism under repeated runs.
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).
+- Phase III kickoff: switchable orchestration modes (`sequential` + `parallel`) on top of current task graph.
+- Add task execution policy metadata (`run_mode`, `depends_on`, `resource_keys`, optional retries/timeouts).
+- Add deterministic scheduler planning (`task run-plan`) before mixed-mode execution.
 
 ## Next (1-2 months)
 
@@ -13,12 +16,17 @@
 - Add CI-level artifact reports for reliability suite failures.
 - Improve task orchestration ergonomics (`task show`/`task run` UX polish).
 - Broaden OS validation matrix (Linux-focused CI pass).
+- Add bounded worker pool for `parallel` tasks with dependency + resource-lock enforcement.
+- Add run-level concurrency telemetry (`worker_id`, queue/start/finish timestamps, attempt).
+- Phase IV kickoff: multi-model tandem orchestration with broker routing policies.
+- Add task-level backend/model/profile assignment (`codex|ollama|auto`).
+- Add convergence modes for tandem runs (`first_valid`, `majority`, `judge`, `score`).
 
 ## Later (2+ months)
 
-- Optional parallel task execution model (without changing core contract).
 - Pluggable backend adapters beyond Codex/Ollama.
 - Incremental CLI packaging/distribution improvements (Homebrew-ready metadata).
+- Optional distributed execution backends (multi-process/remote workers) while preserving current log/schema contracts.
 
 ## Guardrails
 
@@ -26,3 +34,5 @@
 - Bash remains compatibility/bootstrap.
 - Structured commands stay schema-enforced.
 - Logging contract changes require tests + changelog.
+- Mixed-mode orchestration must keep policy boundaries and deterministic schema behavior.
+- Multi-model routing must preserve schema determinism, quarantine replayability, and stable log contracts.
