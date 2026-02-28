@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
     - `--severity critical`: fail only on critical violations.
     - `--severity warn`: fail on warn or critical violations.
   - JSON output now includes `severity` and `violation_counts`.
+  - CI now exercises both strict severity paths (`critical` pass dataset and `warn` fail dataset).
 - `broker benchmark` strict sample gate:
   - new flags: `--strict` and `--min-runs N` (default `1`).
   - strict mode returns non-zero when any requested backend has fewer than `min_runs` samples.

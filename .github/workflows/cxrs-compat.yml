@@ -134,6 +134,19 @@ jobs:
           echo "$out" | jq -e '.violations | type == "array" and length == 0' >/dev/null
           echo "$out" | jq -e '.violation_counts.warn == 0 and .violation_counts.critical == 0' >/dev/null
 
+          # Warn-only threshold path: insufficient samples but non-zero per backend should fail only under severity=warn.
+          cat > "$repo/.codex/cxlogs/runs.jsonl" <<'JSONL'
+          {"execution_id":"bw1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":900,"schema_enforced":false,"schema_valid":true}
+          {"execution_id":"bw2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean","duration_ms":950,"schema_enforced":false,"schema_valid":true}
+          JSONL
+          set +e
+          warn_out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend codex --backend ollama --window 10 --strict --min-runs 2 --severity warn --json)"
+          warn_rc=$?
+          set -e
+          test "$warn_rc" -eq 1
+          echo "$warn_out" | jq -e '.severity == "warn"' >/dev/null
+          echo "$warn_out" | jq -e '.violation_counts.warn >= 1 and .violation_counts.critical == 0' >/dev/null
+
       - name: Quality gate
         run: |
           cd rust/cxrs
