@@ -1073,7 +1073,7 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
         issue_count, strict_violations,
         "logs validate and telemetry strict violation counts diverged"
     );
-    assert_eq!(required, 30, "unexpected strict contract field count");
+    assert_eq!(required, 33, "unexpected strict contract field count");
 }
 
 #[cfg(target_os = "macos")]

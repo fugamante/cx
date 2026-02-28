@@ -109,6 +109,9 @@ fn normalize_execution_log_row(
 
 fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut ExecutionLog) {
     row.llm_model = get_opt_str(obj, "llm_model");
+    row.adapter_type = get_opt_str(obj, "adapter_type");
+    row.provider_transport = get_opt_str(obj, "provider_transport");
+    row.provider_status = get_opt_str(obj, "provider_status");
     row.capture_provider = get_opt_str(obj, "capture_provider");
     row.duration_ms = get_opt_u64(obj, "duration_ms");
     row.schema_name = get_opt_str(obj, "schema_name");

@@ -12,6 +12,11 @@ All notable changes to this project are documented in this file.
   - added adapter-focused unit coverage for backend normalization and Ollama JSONL wrapping.
   - added centralized adapter invocation helpers for current backend selection.
   - surfaced `provider_adapter` in `cxversion` and `cxcore` runtime introspection output.
+  - telemetry contract expanded with adapter transport fields:
+    - `adapter_type`
+    - `provider_transport`
+    - `provider_status`
+  - strict log contract, migration, and integration assertions updated for the new fields.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:
