@@ -4,6 +4,13 @@ use crate::llm::{
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use std::env;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderCapabilities {
+    pub jsonl_native: bool,
+    pub schema_strict: bool,
+    pub transport: &'static str,
+}
+
 fn normalized_backend_name(raw: &str) -> &'static str {
     if raw.eq_ignore_ascii_case("ollama") {
         "ollama"
@@ -44,6 +51,40 @@ fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
     }
 }
 
+pub fn capabilities_for_adapter(adapter_name: &str) -> ProviderCapabilities {
+    match adapter_name {
+        "codex-cli" => ProviderCapabilities {
+            jsonl_native: true,
+            schema_strict: true,
+            transport: "process",
+        },
+        "ollama-cli" => ProviderCapabilities {
+            jsonl_native: false,
+            schema_strict: true,
+            transport: "process",
+        },
+        "mock" => ProviderCapabilities {
+            jsonl_native: false,
+            schema_strict: true,
+            transport: "mock",
+        },
+        _ => ProviderCapabilities {
+            jsonl_native: false,
+            schema_strict: true,
+            transport: "process",
+        },
+    }
+}
+
+pub fn selected_provider_capabilities() -> ProviderCapabilities {
+    capabilities_for_adapter(selected_adapter_name())
+}
+
+pub fn current_provider_capabilities() -> Result<ProviderCapabilities, LlmRunError> {
+    let adapter = resolve_provider_adapter()?;
+    Ok(adapter.capabilities())
+}
+
 fn ollama_plain_to_jsonl(text: &str) -> Result<String, LlmRunError> {
     wrap_agent_text_as_jsonl(text).map_err(LlmRunError::message)
 }
@@ -51,6 +92,7 @@ fn ollama_plain_to_jsonl(text: &str) -> Result<String, LlmRunError> {
 pub trait ProviderAdapter {
     fn run_plain(&self, prompt: &str) -> Result<String, LlmRunError>;
     fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError>;
+    fn capabilities(&self) -> ProviderCapabilities;
 }
 
 pub struct CodexCliAdapter;
@@ -62,6 +104,10 @@ impl ProviderAdapter for CodexCliAdapter {
 
     fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError> {
         run_codex_jsonl(prompt)
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        capabilities_for_adapter("codex-cli")
     }
 }
 
@@ -84,6 +130,10 @@ impl ProviderAdapter for OllamaCliAdapter {
     fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError> {
         let text = self.run_plain(prompt)?;
         ollama_plain_to_jsonl(&text)
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        capabilities_for_adapter("ollama-cli")
     }
 }
 
@@ -131,6 +181,10 @@ impl ProviderAdapter for MockAdapter {
         let plain = self.run_plain(prompt)?;
         ollama_plain_to_jsonl(&plain)
     }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        capabilities_for_adapter("mock")
+    }
 }
 
 pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunError> {
@@ -152,7 +206,7 @@ pub fn run_jsonl_with_current_adapter(prompt: &str) -> Result<String, LlmRunErro
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_backend_name, ollama_plain_to_jsonl};
+    use super::{ProviderAdapter, normalized_backend_name, ollama_plain_to_jsonl};
     use serde_json::Value;
 
     #[test]
@@ -202,5 +256,31 @@ mod tests {
             super::provider_transport_for_adapter("ollama-cli"),
             "process"
         );
+    }
+
+    #[test]
+    fn capabilities_mapping_is_deterministic() {
+        let codex = super::capabilities_for_adapter("codex-cli");
+        assert!(codex.jsonl_native);
+        assert!(codex.schema_strict);
+        assert_eq!(codex.transport, "process");
+
+        let ollama = super::capabilities_for_adapter("ollama-cli");
+        assert!(!ollama.jsonl_native);
+        assert!(ollama.schema_strict);
+        assert_eq!(ollama.transport, "process");
+
+        let mock = super::capabilities_for_adapter("mock");
+        assert!(!mock.jsonl_native);
+        assert!(mock.schema_strict);
+        assert_eq!(mock.transport, "mock");
+    }
+
+    #[test]
+    fn adapter_trait_capabilities_match_mapping() {
+        let codex = super::CodexCliAdapter;
+        let caps = codex.capabilities();
+        assert!(caps.jsonl_native);
+        assert_eq!(caps.transport, "process");
     }
 }
