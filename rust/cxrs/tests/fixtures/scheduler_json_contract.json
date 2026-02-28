@@ -1,0 +1,18 @@
+{
+  "top_level_keys": [
+    "log_file",
+    "scheduler_window_requested",
+    "scheduler",
+    "severity",
+    "severity_reasons"
+  ],
+  "scheduler_keys": [
+    "window_runs",
+    "queue_rows",
+    "queue_ms_avg",
+    "queue_ms_p95",
+    "workers_seen",
+    "worker_distribution",
+    "backend_distribution"
+  ]
+}

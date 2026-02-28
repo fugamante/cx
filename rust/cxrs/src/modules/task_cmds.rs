@@ -1,11 +1,13 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
 use std::thread;
 use std::time::Instant;
 
 use crate::cmdctx::CmdCtx;
 use crate::config::app_config;
+use crate::paths::resolve_log_file;
 use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::state::{current_task_id, set_state_path};
 use crate::taskrun::{TaskRunError, TaskRunner};
@@ -197,6 +199,65 @@ struct ActiveLaunch {
     join: thread::JoinHandle<Result<(i32, Option<String>), String>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum FailureClass {
+    Retryable,
+    NonRetryable,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RunAllSummary {
+    ok: usize,
+    failed: usize,
+    retryable_failed: usize,
+    non_retryable_failed: usize,
+    blocked: usize,
+}
+
+impl RunAllSummary {
+    fn record_success(&mut self) {
+        self.ok += 1;
+    }
+
+    fn record_failure(&mut self, class: FailureClass) {
+        self.failed += 1;
+        match class {
+            FailureClass::Retryable => self.retryable_failed += 1,
+            FailureClass::NonRetryable => self.non_retryable_failed += 1,
+            FailureClass::Blocked => self.blocked += 1,
+        }
+    }
+}
+
+fn classify_failure_for_execution(execution_id: Option<&str>) -> FailureClass {
+    let Some(exec_id) = execution_id else {
+        return FailureClass::NonRetryable;
+    };
+    let Some(log_file) = resolve_log_file() else {
+        return FailureClass::NonRetryable;
+    };
+    let Ok(content) = fs::read_to_string(log_file) else {
+        return FailureClass::NonRetryable;
+    };
+    for line in content.lines().rev() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("execution_id").and_then(Value::as_str) != Some(exec_id) {
+            continue;
+        }
+        if v.get("policy_blocked").and_then(Value::as_bool) == Some(true) {
+            return FailureClass::Blocked;
+        }
+        if v.get("timed_out").and_then(Value::as_bool) == Some(true) {
+            return FailureClass::Retryable;
+        }
+        return FailureClass::NonRetryable;
+    }
+    FailureClass::NonRetryable
+}
+
 fn parse_execution_id(stdout: &str) -> Option<String> {
     stdout
         .lines()
@@ -299,7 +360,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             .collect()
     };
 
-    let (ok, failed) = if options.run_mode == "mixed" && options.max_workers > 1 {
+    let summary = if options.run_mode == "mixed" && options.max_workers > 1 {
         match run_schedule_parallel(&schedule, &task_index, &options) {
             Ok(v) => v,
             Err(e) => {
@@ -308,8 +369,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             }
         }
     } else {
-        let mut ok = 0usize;
-        let mut failed = 0usize;
+        let mut summary = RunAllSummary::default();
         for (idx, id) in schedule.iter().enumerate() {
             let task = task_index.get(id);
             let backend_selected = fallback_backend(
@@ -323,11 +383,13 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                 backend_selected.as_deref(),
                 false,
             ) {
-                Ok((code, _)) => {
+                Ok((code, execution_id)) => {
                     if code == 0 {
-                        ok += 1;
+                        summary.record_success();
                     } else {
-                        failed += 1;
+                        summary.record_failure(classify_failure_for_execution(
+                            execution_id.as_deref(),
+                        ));
                         crate::cx_eprintln!("cxrs task run-all: task failed: {id}");
                     }
                 }
@@ -337,13 +399,18 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                 }
             }
         }
-        (ok, failed)
+        summary
     };
     println!(
-        "run-all summary: mode={}, complete={ok}, failed={failed}",
-        options.run_mode
+        "run-all summary: mode={}, complete={}, failed={}, blocked={}, retryable_failures={}, non_retryable_failures={}",
+        options.run_mode,
+        summary.ok,
+        summary.failed,
+        summary.blocked,
+        summary.retryable_failed,
+        summary.non_retryable_failed
     );
-    if failed > 0 { 1 } else { 0 }
+    if summary.failed > 0 { 1 } else { 0 }
 }
 
 #[derive(Debug, Clone)]
@@ -625,7 +692,7 @@ fn run_schedule_parallel(
     schedule: &[String],
     task_index: &HashMap<String, TaskRecord>,
     options: &RunAllOptions,
-) -> Result<(usize, usize), String> {
+) -> Result<RunAllSummary, String> {
     let available = available_pool(&options.backend_pool);
     if available.is_empty() {
         return Err("task run-all: no available backend from --backend-pool".to_string());
@@ -645,8 +712,7 @@ fn run_schedule_parallel(
         .collect();
     let mut active: Vec<ActiveLaunch> = Vec::new();
     let mut backend_active: HashMap<String, usize> = HashMap::new();
-    let mut ok = 0usize;
-    let mut failed = 0usize;
+    let mut summary = RunAllSummary::default();
     let mut next_worker = 1usize;
 
     while !pending.is_empty() || !active.is_empty() {
@@ -709,18 +775,20 @@ fn run_schedule_parallel(
                 *v -= 1;
             }
             match join_out {
-                Ok((code, _execution_id)) => {
+                Ok((code, execution_id)) => {
                     if code == 0 {
-                        ok += 1;
+                        summary.record_success();
                         let _ = set_task_status_quiet(&done.id, "complete");
                     } else {
-                        failed += 1;
+                        summary.record_failure(classify_failure_for_execution(
+                            execution_id.as_deref(),
+                        ));
                         let _ = set_task_status_quiet(&done.id, "failed");
                         crate::cx_eprintln!("cxrs task run-all: task failed: {}", done.id);
                     }
                 }
                 Err(e) => {
-                    failed += 1;
+                    summary.record_failure(FailureClass::NonRetryable);
                     let _ = set_task_status_quiet(&done.id, "failed");
                     crate::cx_eprintln!("cxrs task run-all: critical error for {}: {e}", done.id);
                 }
@@ -728,7 +796,7 @@ fn run_schedule_parallel(
         }
     }
 
-    Ok((ok, failed))
+    Ok(summary)
 }
 
 fn handle_run_plan(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {

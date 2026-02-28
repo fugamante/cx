@@ -56,6 +56,14 @@ All notable changes to this project are documented in this file.
 - added dedicated scheduler diagnostics command:
   - `cx scheduler [--json] [--window N] [--strict]`
   - emits queue/worker/backend telemetry and severity gate output without full `diag` payload.
+- task orchestration run summaries now include failure taxonomy counts:
+  - `blocked`
+  - `retryable_failures`
+  - `non_retryable_failures`
+  (classification sourced from run-log metadata such as `policy_blocked` and `timed_out` when available)
+- added fixture-backed JSON contract tests for diagnostics surfaces:
+  - `diag --json` contract fixture (`tests/fixtures/diag_json_contract.json`)
+  - `scheduler --json` contract fixture (`tests/fixtures/scheduler_json_contract.json`)
 - mixed scheduler execution polish:
   - `task run-all --mode mixed` now supports `--fairness round_robin|least_loaded`.
   - backend selection now gracefully falls back to available providers when a pooled backend is unavailable.
