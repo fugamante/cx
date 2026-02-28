@@ -26,6 +26,19 @@ require_bin diff
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+ensure_seed_runlog() {
+  local runlog="$REPO_ROOT/.codex/cxlogs/runs.jsonl"
+  if [[ -s "$runlog" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$runlog")"
+  cat > "$runlog" <<'JSONL'
+{"execution_id":"seed_1","timestamp":"2026-01-01T00:00:00Z","ts":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","cwd":".","duration_ms":1200,"input_tokens":1000,"cached_input_tokens":200,"effective_input_tokens":800,"output_tokens":120,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"lean","schema_enforced":false,"schema_valid":true}
+{"execution_id":"seed_2","timestamp":"2026-01-01T00:01:00Z","ts":"2026-01-01T00:01:00Z","command":"cxcommitjson","tool":"cxcommitjson","cwd":".","duration_ms":1800,"input_tokens":1300,"cached_input_tokens":400,"effective_input_tokens":900,"output_tokens":160,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
+{"execution_id":"seed_3","timestamp":"2026-01-01T00:02:00Z","ts":"2026-01-01T00:02:00Z","command":"cxdiffsum_staged","tool":"cxdiffsum_staged","cwd":".","duration_ms":2200,"input_tokens":1600,"cached_input_tokens":600,"effective_input_tokens":1000,"output_tokens":200,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
+JSONL
+}
+
 run_bash_cx() {
   local cmd="$1"
   bash -lc "source \"$REPO_ROOT/cx.sh\" >/dev/null 2>&1; $cmd"
@@ -226,6 +239,8 @@ norm_metrics() {
 
 export CXALERT_MAX_MS="${CXALERT_MAX_MS:-8000}"
 export CXALERT_MAX_EFF_IN="${CXALERT_MAX_EFF_IN:-5000}"
+
+ensure_seed_runlog
 
 echo "[compat] comparing metrics (N=$N)"
 run_bash_cx "cxmetrics $N" | norm_metrics > "$tmpdir/bash_metrics.json"
