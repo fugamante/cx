@@ -8,6 +8,7 @@
     "fields",
     "contract_drift",
     "retry_telemetry",
+    "critical_telemetry",
     "http_mode_stats"
   ],
   "contract_drift_keys": [
@@ -23,6 +24,13 @@
     "tasks_retry_recovered",
     "tasks_retry_recovery_rate",
     "attempt_histogram"
+  ],
+  "critical_keys": [
+    "summary_rows",
+    "halt_enabled_rows",
+    "halted_rows",
+    "critical_errors_total",
+    "runs_with_critical_errors"
   ],
   "http_mode_item_keys": [
     "format",

@@ -1232,6 +1232,10 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     assert!(retry.get("rows_with_retry_metadata").is_some());
     assert!(retry.get("rows_after_retry_success_rate").is_some());
     assert!(retry.get("attempt_histogram").is_some());
+    let critical = v.get("critical_telemetry").expect("critical_telemetry");
+    assert!(critical.get("summary_rows").is_some());
+    assert!(critical.get("halted_rows").is_some());
+    assert!(critical.get("critical_errors_total").is_some());
     let http_modes = v
         .get("http_mode_stats")
         .and_then(Value::as_array)
@@ -1291,6 +1295,14 @@ fn telemetry_json_matches_contract_fixture() {
         payload.get("retry_telemetry").expect("retry_telemetry"),
         &retry_keys,
         "telemetry.retry_telemetry",
+    );
+    let critical_keys = fixture_keys(&fixture, "critical_keys");
+    assert_has_keys(
+        payload
+            .get("critical_telemetry")
+            .expect("critical_telemetry"),
+        &critical_keys,
+        "telemetry.critical_telemetry",
     );
     let item_keys = fixture_keys(&fixture, "http_mode_item_keys");
     let modes = payload

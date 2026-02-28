@@ -111,6 +111,7 @@ All notable changes to this project are documented in this file.
       - `halted_rows`
       - `critical_errors_total`
       - `runs_with_critical_errors`
+    - `logs stats` / `telemetry --json` now includes `critical_telemetry` with the same run-all critical counters for windowed trend analysis.
     - strict diagnostics severity now raises `critical_halts_detected` when halted run-all telemetry is present in the diagnostics window.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
