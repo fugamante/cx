@@ -195,7 +195,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
         stderr_str(&out)
     );
     assert!(
-        elapsed_ms >= 1800 && elapsed_ms <= 3800,
+        (1800..=3800).contains(&elapsed_ms),
         "expected two-wave runtime envelope, got elapsed_ms={elapsed_ms}"
     );
 

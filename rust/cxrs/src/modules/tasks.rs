@@ -101,28 +101,24 @@ fn parse_csv_list(v: &str) -> Vec<String> {
         .collect()
 }
 
-fn parse_add_flags(
-    args: &[String],
-    mut i: usize,
-) -> Result<
-    (
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        u32,
-        Option<u32>,
-        String,
-        Vec<String>,
-        Vec<String>,
-        Option<u32>,
-        Option<u64>,
-    ),
-    i32,
-> {
+type AddFlagsParsed = (
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    u32,
+    Option<u32>,
+    String,
+    Vec<String>,
+    Vec<String>,
+    Option<u32>,
+    Option<u64>,
+);
+
+fn parse_add_flags(args: &[String], mut i: usize) -> Result<AddFlagsParsed, i32> {
     let mut role = "implementer".to_string();
     let mut parent_id: Option<String> = None;
     let mut context_ref = String::new();
