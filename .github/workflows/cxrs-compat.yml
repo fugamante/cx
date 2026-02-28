@@ -25,7 +25,6 @@ on:
 
 jobs:
   compat-check:
-    if: ${{ vars.CXRS_COMPAT_CHECK != '0' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
