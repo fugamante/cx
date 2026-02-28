@@ -1,6 +1,6 @@
 # CX
 
-`cx` is a deterministic, Rust-first LLM dev runtime for local repositories.
+`cx` is a deterministic, Rust-first LLM dev runtime.
 
 Project naming note:
 - `CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
