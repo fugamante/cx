@@ -1198,6 +1198,105 @@ printf '%s\n' "ok"
 }
 
 #[test]
+fn mock_adapter_next_schema_success_without_provider_binaries() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["next", "echo", "mock-adapter"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            (
+                "CX_MOCK_PLAIN_RESPONSE",
+                "{\"commands\":[\"echo ok-from-mock\"]}",
+            ),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(
+        stdout.contains("echo ok-from-mock"),
+        "unexpected stdout: {stdout}"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxrs_next"))
+        .expect("cxrs_next row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("mock"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("mock"),
+        "row={row}"
+    );
+}
+
+#[test]
+fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["next", "echo", "mock-fail"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            ("CX_MOCK_PLAIN_RESPONSE", "not-json"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected schema failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let qdir = repo.quarantine_dir();
+    let entries = fs::read_dir(&qdir)
+        .expect("read quarantine dir")
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    assert!(
+        !entries.is_empty(),
+        "expected quarantine entries in {}",
+        qdir.display()
+    );
+    let schema_fail_log = repo.schema_fail_log();
+    let last_fail = common::parse_jsonl(&schema_fail_log)
+        .into_iter()
+        .last()
+        .expect("schema failure log row");
+    let qid = last_fail
+        .get("quarantine_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(!qid.is_empty(), "schema failure log missing quarantine_id");
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("schema_valid").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("mock")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("mock")
+    );
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

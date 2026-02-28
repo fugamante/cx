@@ -2,6 +2,7 @@ use crate::llm::{
     LlmRunError, run_codex_jsonl, run_codex_plain, run_ollama_plain, wrap_agent_text_as_jsonl,
 };
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
+use std::env;
 
 fn normalized_backend_name(raw: &str) -> &'static str {
     if raw.eq_ignore_ascii_case("ollama") {
@@ -11,11 +12,35 @@ fn normalized_backend_name(raw: &str) -> &'static str {
     }
 }
 
+fn adapter_override() -> Option<String> {
+    env::var("CX_PROVIDER_ADAPTER")
+        .ok()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+}
+
 pub fn selected_adapter_name() -> &'static str {
+    if let Some(v) = adapter_override()
+        && v == "mock"
+    {
+        return "mock";
+    }
     if normalized_backend_name(&llm_backend()) == "ollama" {
         "ollama-cli"
     } else {
         "codex-cli"
+    }
+}
+
+pub fn selected_provider_transport() -> &'static str {
+    provider_transport_for_adapter(selected_adapter_name())
+}
+
+fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
+    if adapter_name == "mock" {
+        "mock"
+    } else {
+        "process"
     }
 }
 
@@ -62,7 +87,58 @@ impl ProviderAdapter for OllamaCliAdapter {
     }
 }
 
+pub struct MockAdapter {
+    plain_response: String,
+    jsonl_response: Option<String>,
+    error_message: Option<String>,
+}
+
+impl MockAdapter {
+    fn new_from_env() -> Self {
+        let plain_response = env::var("CX_MOCK_PLAIN_RESPONSE")
+            .unwrap_or_else(|_| "{\"commands\":[\"echo mock\"]}".to_string());
+        let jsonl_response = env::var("CX_MOCK_JSONL_RESPONSE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let error_message = env::var("CX_MOCK_ERROR")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        Self {
+            plain_response,
+            jsonl_response,
+            error_message,
+        }
+    }
+}
+
+impl ProviderAdapter for MockAdapter {
+    fn run_plain(&self, _prompt: &str) -> Result<String, LlmRunError> {
+        if let Some(err) = &self.error_message {
+            return Err(LlmRunError::message(err.clone()));
+        }
+        Ok(self.plain_response.clone())
+    }
+
+    fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError> {
+        if let Some(err) = &self.error_message {
+            return Err(LlmRunError::message(err.clone()));
+        }
+        if let Some(jsonl) = &self.jsonl_response {
+            return Ok(jsonl.clone());
+        }
+        let plain = self.run_plain(prompt)?;
+        ollama_plain_to_jsonl(&plain)
+    }
+}
+
 pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunError> {
+    if let Some(v) = adapter_override()
+        && v == "mock"
+    {
+        return Ok(Box::new(MockAdapter::new_from_env()));
+    }
     if normalized_backend_name(&llm_backend()) == "ollama" {
         return Ok(Box::new(OllamaCliAdapter::new()?));
     }
@@ -113,5 +189,18 @@ mod tests {
     fn selected_adapter_name_follows_backend_normalization() {
         assert_eq!(normalized_backend_name("ollama"), "ollama");
         assert_eq!(normalized_backend_name("codex"), "codex");
+    }
+
+    #[test]
+    fn provider_transport_mapping_covers_mock_and_process() {
+        assert_eq!(super::provider_transport_for_adapter("mock"), "mock");
+        assert_eq!(
+            super::provider_transport_for_adapter("codex-cli"),
+            "process"
+        );
+        assert_eq!(
+            super::provider_transport_for_adapter("ollama-cli"),
+            "process"
+        );
     }
 }
