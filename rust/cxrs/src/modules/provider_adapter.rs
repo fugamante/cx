@@ -1,5 +1,6 @@
 use crate::llm::{
-    LlmRunError, run_codex_jsonl, run_codex_plain, run_ollama_plain, wrap_agent_text_as_jsonl,
+    LlmRunError, run_codex_jsonl, run_codex_plain, run_http_plain, run_ollama_plain,
+    wrap_agent_text_as_jsonl,
 };
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use std::env;
@@ -34,6 +35,9 @@ pub fn selected_adapter_name() -> &'static str {
         if v == "http-stub" {
             return "http-stub";
         }
+        if v == "http" || v == "http-curl" {
+            return "http-curl";
+        }
     }
     if normalized_backend_name(&llm_backend()) == "ollama" {
         "ollama-cli"
@@ -53,16 +57,16 @@ pub fn selected_provider_status() -> Option<&'static str> {
 fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
     match adapter_name {
         "mock" => "mock",
-        "http-stub" => "http",
+        "http-stub" | "http-curl" => "http",
         _ => "process",
     }
 }
 
 fn provider_status_for_adapter(adapter_name: &str) -> Option<&'static str> {
-    if adapter_name == "http-stub" {
-        Some("stub_unimplemented")
-    } else {
-        None
+    match adapter_name {
+        "http-stub" => Some("stub_unimplemented"),
+        "http-curl" => Some("experimental"),
+        _ => None,
     }
 }
 
@@ -84,6 +88,11 @@ pub fn capabilities_for_adapter(adapter_name: &str) -> ProviderCapabilities {
             transport: "mock",
         },
         "http-stub" => ProviderCapabilities {
+            jsonl_native: false,
+            schema_strict: true,
+            transport: "http",
+        },
+        "http-curl" => ProviderCapabilities {
             jsonl_native: false,
             schema_strict: true,
             transport: "http",
@@ -226,6 +235,45 @@ impl ProviderAdapter for HttpStubAdapter {
     }
 }
 
+pub struct HttpCurlAdapter {
+    url: String,
+    token: Option<String>,
+}
+
+impl HttpCurlAdapter {
+    fn new_from_env() -> Result<Self, LlmRunError> {
+        let url = env::var("CX_HTTP_PROVIDER_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                LlmRunError::message(
+                    "http-curl adapter requires CX_HTTP_PROVIDER_URL to be set".to_string(),
+                )
+            })?;
+        let token = env::var("CX_HTTP_PROVIDER_TOKEN")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        Ok(Self { url, token })
+    }
+}
+
+impl ProviderAdapter for HttpCurlAdapter {
+    fn run_plain(&self, prompt: &str) -> Result<String, LlmRunError> {
+        run_http_plain(prompt, &self.url, self.token.as_deref())
+    }
+
+    fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError> {
+        let text = self.run_plain(prompt)?;
+        ollama_plain_to_jsonl(&text)
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        capabilities_for_adapter("http-curl")
+    }
+}
+
 pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunError> {
     if let Some(v) = adapter_override() {
         if v == "mock" {
@@ -233,6 +281,9 @@ pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunErro
         }
         if v == "http-stub" {
             return Ok(Box::new(HttpStubAdapter));
+        }
+        if v == "http" || v == "http-curl" {
+            return Ok(Box::new(HttpCurlAdapter::new_from_env()?));
         }
     }
     if normalized_backend_name(&llm_backend()) == "ollama" {
@@ -321,6 +372,11 @@ mod tests {
         assert!(!http.jsonl_native);
         assert!(http.schema_strict);
         assert_eq!(http.transport, "http");
+
+        let http_curl = super::capabilities_for_adapter("http-curl");
+        assert!(!http_curl.jsonl_native);
+        assert!(http_curl.schema_strict);
+        assert_eq!(http_curl.transport, "http");
     }
 
     #[test]
@@ -337,6 +393,11 @@ mod tests {
         assert_eq!(
             super::provider_status_for_adapter("http-stub"),
             Some("stub_unimplemented")
+        );
+        assert_eq!(super::provider_transport_for_adapter("http-curl"), "http");
+        assert_eq!(
+            super::provider_status_for_adapter("http-curl"),
+            Some("experimental")
         );
     }
 }

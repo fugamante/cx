@@ -1,7 +1,7 @@
 # Provider Adapter Plan (Experimental)
 
 Branch: `codex/provider-adapter-phase1`
-Status: draft execution plan
+Status: active (Phase 1-4 complete, Phase 5 scaffold in progress)
 Owner: CX runtime
 
 ## Objective
@@ -149,6 +149,18 @@ Required before merge discussion:
 
 ## Immediate Next Actions
 
-1. Implement Phase 1 adapter trait + CLI adapters with no behavior change.
-2. Add adapter resolver and keep current execution output identical.
-3. Add initial adapter-focused tests (resolver + CLI adapter smoke).
+1. Implement Phase 5 HTTP transport execution path (currently `http-curl` experimental scaffold + `http-stub` fail-fast path).
+2. Add adapter parity for additional structured command surfaces (`diffsum`, `fixrun`) under mock/provider overrides.
+3. Define rollout policy for transport promotion (`process` default, explicit opt-in for HTTP).
+
+## Current Progress Snapshot
+
+- Complete:
+  - Phase 1 adapter contract + CLI adapters.
+  - Phase 2 execution-core wiring through adapter contract.
+  - Phase 3 telemetry extension (`adapter_type`, `provider_transport`, `provider_status`).
+  - Phase 4 mock adapter + schema/quarantine integration tests.
+- In progress:
+  - Phase 5 optional HTTP transport (`http-curl` scaffold, opt-in by `CX_PROVIDER_ADAPTER=http-curl` and `CX_HTTP_PROVIDER_URL`).
+- Pending:
+  - Full HTTP provider protocol contract and end-to-end transport tests against a controlled local server fixture.

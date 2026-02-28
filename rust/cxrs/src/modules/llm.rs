@@ -123,6 +123,38 @@ pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, LlmRunError
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sS",
+        "-f",
+        "-X",
+        "POST",
+        url,
+        "-H",
+        "Content-Type: text/plain; charset=utf-8",
+        "--data-binary",
+        "@-",
+    ]);
+    if let Some(t) = token.filter(|v| !v.trim().is_empty()) {
+        cmd.args(["-H", &format!("Authorization: Bearer {t}")]);
+    }
+    let out = run_command_with_stdin_output_with_timeout_meta(cmd, prompt, "http provider curl")
+        .map_err(LlmRunError::from_process)?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(LlmRunError::message(if stderr.is_empty() {
+            format!("http provider exited with status {}", out.status)
+        } else {
+            format!(
+                "http provider exited with status {}: {}",
+                out.status, stderr
+            )
+        }));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
     let wrapped = json!({
       "type":"item.completed",

@@ -46,6 +46,18 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
     let adapter = match resolve_provider_adapter() {
         Ok(v) => v,
         Err(e) => {
+            log_execution_error(LogExecutionErrorInput {
+                spec: &spec,
+                prompt: &prompt,
+                capture_stats: &capture_stats,
+                usage: &usage,
+                schema_name: None,
+                schema_prompt: None,
+                schema_raw: None,
+                schema_attempt: None,
+                err: &e,
+                started: &started,
+            });
             return Err(e.message);
         }
     };

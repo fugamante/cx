@@ -24,6 +24,13 @@ All notable changes to this project are documented in this file.
     - adapter resolves with `provider_transport=http`.
     - run logs now tag `provider_status=stub_unimplemented` for this path.
     - added integration coverage for failure behavior + telemetry tagging.
+  - added `CX_PROVIDER_ADAPTER=http-curl` experimental scaffold:
+    - requires `CX_HTTP_PROVIDER_URL` (optional bearer token: `CX_HTTP_PROVIDER_TOKEN`).
+    - sends prompt payload through `curl` over HTTP transport.
+    - telemetry tags this path as `provider_transport=http`, `provider_status=experimental`.
+    - added integration coverage for URL-missing failure path + telemetry tagging.
+  - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
+  - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

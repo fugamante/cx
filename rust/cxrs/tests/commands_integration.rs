@@ -1041,7 +1041,20 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
     assert!(sev_out.contains("severity:"), "{sev_out}");
     assert!(!sev_out.contains("field_population"), "{sev_out}");
 
-    let validate = repo.run(&["logs", "validate"]);
+    let validate_default = repo.run(&["logs", "validate"]);
+    assert!(
+        validate_default.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&validate_default),
+        stderr_str(&validate_default)
+    );
+    let validate_default_out = stdout_str(&validate_default);
+    assert!(
+        validate_default_out.contains("status: ok_with_warnings"),
+        "{validate_default_out}"
+    );
+
+    let validate = repo.run(&["logs", "validate", "--strict"]);
     assert_eq!(
         validate.status.code(),
         Some(1),
@@ -1297,6 +1310,63 @@ fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
 }
 
 #[test]
+fn schema_command_parity_next_between_codex_cli_and_mock_adapter() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock_codex(
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"commands\":[\"echo parity-next\"]}"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":14,"cached_input_tokens":2,"output_tokens":4}}'
+"#,
+    );
+
+    let codex_out = repo.run(&["next", "echo", "parity-next"]);
+    assert!(
+        codex_out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&codex_out),
+        stderr_str(&codex_out)
+    );
+    let codex_stdout = stdout_str(&codex_out);
+    let codex_lines: Vec<String> = codex_stdout
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(codex_lines, vec!["echo parity-next".to_string()]);
+
+    let mock_out = repo.run_with_env(
+        &["next", "echo", "parity-next"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "mock"),
+            (
+                "CX_MOCK_PLAIN_RESPONSE",
+                "{\"commands\":[\"echo parity-next\"]}",
+            ),
+        ],
+    );
+    assert!(
+        mock_out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&mock_out),
+        stderr_str(&mock_out)
+    );
+    let mock_stdout = stdout_str(&mock_out);
+    let mock_lines: Vec<String> = mock_stdout
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(mock_lines, vec!["echo parity-next".to_string()]);
+    assert_eq!(
+        codex_lines, mock_lines,
+        "next output diverged between codex-cli and mock adapter"
+    );
+}
+
+#[test]
 fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
     let repo = TempRepo::new("cxrs-it");
     let out = repo.run_with_env(
@@ -1331,6 +1401,43 @@ fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
     assert_eq!(
         run_last.get("provider_status").and_then(Value::as_str),
         Some("stub_unimplemented")
+    );
+}
+
+#[test]
+fn http_curl_adapter_requires_url_and_logs_experimental_status() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-curl"],
+        &[("CX_PROVIDER_ADAPTER", "http-curl")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("CX_HTTP_PROVIDER_URL"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-curl")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        run_last.get("provider_status").and_then(Value::as_str),
+        Some("experimental")
     );
 }
 

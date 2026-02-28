@@ -38,7 +38,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "logs",
-        usage: "logs validate [--fix=false] [--legacy-ok]",
+        usage: "logs validate [--strict] [--legacy-ok]",
         description: "Validate execution log JSONL contract",
     },
     CommandHelp {
