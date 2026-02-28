@@ -152,7 +152,43 @@ pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<St
             )
         }));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    let body = String::from_utf8_lossy(&out.stdout).to_string();
+    Ok(parse_http_provider_body(&body))
+}
+
+fn parse_http_provider_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+        return body.to_string();
+    };
+    if let Some(s) = v.get("text").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(s) = v.get("response").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(s) = v.get("output").and_then(Value::as_str) {
+        return s.to_string();
+    }
+    if let Some(arr) = v.get("content").and_then(Value::as_array) {
+        let mut joined = Vec::new();
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                joined.push(s.to_string());
+                continue;
+            }
+            if let Some(s) = item.get("text").and_then(Value::as_str) {
+                joined.push(s.to_string());
+            }
+        }
+        if !joined.is_empty() {
+            return joined.join("\n");
+        }
+    }
+    body.to_string()
 }
 
 pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
@@ -162,4 +198,29 @@ pub fn wrap_agent_text_as_jsonl(text: &str) -> Result<String, String> {
     });
     serde_json::to_string(&wrapped)
         .map_err(|e| format!("failed to serialize ollama JSONL wrapper: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_http_provider_body;
+
+    #[test]
+    fn http_body_parser_prefers_text_field() {
+        let parsed = parse_http_provider_body("{\"text\":\"hello\"}");
+        assert_eq!(parsed, "hello");
+    }
+
+    #[test]
+    fn http_body_parser_supports_content_array_objects() {
+        let parsed =
+            parse_http_provider_body("{\"content\":[{\"text\":\"line1\"},{\"text\":\"line2\"}]}");
+        assert_eq!(parsed, "line1\nline2");
+    }
+
+    #[test]
+    fn http_body_parser_falls_back_to_raw_body() {
+        let raw = "plain response";
+        let parsed = parse_http_provider_body(raw);
+        assert_eq!(parsed, raw);
+    }
 }

@@ -1442,6 +1442,45 @@ fn http_curl_adapter_requires_url_and_logs_experimental_status() {
 }
 
 #[test]
+fn http_curl_adapter_parses_json_text_payload_from_curl() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"text":"http adapter ok"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-curl"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), "http adapter ok");
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-curl")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
