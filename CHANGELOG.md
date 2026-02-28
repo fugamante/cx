@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
+  - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
+  - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
+  - execution core now resolves a provider adapter and routes plain/JSONL calls through the adapter contract (no behavior change intended).
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

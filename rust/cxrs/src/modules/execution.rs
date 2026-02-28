@@ -4,12 +4,9 @@ use std::time::Instant;
 use crate::config::app_config;
 use crate::execmeta::make_execution_id;
 use crate::execution_logging::{LogExecutionErrorInput, log_execution_error};
-use crate::llm::{
-    LlmRunError, extract_agent_text, run_codex_jsonl, run_codex_plain, run_ollama_plain,
-    usage_from_jsonl, wrap_agent_text_as_jsonl,
-};
+use crate::llm::{LlmRunError, extract_agent_text, usage_from_jsonl};
+use crate::provider_adapter::resolve_provider_adapter;
 use crate::runlog::log_schema_failure;
-use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
 use crate::types::{
     CaptureStats, ExecutionResult, LlmOutputKind, QuarantineAttempt, TaskInput, TaskSpec,
@@ -17,39 +14,9 @@ use crate::types::{
 };
 use crate::util::sha256_hex;
 
-fn run_llm_plain_meta(prompt: &str) -> Result<String, LlmRunError> {
-    if llm_backend() == "ollama" {
-        run_ollama_plain(
-            prompt,
-            &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
-                message: e,
-                timeout: None,
-            })?,
-        )
-    } else {
-        run_codex_plain(prompt)
-    }
-}
-
-fn run_llm_jsonl_meta(prompt: &str) -> Result<String, LlmRunError> {
-    if llm_backend() != "ollama" {
-        return run_codex_jsonl(prompt);
-    }
-    let text = run_ollama_plain(
-        prompt,
-        &resolve_ollama_model_for_run().map_err(|e| LlmRunError {
-            message: e,
-            timeout: None,
-        })?,
-    )?;
-    wrap_agent_text_as_jsonl(&text).map_err(|e| LlmRunError {
-        message: e,
-        timeout: None,
-    })
-}
-
 pub fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
-    run_llm_jsonl_meta(prompt).map_err(|e| e.message)
+    let adapter = resolve_provider_adapter().map_err(|e| e.message)?;
+    adapter.run_jsonl(prompt).map_err(|e| e.message)
 }
 
 pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
@@ -77,10 +44,16 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
     let mut usage = UsageStats::default();
     let stdout: String;
     let stderr = String::new();
+    let adapter = match resolve_provider_adapter() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(e.message);
+        }
+    };
 
     match spec.output_kind {
         LlmOutputKind::Plain => {
-            stdout = match run_llm_plain_meta(&prompt) {
+            stdout = match adapter.run_plain(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(LogExecutionErrorInput {
@@ -100,7 +73,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             };
         }
         LlmOutputKind::Jsonl => {
-            let jsonl = match run_llm_jsonl_meta(&prompt) {
+            let jsonl = match adapter.run_jsonl(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(LogExecutionErrorInput {
@@ -122,7 +95,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             stdout = jsonl;
         }
         LlmOutputKind::AgentText => {
-            let jsonl = match run_llm_jsonl_meta(&prompt) {
+            let jsonl = match adapter.run_jsonl(&prompt) {
                 Ok(v) => v,
                 Err(e) => {
                     log_execution_error(LogExecutionErrorInput {
@@ -165,7 +138,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             schema_attempt_for_log = Some(1);
 
             let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), LlmRunError> {
-                let jsonl = run_llm_jsonl_meta(full_prompt)?;
+                let jsonl = adapter.run_jsonl(full_prompt)?;
                 let usage = usage_from_jsonl(&jsonl);
                 let raw = extract_agent_text(&jsonl).unwrap_or_default();
                 Ok((raw, usage))

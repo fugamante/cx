@@ -19,7 +19,7 @@ impl LlmRunError {
         }
     }
 
-    fn message(message: String) -> Self {
+    pub(crate) fn message(message: String) -> Self {
         Self {
             message,
             timeout: None,

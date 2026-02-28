@@ -69,6 +69,8 @@ mod policy;
 mod process;
 #[path = "modules/prompting.rs"]
 mod prompting;
+#[path = "modules/provider_adapter.rs"]
+mod provider_adapter;
 #[path = "modules/quarantine.rs"]
 mod quarantine;
 #[path = "modules/routing.rs"]
