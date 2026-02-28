@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file.
   - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
   - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
   - execution core now resolves a provider adapter and routes plain/JSONL calls through the adapter contract (no behavior change intended).
+  - added adapter-focused unit coverage for backend normalization and Ollama JSONL wrapping.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:
