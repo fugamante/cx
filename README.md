@@ -214,6 +214,38 @@ Retry-health JSON surfaces:
 - `scheduler --json`: top-level `retry`
 - `optimize --json`: `scoreboard.retry_health`
 
+Expected JSON shape (key excerpts):
+
+```json
+{
+  "diag": {
+    "scheduler": { "window_runs": 50, "queue_ms_p95": 1200 },
+    "retry": {
+      "rows_with_retry_metadata": 8,
+      "rows_after_retry_success_rate": 0.75,
+      "attempt_histogram": { "1": 42, "2": 8 }
+    }
+  },
+  "scheduler": {
+    "scheduler": { "queue_rows": 20, "worker_distribution": { "w1": 10 } },
+    "retry": {
+      "tasks_with_retry": 3,
+      "tasks_retry_recovery_rate": 0.67
+    }
+  },
+  "optimize": {
+    "scoreboard": {
+      "retry_health": {
+        "rows_after_retry": 8,
+        "rows_after_retry_success": 6,
+        "tasks_recovery_rate": 0.67,
+        "attempt_histogram": [[1, 42], [2, 8]]
+      }
+    }
+  }
+}
+```
+
 ## Task Graph + Safety + Optimization
 
 Stage II runtime commands:
