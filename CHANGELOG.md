@@ -14,6 +14,9 @@ All notable changes to this project are documented in this file.
     - `retry_reason`
     - `retry_backoff_ms`
   - strict log contract and migration normalize these retry fields across telemetry and validation paths.
+- Scheduler hardening test coverage expanded:
+  - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
+  - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
 - Phase IV broker + mixed routing controls:
   - `cx broker set --policy latency|quality|cost|balanced` persisted to `.codex/state.json`.
   - `cx task run-all --mode mixed` now accepts:

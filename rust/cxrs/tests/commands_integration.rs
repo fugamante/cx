@@ -463,6 +463,171 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
+fn mixed_run_all_least_loaded_stress_balances_backends_and_workers() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 1
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "list" ]; then
+  printf '%s\n' "NAME ID SIZE MODIFIED"
+  printf '%s\n' "llama3.1 abc 4GB now"
+  exit 0
+fi
+sleep 1
+printf '%s\n' "ok"
+"#,
+    );
+
+    for i in 1..=10 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo stress-fairness-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "auto",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let started = Instant::now();
+    let out = repo.run_with_env(
+        &[
+            "task",
+            "run-all",
+            "--status",
+            "pending",
+            "--mode",
+            "mixed",
+            "--backend-pool",
+            "codex,ollama",
+            "--backend-cap",
+            "codex=1",
+            "--backend-cap",
+            "ollama=1",
+            "--max-workers",
+            "4",
+            "--fairness",
+            "least_loaded",
+        ],
+        &[("CX_OLLAMA_MODEL", "llama3.1")],
+    );
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        elapsed_ms >= 4500,
+        "expected cap-limited mixed runtime envelope, got elapsed_ms={elapsed_ms}"
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let cxo_rows: Vec<&Value> = runs
+        .iter()
+        .filter(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .collect();
+    assert_eq!(cxo_rows.len(), 10, "expected 10 cxo rows");
+
+    let codex_count = cxo_rows
+        .iter()
+        .filter(|v| v.get("backend_used").and_then(Value::as_str) == Some("codex"))
+        .count();
+    let ollama_count = cxo_rows
+        .iter()
+        .filter(|v| v.get("backend_used").and_then(Value::as_str) == Some("ollama"))
+        .count();
+    assert!(
+        codex_count >= 3 && ollama_count >= 3,
+        "expected both backends to carry load, got codex={codex_count} ollama={ollama_count}"
+    );
+
+    let mut workers = std::collections::BTreeSet::new();
+    let mut queue_values: Vec<u64> = Vec::new();
+    for row in &cxo_rows {
+        if let Some(w) = row.get("worker_id").and_then(Value::as_str) {
+            workers.insert(w.to_string());
+        }
+        if let Some(q) = row.get("queue_ms").and_then(Value::as_u64) {
+            queue_values.push(q);
+        }
+    }
+    assert!(
+        workers.len() >= 2,
+        "expected multiple workers, got {workers:?}"
+    );
+    queue_values.sort_unstable();
+    assert_eq!(
+        queue_values.len(),
+        10,
+        "expected queue telemetry for all rows, got {queue_values:?}"
+    );
+    assert!(
+        queue_values.last().copied().unwrap_or(0) >= 3000,
+        "expected late queued tasks under cap pressure, got {queue_values:?}"
+    );
+}
+
+#[test]
+fn mixed_run_all_errors_when_pool_has_no_available_backends() {
+    let repo = TempRepo::new("cxrs-it");
+    let add = repo.run(&[
+        "task",
+        "add",
+        "cxo echo unavailable-backends",
+        "--role",
+        "implementer",
+        "--backend",
+        "auto",
+        "--mode",
+        "parallel",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+
+    let out = repo.run_with_env(
+        &[
+            "task",
+            "run-all",
+            "--status",
+            "pending",
+            "--mode",
+            "mixed",
+            "--backend-pool",
+            "codex,ollama",
+            "--max-workers",
+            "2",
+        ],
+        &[("CX_DISABLE_CODEX", "1"), ("CX_DISABLE_OLLAMA", "1")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure when all backends unavailable; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("no available backend from --backend-pool"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
 fn judge_convergence_uses_model_path_and_logs_decision_source() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
