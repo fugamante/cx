@@ -2155,6 +2155,8 @@ fn diag_reports_scheduler_distribution_fields() {
     );
     assert!(stdout.contains("retry_rows_with_metadata:"), "{stdout}");
     assert!(stdout.contains("retry_attempt_histogram:"), "{stdout}");
+    assert!(stdout.contains("critical_summary_rows:"), "{stdout}");
+    assert!(stdout.contains("critical_errors_total:"), "{stdout}");
 }
 
 #[test]
@@ -2201,6 +2203,12 @@ fn diag_json_reports_scheduler_object() {
         retry.get("attempt_histogram").is_some(),
         "unexpected retry object: {retry}"
     );
+    let critical = v.get("critical").expect("critical");
+    assert_eq!(
+        critical.get("summary_rows").and_then(Value::as_u64),
+        Some(0),
+        "unexpected critical object: {critical}"
+    );
 }
 
 #[test]
@@ -2230,6 +2238,7 @@ fn diag_json_matches_contract_fixture() {
             ("routing_trace", "routing_trace_keys", "diag.routing_trace"),
             ("scheduler", "scheduler_keys", "diag.scheduler"),
             ("retry", "retry_keys", "diag.retry"),
+            ("critical", "critical_keys", "diag.critical"),
         ],
     );
 }
@@ -2269,6 +2278,67 @@ fn diag_json_window_scopes_scheduler_rows() {
         Some(1)
     );
     assert_eq!(scheduler.get("queue_rows").and_then(Value::as_u64), Some(1));
+}
+
+#[test]
+fn diag_json_reports_run_all_critical_telemetry() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"dc1","timestamp":"2026-01-01T00:00:00Z","command":"cxtask_runall","tool":"cxtask_runall",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":120,"schema_enforced":false,"schema_valid":true,
+            "run_all_mode":"mixed","halt_on_critical":true,
+            "run_all_scheduled":3,"run_all_complete":1,"run_all_failed":1,"run_all_critical_errors":1
+        }),
+        serde_json::json!({
+            "execution_id":"dc2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["diag", "--json", "--strict", "--window", "5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected strict warning on critical halt telemetry; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
+    let critical = v.get("critical").expect("critical");
+    assert_eq!(
+        critical.get("summary_rows").and_then(Value::as_u64),
+        Some(1),
+        "unexpected critical object: {critical}"
+    );
+    assert_eq!(
+        critical.get("halted_rows").and_then(Value::as_u64),
+        Some(1),
+        "unexpected critical object: {critical}"
+    );
+    let reasons = v
+        .get("severity_reasons")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|x| x.as_str().map(ToOwned::to_owned))
+        .collect::<Vec<String>>()
+        .join(",");
+    assert!(
+        reasons.contains("critical_halts_detected"),
+        "expected critical_halts_detected reason, got: {reasons}"
+    );
 }
 
 #[test]
@@ -2759,6 +2829,7 @@ fn scheduler_json_matches_contract_fixture() {
         &[
             ("scheduler", "scheduler_keys", "scheduler.scheduler"),
             ("retry", "retry_keys", "scheduler.retry"),
+            ("critical", "critical_keys", "scheduler.critical"),
         ],
     );
 }

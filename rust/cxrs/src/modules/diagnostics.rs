@@ -335,6 +335,100 @@ fn print_retry_diag(log_file_path: &str, window: usize) {
     println!("retry_attempt_histogram: {hist}");
 }
 
+fn critical_diag_value(log_file_path: &str, window: usize) -> Value {
+    let path = Path::new(log_file_path);
+    if !path.exists() {
+        return serde_json::json!({
+            "window_runs": 0,
+            "summary_rows": 0,
+            "halt_enabled_rows": 0,
+            "halted_rows": 0,
+            "critical_errors_total": 0,
+            "runs_with_critical_errors": 0
+        });
+    }
+    let rows = load_values(path, window).unwrap_or_default();
+    let mut summary_rows = 0u64;
+    let mut halt_enabled_rows = 0u64;
+    let mut halted_rows = 0u64;
+    let mut critical_errors_total = 0u64;
+    let mut runs_with_critical_errors = 0u64;
+    for v in &rows {
+        if v.get("tool").and_then(Value::as_str) != Some("cxtask_runall") {
+            continue;
+        }
+        summary_rows += 1;
+        if v.get("halt_on_critical").and_then(Value::as_bool) == Some(true) {
+            halt_enabled_rows += 1;
+        }
+        let critical = v
+            .get("run_all_critical_errors")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        critical_errors_total += critical;
+        if critical > 0 {
+            runs_with_critical_errors += 1;
+        }
+        let halted = v
+            .get("run_all_scheduled")
+            .and_then(Value::as_u64)
+            .zip(v.get("run_all_complete").and_then(Value::as_u64))
+            .zip(v.get("run_all_failed").and_then(Value::as_u64))
+            .map(|((sched, ok), failed)| ok + failed < sched)
+            .unwrap_or(false);
+        if halted {
+            halted_rows += 1;
+        }
+    }
+    serde_json::json!({
+        "window_runs": rows.len(),
+        "summary_rows": summary_rows,
+        "halt_enabled_rows": halt_enabled_rows,
+        "halted_rows": halted_rows,
+        "critical_errors_total": critical_errors_total,
+        "runs_with_critical_errors": runs_with_critical_errors
+    })
+}
+
+fn print_critical_diag(log_file_path: &str, window: usize) {
+    let critical = critical_diag_value(log_file_path, window);
+    println!(
+        "critical_summary_rows: {}",
+        critical
+            .get("summary_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "critical_halt_enabled_rows: {}",
+        critical
+            .get("halt_enabled_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "critical_halted_rows: {}",
+        critical
+            .get("halted_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "critical_errors_total: {}",
+        critical
+            .get("critical_errors_total")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+    println!(
+        "critical_runs_with_errors: {}",
+        critical
+            .get("runs_with_critical_errors")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    );
+}
+
 fn print_diag_header(app_version: &str, cfg: &crate::config::AppConfig) {
     let backend = llm_backend();
     let model = llm_model();
@@ -433,7 +527,11 @@ fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
     Ok((as_json, window, strict))
 }
 
-fn scheduler_severity(scheduler: &Value, retry: &Value) -> (&'static str, Vec<String>) {
+fn scheduler_severity(
+    scheduler: &Value,
+    retry: &Value,
+    critical: &Value,
+) -> (&'static str, Vec<String>) {
     let mut reasons: Vec<String> = Vec::new();
     let queue_p95 = scheduler
         .get("queue_ms_p95")
@@ -498,6 +596,13 @@ fn scheduler_severity(scheduler: &Value, retry: &Value) -> (&'static str, Vec<St
     if window_runs >= 10 && retry_rows_with_meta * 100 >= window_runs * 30 {
         reasons.push("retry_pressure_high".to_string());
     }
+    let halted_rows = critical
+        .get("halted_rows")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if halted_rows > 0 {
+        reasons.push("critical_halts_detected".to_string());
+    }
 
     let severity = if reasons.len() >= 2 {
         "critical"
@@ -534,6 +639,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     };
     let scheduler = scheduler_diag_value(&log_file, window);
     let retry = retry_diag_value(&log_file, window);
+    let critical = critical_diag_value(&log_file, window);
     let sample_cmd = "cxo git status";
     let rust_handles = route_handler_for("cxo");
     let bash_handles = bash_type_of_function(&repo, "cxo").is_some();
@@ -551,7 +657,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     } else {
         "no rust route and no bash fallback".to_string()
     };
-    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry);
+    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry, &critical);
 
     if as_json {
         let payload = serde_json::json!({
@@ -574,6 +680,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "schema_registry_files": schema_count(&schema_dir),
             "scheduler": scheduler,
             "retry": retry,
+            "critical": critical,
             "scheduler_window_requested": window,
             "severity": severity,
             "severity_reasons": severity_reasons,
@@ -611,6 +718,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     println!("schema_registry_files: {}", schema_count(&schema_dir));
     print_scheduler_diag(&log_file, window);
     print_retry_diag(&log_file, window);
+    print_critical_diag(&log_file, window);
     println!("scheduler_window_requested: {window}");
     println!("severity: {severity}");
     if !severity_reasons.is_empty() {
@@ -638,7 +746,8 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
         .unwrap_or_else(|| "<unresolved>".to_string());
     let scheduler = scheduler_diag_value(&log_file, window);
     let retry = retry_diag_value(&log_file, window);
-    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry);
+    let critical = critical_diag_value(&log_file, window);
+    let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry, &critical);
 
     if as_json {
         let payload = serde_json::json!({
@@ -646,6 +755,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
             "scheduler_window_requested": window,
             "scheduler": scheduler,
             "retry": retry,
+            "critical": critical,
             "severity": severity,
             "severity_reasons": severity_reasons
         });
@@ -663,6 +773,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
     println!("log_file: {log_file}");
     print_scheduler_diag(&log_file, window);
     print_retry_diag(&log_file, window);
+    print_critical_diag(&log_file, window);
     println!("scheduler_window_requested: {window}");
     println!("severity: {severity}");
     if !severity_reasons.is_empty() {

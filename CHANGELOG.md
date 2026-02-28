@@ -105,6 +105,13 @@ All notable changes to this project are documented in this file.
     - integration coverage now asserts:
       - halt mode stops after first critical failure.
       - continue mode processes remaining tasks and reports `critical_errors` in summary.
+    - diagnostics/scheduler observability now includes a `critical` telemetry block with:
+      - `summary_rows`
+      - `halt_enabled_rows`
+      - `halted_rows`
+      - `critical_errors_total`
+      - `runs_with_critical_errors`
+    - strict diagnostics severity now raises `critical_halts_detected` when halted run-all telemetry is present in the diagnostics window.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
 - Observability expansion for retries in `logs stats` / `telemetry`:

@@ -221,6 +221,7 @@ struct RunAllSummary {
     non_retryable_failed: usize,
     blocked: usize,
     critical_errors: usize,
+    halted_on_critical: bool,
 }
 
 impl RunAllSummary {
@@ -421,6 +422,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         Ok(v) => v,
         Err(code) => return code,
     };
+    let started = Instant::now();
 
     let tasks = match (deps.read_tasks)() {
         Ok(v) => v,
@@ -486,6 +488,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             .collect()
     };
 
+    let scheduled_count = schedule.len();
     let summary = if options.run_mode == "mixed" && options.max_workers > 1 {
         match run_schedule_parallel(&schedule, &task_index, &options) {
             Ok(v) => v,
@@ -496,7 +499,11 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         }
     } else {
         let mut summary = RunAllSummary::default();
+        let mut halt_all = false;
         for (idx, id) in schedule.iter().enumerate() {
+            if halt_all {
+                break;
+            }
             let task = task_index.get(id);
             let max_retries = task.and_then(|t| t.max_retries).unwrap_or(0);
             let backend_selected = fallback_backend(
@@ -546,7 +553,8 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                         crate::cx_eprintln!("cxrs task run-all: critical error for {id}: {e}");
                         summary.record_critical_error();
                         if options.halt_on_critical {
-                            return 1;
+                            summary.halted_on_critical = true;
+                            halt_all = true;
                         }
                         finished = true;
                         break;
@@ -570,6 +578,21 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
         summary.non_retryable_failed,
         summary.critical_errors
     );
+    if summary.halted_on_critical {
+        println!("run-all halted_on_critical: true");
+    }
+    let _ = crate::runlog::log_task_run_all_summary(crate::runlog::TaskRunAllSummaryLogInput {
+        mode: &options.run_mode,
+        halt_on_critical: options.halt_on_critical,
+        scheduled: scheduled_count as u64,
+        complete: summary.ok as u64,
+        failed: summary.failed as u64,
+        blocked: summary.blocked as u64,
+        retryable_failures: summary.retryable_failed as u64,
+        non_retryable_failures: summary.non_retryable_failed as u64,
+        critical_errors: summary.critical_errors as u64,
+        duration_ms: started.elapsed().as_millis() as u64,
+    });
     if summary.failed > 0 { 1 } else { 0 }
 }
 
@@ -971,10 +994,8 @@ fn run_schedule_parallel(
                     let _ = set_task_status_quiet(&done.id, "failed");
                     crate::cx_eprintln!("cxrs task run-all: critical error for {}: {e}", done.id);
                     if options.halt_on_critical {
-                        return Err(format!(
-                            "task run-all: halted on critical error for {}",
-                            done.id
-                        ));
+                        summary.halted_on_critical = true;
+                        return Ok(summary);
                     }
                 }
             }

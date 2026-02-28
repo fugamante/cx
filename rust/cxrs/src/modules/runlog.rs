@@ -37,6 +37,19 @@ pub struct RunLogInput<'a> {
     pub policy_reason: Option<&'a str>,
 }
 
+pub struct TaskRunAllSummaryLogInput<'a> {
+    pub mode: &'a str,
+    pub halt_on_critical: bool,
+    pub scheduled: u64,
+    pub complete: u64,
+    pub failed: u64,
+    pub blocked: u64,
+    pub retryable_failures: u64,
+    pub non_retryable_failures: u64,
+    pub critical_errors: u64,
+    pub duration_ms: u64,
+}
+
 fn cwd_scope_root() -> (String, String, String) {
     let cwd = env::current_dir()
         .ok()
@@ -233,6 +246,26 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.policy_blocked = input.policy_blocked;
     row.policy_reason = input.policy_reason.map(|s| s.to_string());
 
+    finalize_and_append_run(&run_log, row)
+}
+
+pub fn log_task_run_all_summary(input: TaskRunAllSummaryLogInput<'_>) -> Result<(), String> {
+    let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
+    let (cwd, root, scope) = cwd_scope_root();
+    let mut row = base_run_row("cxtask_runall", cwd, scope, root);
+    row.duration_ms = Some(input.duration_ms);
+    row.command_label = Some("task_run_all_summary".to_string());
+    row.prompt_sha256 = Some(sha256_hex("task run-all summary"));
+    row.prompt_preview = Some(format!("task run-all mode={}", input.mode));
+    row.run_all_mode = Some(input.mode.to_string());
+    row.halt_on_critical = Some(input.halt_on_critical);
+    row.run_all_scheduled = Some(input.scheduled);
+    row.run_all_complete = Some(input.complete);
+    row.run_all_failed = Some(input.failed);
+    row.run_all_blocked = Some(input.blocked);
+    row.run_all_retryable_failures = Some(input.retryable_failures);
+    row.run_all_non_retryable_failures = Some(input.non_retryable_failures);
+    row.run_all_critical_errors = Some(input.critical_errors);
     finalize_and_append_run(&run_log, row)
 }
 
