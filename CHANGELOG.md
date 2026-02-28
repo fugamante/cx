@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase IV completion hardening:
+  - added mixed-mode round-robin determinism coverage to assert backend assignment ordering for `auto` tasks under `--fairness round_robin`.
+  - added convergence fallback coverage for `judge` mode when model-judge output is invalid, asserting deterministic `score_fallback` telemetry.
+  - updated Phase IV orchestration status doc to reflect Milestones A-D completion on `main`.
 - Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
   - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
   - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
