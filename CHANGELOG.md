@@ -26,6 +26,7 @@ All notable changes to this project are documented in this file.
     - added integration coverage for failure behavior + telemetry tagging.
   - added `CX_PROVIDER_ADAPTER=http-curl` experimental scaffold:
     - requires `CX_HTTP_PROVIDER_URL` (optional bearer token: `CX_HTTP_PROVIDER_TOKEN`).
+    - supports `CX_HTTP_PROVIDER_FORMAT=text|json|jsonl` (default `text`).
     - sends prompt payload through `curl` over HTTP transport.
     - accepts provider responses as plain text or JSON envelopes (`text`, `response`, `output`, `content[]`).
     - telemetry tags this path as `provider_transport=http`, `provider_status=experimental`.
@@ -35,7 +36,7 @@ All notable changes to this project are documented in this file.
       - `http_status`
       - `transport_error`
       - `provider_error`
-    - added integration coverage for non-200 and transport-failure classification, plus malformed-envelope raw fallback.
+    - added integration coverage for non-200 and transport-failure classification, malformed-envelope raw fallback, JSON schema-command flow, JSONL passthrough, and invalid-JSONL rejection.
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
   - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:

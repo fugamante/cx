@@ -1,5 +1,5 @@
 use crate::llm::{
-    LlmRunError, run_codex_jsonl, run_codex_plain, run_http_plain, run_ollama_plain,
+    LlmRunError, run_codex_jsonl, run_codex_plain, run_http_plain, run_http_raw, run_ollama_plain,
     wrap_agent_text_as_jsonl,
 };
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
@@ -48,6 +48,18 @@ pub fn selected_adapter_name() -> &'static str {
 
 pub fn selected_provider_transport() -> &'static str {
     provider_transport_for_adapter(selected_adapter_name())
+}
+
+pub fn selected_http_provider_format() -> &'static str {
+    match env::var("CX_HTTP_PROVIDER_FORMAT")
+        .ok()
+        .map(|v| v.trim().to_lowercase())
+        .as_deref()
+    {
+        Some("jsonl") => "jsonl",
+        Some("json") => "json",
+        _ => "text",
+    }
 }
 
 pub fn selected_provider_status() -> Option<&'static str> {
@@ -238,9 +250,63 @@ impl ProviderAdapter for HttpStubAdapter {
 pub struct HttpCurlAdapter {
     url: String,
     token: Option<String>,
+    format: HttpProviderFormat,
+}
+
+#[derive(Clone, Copy)]
+enum HttpProviderFormat {
+    Text,
+    Json,
+    Jsonl,
 }
 
 impl HttpCurlAdapter {
+    fn parse_format_from_env() -> HttpProviderFormat {
+        let raw = env::var("CX_HTTP_PROVIDER_FORMAT")
+            .ok()
+            .map(|v| v.trim().to_lowercase())
+            .unwrap_or_else(|| "text".to_string());
+        match raw.as_str() {
+            "jsonl" => HttpProviderFormat::Jsonl,
+            "json" => HttpProviderFormat::Json,
+            _ => HttpProviderFormat::Text,
+        }
+    }
+
+    fn extract_json_payload(raw: &str) -> Result<String, LlmRunError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(LlmRunError::message(
+                "http-curl adapter returned empty JSON payload".to_string(),
+            ));
+        }
+        match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(serde_json::Value::String(s)) => Ok(s),
+            Ok(v) => Ok(v.to_string()),
+            Err(e) => Err(LlmRunError::message(format!(
+                "http-curl adapter expected JSON payload: {e}"
+            ))),
+        }
+    }
+
+    fn validate_jsonl_payload(raw: &str) -> Result<String, LlmRunError> {
+        let mut saw_item = false;
+        for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+            let parsed = serde_json::from_str::<serde_json::Value>(line).map_err(|e| {
+                LlmRunError::message(format!("http-curl adapter expected JSONL lines: {e}"))
+            })?;
+            if parsed.get("type").and_then(serde_json::Value::as_str) == Some("item.completed") {
+                saw_item = true;
+            }
+        }
+        if !saw_item {
+            return Err(LlmRunError::message(
+                "http-curl adapter jsonl payload missing item.completed entry".to_string(),
+            ));
+        }
+        Ok(raw.to_string())
+    }
+
     fn new_from_env() -> Result<Self, LlmRunError> {
         let url = env::var("CX_HTTP_PROVIDER_URL")
             .ok()
@@ -255,7 +321,8 @@ impl HttpCurlAdapter {
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        Ok(Self { url, token })
+        let format = Self::parse_format_from_env();
+        Ok(Self { url, token, format })
     }
 }
 
@@ -265,8 +332,21 @@ impl ProviderAdapter for HttpCurlAdapter {
     }
 
     fn run_jsonl(&self, prompt: &str) -> Result<String, LlmRunError> {
-        let text = self.run_plain(prompt)?;
-        ollama_plain_to_jsonl(&text)
+        match self.format {
+            HttpProviderFormat::Text => {
+                let text = self.run_plain(prompt)?;
+                ollama_plain_to_jsonl(&text)
+            }
+            HttpProviderFormat::Json => {
+                let raw = run_http_raw(prompt, &self.url, self.token.as_deref())?;
+                let payload = Self::extract_json_payload(&raw)?;
+                ollama_plain_to_jsonl(&payload)
+            }
+            HttpProviderFormat::Jsonl => {
+                let jsonl = run_http_raw(prompt, &self.url, self.token.as_deref())?;
+                Self::validate_jsonl_payload(&jsonl)
+            }
+        }
     }
 
     fn capabilities(&self) -> ProviderCapabilities {

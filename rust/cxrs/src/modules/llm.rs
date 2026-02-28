@@ -123,7 +123,7 @@ pub fn run_ollama_plain(prompt: &str, model: &str) -> Result<String, LlmRunError
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+fn run_http_request(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
     let mut cmd = Command::new("curl");
     cmd.args([
         "-sS",
@@ -153,7 +153,15 @@ pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<St
             )
         }));
     }
-    let body = String::from_utf8_lossy(&out.stdout).to_string();
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn run_http_raw(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    run_http_request(prompt, url, token)
+}
+
+pub fn run_http_plain(prompt: &str, url: &str, token: Option<&str>) -> Result<String, LlmRunError> {
+    let body = run_http_request(prompt, url, token)?;
     Ok(parse_http_provider_body(&body))
 }
 

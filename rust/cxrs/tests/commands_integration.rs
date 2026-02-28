@@ -1712,6 +1712,95 @@ printf '%s\n' '{"unexpected":"shape"}'
 }
 
 #[test]
+fn http_curl_adapter_json_format_supports_schema_commands() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"commands":["echo via-http-json"]}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["next", "echo", "http-json-schema"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "json"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert_eq!(stdout_str(&out).trim(), "echo via-http-json");
+}
+
+#[test]
+fn http_curl_adapter_jsonl_format_passthrough_for_cxj() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"jsonl-ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":1,"output_tokens":1}}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxj", "echo", "http-jsonl"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "jsonl"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains(r#""type":"item.completed""#), "{stdout}");
+    assert!(stdout.contains(r#""type":"turn.completed""#), "{stdout}");
+}
+
+#[test]
+fn http_curl_adapter_jsonl_format_rejects_non_jsonl_payload() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"unexpected":"shape"}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxj", "echo", "http-jsonl-bad"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "jsonl"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("jsonl payload missing item.completed"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
