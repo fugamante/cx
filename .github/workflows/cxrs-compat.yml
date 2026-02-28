@@ -114,6 +114,23 @@ jobs:
           echo "$out" | jq -e '.scoreboard.retry_health.rows_after_retry_success == 1' >/dev/null
           echo "$out" | jq -e '.scoreboard.retry_health.attempt_histogram | type == "array"' >/dev/null
 
+      - name: Broker Benchmark Contract Gate
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          trap 'rm -rf "$repo"' EXIT
+          git -C "$repo" init -q
+          mkdir -p "$repo/.codex/cxlogs"
+          cat > "$repo/.codex/cxlogs/runs.jsonl" <<'JSONL'
+          {"execution_id":"b1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":1000,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20}
+          {"execution_id":"b2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean","duration_ms":1500,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":90,"output_tokens":18}
+          JSONL
+          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend codex --backend ollama --window 10 --json)"
+          echo "$out" | jq -e '.window == 10' >/dev/null
+          echo "$out" | jq -e '.summary | type == "array"' >/dev/null
+          echo "$out" | jq -e '.summary | length == 2' >/dev/null
+          echo "$out" | jq -e '.summary[] | has("backend") and has("runs") and has("avg_duration_ms") and has("p95_duration_ms") and has("avg_effective_input_tokens") and has("avg_output_tokens")' >/dev/null
+
       - name: Quality gate
         run: |
           cd rust/cxrs

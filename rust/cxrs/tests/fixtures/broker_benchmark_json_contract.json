@@ -1,0 +1,15 @@
+{
+  "top_level_keys": [
+    "window",
+    "log_file",
+    "summary"
+  ],
+  "summary_item_keys": [
+    "backend",
+    "runs",
+    "avg_duration_ms",
+    "p95_duration_ms",
+    "avg_effective_input_tokens",
+    "avg_output_tokens"
+  ]
+}

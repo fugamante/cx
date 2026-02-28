@@ -1443,6 +1443,48 @@ fn broker_benchmark_json_reports_backend_stats() {
 }
 
 #[test]
+fn broker_benchmark_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"bb1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1200,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
+        }),
+        serde_json::json!({
+            "execution_id":"bb2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1400,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":90,"output_tokens":18
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["broker", "benchmark", "--window", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("broker benchmark json");
+    let fixture = load_fixture_json("broker_benchmark_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "broker.benchmark");
+    let item_keys = fixture_keys(&fixture, "summary_item_keys");
+    let summary = payload
+        .get("summary")
+        .and_then(Value::as_array)
+        .expect("summary array");
+    assert!(!summary.is_empty(), "summary array is empty");
+    for item in summary {
+        assert_has_keys(item, &item_keys, "broker.benchmark.summary[*]");
+    }
+}
+
+#[test]
 fn diag_json_strict_fails_on_retry_recovery_degradation() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

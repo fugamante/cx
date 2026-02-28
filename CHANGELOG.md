@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Broker benchmark contract hardening:
+  - added fixture `rust/cxrs/tests/fixtures/broker_benchmark_json_contract.json`.
+  - added integration coverage to validate `broker benchmark --json` top-level and summary item key contract.
+  - added CI gate step `Broker Benchmark Contract Gate` in `.github/workflows/cxrs-compat.yml`.
 - `broker benchmark` command for local backend telemetry comparison:
   - `cx broker benchmark [--backend codex|ollama]... [--window N] [--json]`
   - computes per-backend run count, average duration, p95 duration, average effective input tokens, and average output tokens from `runs.jsonl`.
