@@ -316,6 +316,134 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
     assert!(stdout.contains("critical_errors="), "{stdout}");
 }
 
+#[cfg(unix)]
+#[test]
+fn run_all_halt_on_critical_stops_after_first_critical_failure() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 2
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    for objective in ["cxo echo halt-critical-a", "cxo echo halt-critical-b"] {
+        let add = repo.run(&[
+            "task",
+            "add",
+            objective,
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let tasks_file = repo.tasks_file();
+    let tasks_file_for_breaker = tasks_file.clone();
+    let breaker = std::thread::spawn(move || {
+        sleep(Duration::from_millis(400));
+        let _ = fs::remove_file(&tasks_file_for_breaker);
+        let _ = fs::create_dir_all(&tasks_file_for_breaker);
+    });
+    let out = repo.run(&[
+        "task",
+        "run-all",
+        "--status",
+        "pending",
+        "--halt-on-critical",
+    ]);
+    breaker.join().expect("join breaker thread");
+    if tasks_file.is_dir() {
+        let _ = fs::remove_dir_all(&tasks_file);
+    }
+
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected non-zero on critical halt; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stderr = stderr_str(&out);
+    let critical_count = stderr.matches("critical error for task_").count();
+    assert_eq!(
+        critical_count, 1,
+        "expected one critical error before halt; stderr={stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_all_continue_on_critical_processes_remaining_tasks() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+sleep 2
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    for objective in [
+        "cxo echo continue-critical-a",
+        "cxo echo continue-critical-b",
+    ] {
+        let add = repo.run(&[
+            "task",
+            "add",
+            objective,
+            "--role",
+            "implementer",
+            "--backend",
+            "codex",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    }
+
+    let tasks_file = repo.tasks_file();
+    let tasks_file_for_breaker = tasks_file.clone();
+    let breaker = std::thread::spawn(move || {
+        sleep(Duration::from_millis(400));
+        let _ = fs::remove_file(&tasks_file_for_breaker);
+        let _ = fs::create_dir_all(&tasks_file_for_breaker);
+    });
+    let out = repo.run(&[
+        "task",
+        "run-all",
+        "--status",
+        "pending",
+        "--continue-on-critical",
+    ]);
+    breaker.join().expect("join breaker thread");
+    if tasks_file.is_dir() {
+        let _ = fs::remove_dir_all(&tasks_file);
+    }
+
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected non-zero with critical failures; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let stderr = stderr_str(&out);
+    let critical_count = stderr.matches("critical error for task_").count();
+    assert_eq!(
+        critical_count, 2,
+        "expected two critical errors in continue mode; stderr={stderr}"
+    );
+    let stdout = stdout_str(&out);
+    assert!(
+        stdout.contains("critical_errors=2"),
+        "expected summary to include critical_errors=2; stdout={stdout}"
+    );
+}
+
 #[test]
 fn mixed_run_all_respects_dependency_waves_with_concurrency() {
     let repo = TempRepo::new("cxrs-it");

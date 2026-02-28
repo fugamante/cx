@@ -102,6 +102,9 @@ All notable changes to this project are documented in this file.
     - new flags: `--halt-on-critical` and `--continue-on-critical`.
     - env default: `CX_TASK_HALT_ON_CRITICAL` (default `0`).
     - run summary now includes `critical_errors` taxonomy count.
+    - integration coverage now asserts:
+      - halt mode stops after first critical failure.
+      - continue mode processes remaining tasks and reports `critical_errors` in summary.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
 - Observability expansion for retries in `logs stats` / `telemetry`:
