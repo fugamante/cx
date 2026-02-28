@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file.
     - `provider_transport`
     - `provider_status`
   - strict log contract, migration, and integration assertions updated for the new fields.
+  - added adapter telemetry parity smoke tests covering codex and ollama run paths.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

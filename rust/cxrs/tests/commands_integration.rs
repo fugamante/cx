@@ -1107,6 +1107,97 @@ fn telemetry_json_output_is_stable_on_macos() {
 }
 
 #[test]
+fn adapter_telemetry_fields_present_for_codex_runs() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock_codex(
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":1,"output_tokens":2}}'
+"#,
+    );
+    let out = repo.run(&["cxo", "echo", "adapter-codex"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .expect("cxo row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("codex-cli"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("process"),
+        "row={row}"
+    );
+    assert!(
+        row.get("provider_status").is_some()
+            && row.get("provider_status").is_some_and(Value::is_null),
+        "expected provider_status=null, row={row}"
+    );
+}
+
+#[test]
+fn adapter_telemetry_fields_present_for_ollama_runs() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "list" ]; then
+  printf '%s\n' "NAME ID SIZE MODIFIED"
+  printf '%s\n' "llama3.1 abc 4GB now"
+  exit 0
+fi
+cat >/dev/null
+printf '%s\n' "ok"
+"#,
+    );
+    let out = repo.run_with_env(
+        &["cxo", "echo", "adapter-ollama"],
+        &[
+            ("CX_LLM_BACKEND", "ollama"),
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxo"))
+        .expect("cxo row");
+    assert_eq!(
+        row.get("adapter_type").and_then(Value::as_str),
+        Some("ollama-cli"),
+        "row={row}"
+    );
+    assert_eq!(
+        row.get("provider_transport").and_then(Value::as_str),
+        Some("process"),
+        "row={row}"
+    );
+    assert!(
+        row.get("provider_status").is_some()
+            && row.get("provider_status").is_some_and(Value::is_null),
+        "expected provider_status=null, row={row}"
+    );
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
