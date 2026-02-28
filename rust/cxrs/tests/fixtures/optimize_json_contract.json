@@ -1,0 +1,34 @@
+{
+  "top_level_keys": [
+    "window",
+    "runs",
+    "scoreboard",
+    "anomalies",
+    "recommendations",
+    "log_file"
+  ],
+  "scoreboard_keys": [
+    "runs",
+    "alerts",
+    "alerts_pct",
+    "top_avg_duration_ms",
+    "top_avg_effective_input_tokens",
+    "cache_hit_rate",
+    "cache_hit_trend",
+    "schema_failure_frequency",
+    "timeout_frequency",
+    "retry_health",
+    "capture_provider_compression",
+    "budget_clipping_frequency"
+  ],
+  "retry_health_keys": [
+    "rows_after_retry",
+    "rows_after_retry_success",
+    "rows_after_retry_rate",
+    "rows_after_retry_success_rate",
+    "tasks_with_timeout",
+    "tasks_recovered",
+    "tasks_recovery_rate",
+    "attempt_histogram"
+  ]
+}

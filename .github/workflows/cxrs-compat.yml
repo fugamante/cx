@@ -96,6 +96,22 @@ jobs:
           sched="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- scheduler --json --window 3)"
           echo "$sched" | jq -e '.scheduler_window_requested == 3' >/dev/null
 
+      - name: Optimize Retry Contract Gate
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          trap 'rm -rf "$repo"' EXIT
+          git -C "$repo" init -q
+          mkdir -p "$repo/.codex/cxlogs"
+          cat > "$repo/.codex/cxlogs/runs.jsonl" <<'JSONL'
+          {"execution_id":"o1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":1000,"schema_enforced":false,"schema_valid":true,"task_id":"task_001","retry_attempt":1,"timed_out":true}
+          {"execution_id":"o2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"codex","capture_provider":"native","execution_mode":"lean","duration_ms":800,"schema_enforced":false,"schema_valid":true,"task_id":"task_001","retry_attempt":2,"timed_out":false}
+          JSONL
+          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- optimize 10 --json)"
+          echo "$out" | jq -e '.scoreboard.retry_health.rows_after_retry == 1' >/dev/null
+          echo "$out" | jq -e '.scoreboard.retry_health.rows_after_retry_success == 1' >/dev/null
+          echo "$out" | jq -e '.scoreboard.retry_health.attempt_histogram | type == "array"' >/dev/null
+
       - name: Quality gate
         run: |
           cd rust/cxrs

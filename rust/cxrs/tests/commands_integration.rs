@@ -1513,3 +1513,42 @@ fn optimize_recommendations_include_retry_actions_when_recovery_is_low() {
         "expected retry recovery recommendation, got:\n{joined}"
     );
 }
+
+#[test]
+fn optimize_json_matches_contract_fixture() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let row = serde_json::json!({
+        "execution_id":"ofx1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":1000,"schema_enforced":false,"schema_valid":true,
+        "retry_attempt":2,"timed_out":false
+    });
+    let mut text = serde_json::to_string(&row).expect("serialize row");
+    text.push('\n');
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["optimize", "10", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("optimize json");
+    let fixture = load_fixture_json("optimize_json_contract.json");
+
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(&payload, &top_keys, "optimize");
+    let sb_keys = fixture_keys(&fixture, "scoreboard_keys");
+    assert_has_keys(
+        payload.get("scoreboard").expect("scoreboard"),
+        &sb_keys,
+        "optimize.scoreboard",
+    );
+    let retry_keys = fixture_keys(&fixture, "retry_health_keys");
+    assert_has_keys(
+        payload
+            .get("scoreboard")
+            .and_then(|v| v.get("retry_health"))
+            .expect("retry_health"),
+        &retry_keys,
+        "optimize.scoreboard.retry_health",
+    );
+}

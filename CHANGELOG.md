@@ -47,6 +47,11 @@ All notable changes to this project are documented in this file.
     - attempt>1 rate is elevated
     - timeout-to-recovery rate is low
   - integration tests added for optimize retry-health JSON shape and retry recommendation generation.
+- Optimize contract + CI gate hardening:
+  - added fixture-backed optimize JSON contract coverage:
+    - `tests/fixtures/optimize_json_contract.json`
+    - integration test validates top-level keys, scoreboard keys, and retry-health keys.
+  - CI workflow now includes `Optimize Retry Contract Gate` smoke check asserting retry-health fields in `optimize --json`.
 - Scheduler hardening test coverage expanded:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
