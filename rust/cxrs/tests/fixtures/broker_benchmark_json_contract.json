@@ -5,7 +5,13 @@
     "summary",
     "strict",
     "min_runs",
-    "violations"
+    "severity",
+    "violations",
+    "violation_counts"
+  ],
+  "violation_counts_keys": [
+    "warn",
+    "critical"
   ],
   "summary_item_keys": [
     "backend",
@@ -14,5 +20,12 @@
     "p95_duration_ms",
     "avg_effective_input_tokens",
     "avg_output_tokens"
+  ],
+  "violation_item_keys": [
+    "backend",
+    "runs",
+    "min_runs",
+    "severity",
+    "message"
   ]
 }

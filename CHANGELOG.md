@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `broker benchmark` strict severity tiers for CI policies:
+  - new flag: `--severity warn|critical` (default `critical`).
+  - violation classification:
+    - `critical`: backend has zero samples in window.
+    - `warn`: backend has some samples but fewer than `min_runs`.
+  - strict exit behavior:
+    - `--severity critical`: fail only on critical violations.
+    - `--severity warn`: fail on warn or critical violations.
+  - JSON output now includes `severity` and `violation_counts`.
 - `broker benchmark` strict sample gate:
   - new flags: `--strict` and `--min-runs N` (default `1`).
   - strict mode returns non-zero when any requested backend has fewer than `min_runs` samples.

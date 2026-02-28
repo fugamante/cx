@@ -130,8 +130,9 @@ jobs:
           echo "$out" | jq -e '.summary | type == "array"' >/dev/null
           echo "$out" | jq -e '.summary | length == 2' >/dev/null
           echo "$out" | jq -e '.summary[] | has("backend") and has("runs") and has("avg_duration_ms") and has("p95_duration_ms") and has("avg_effective_input_tokens") and has("avg_output_tokens")' >/dev/null
-          echo "$out" | jq -e '.strict == true and .min_runs == 1' >/dev/null
+          echo "$out" | jq -e '.strict == true and .min_runs == 1 and .severity == "critical"' >/dev/null
           echo "$out" | jq -e '.violations | type == "array" and length == 0' >/dev/null
+          echo "$out" | jq -e '.violation_counts.warn == 0 and .violation_counts.critical == 0' >/dev/null
 
       - name: Quality gate
         run: |

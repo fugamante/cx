@@ -65,6 +65,7 @@ struct BenchmarkArgs {
     as_json: bool,
     strict: bool,
     min_runs: usize,
+    severity: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -83,6 +84,7 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
     let mut as_json = false;
     let mut strict = false;
     let mut min_runs = 1usize;
+    let mut severity = "critical".to_string();
     while i < args.len() {
         match args[i].as_str() {
             "--backend" => {
@@ -136,6 +138,20 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
                 }
                 i += 2;
             }
+            "--severity" => {
+                let Some(v) = args.get(i + 1) else {
+                    return Err("cxrs broker benchmark: --severity requires a value".to_string());
+                };
+                let parsed = v.trim().to_lowercase();
+                if !matches!(parsed.as_str(), "warn" | "critical") {
+                    return Err(format!(
+                        "cxrs broker benchmark: --severity expects warn|critical, got '{}'",
+                        v
+                    ));
+                }
+                severity = parsed;
+                i += 2;
+            }
             other => {
                 return Err(format!("cxrs broker benchmark: unknown flag '{other}'"));
             }
@@ -150,6 +166,7 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
         as_json,
         strict,
         min_runs,
+        severity,
     })
 }
 
@@ -213,12 +230,38 @@ fn compute_backend_stats(rows: &[Value], backend: &str) -> BackendStats {
     }
 }
 
+#[derive(Debug, Clone)]
+struct StrictViolation {
+    backend: String,
+    runs: u64,
+    min_runs: usize,
+    severity: String,
+    message: String,
+}
+
+fn strict_violations(entries: &[(String, BackendStats)], min_runs: usize) -> Vec<StrictViolation> {
+    let mut out: Vec<StrictViolation> = Vec::new();
+    for (backend, s) in entries {
+        if s.runs < min_runs as u64 {
+            let sev = if s.runs == 0 { "critical" } else { "warn" };
+            out.push(StrictViolation {
+                backend: backend.clone(),
+                runs: s.runs,
+                min_runs,
+                severity: sev.to_string(),
+                message: format!("{backend}: runs={} below min_runs={min_runs}", s.runs),
+            });
+        }
+    }
+    out
+}
+
 fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
     let parsed = match parse_benchmark_args(args) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!(
-                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N]"
+                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]"
             );
             return 2;
         }
@@ -241,16 +284,18 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
         entries.push((backend.clone(), compute_backend_stats(&rows, backend)));
     }
     if parsed.strict {
-        let mut violations: Vec<String> = Vec::new();
-        for (backend, s) in &entries {
-            if s.runs < parsed.min_runs as u64 {
-                violations.push(format!(
-                    "{backend}: runs={} below min_runs={}",
-                    s.runs, parsed.min_runs
-                ));
-            }
-        }
-        if !violations.is_empty() {
+        let violations = strict_violations(&entries, parsed.min_runs);
+        let warn_count = violations.iter().filter(|v| v.severity == "warn").count();
+        let critical_count = violations
+            .iter()
+            .filter(|v| v.severity == "critical")
+            .count();
+        let should_fail = if parsed.severity == "warn" {
+            !violations.is_empty()
+        } else {
+            critical_count > 0
+        };
+        if should_fail {
             if parsed.as_json {
                 let out = json!({
                     "window": parsed.window,
@@ -267,7 +312,20 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
                     }).collect::<Vec<Value>>(),
                     "strict": true,
                     "min_runs": parsed.min_runs,
-                    "violations": violations
+                    "severity": parsed.severity,
+                    "violations": violations.iter().map(|v| {
+                        json!({
+                            "backend": v.backend,
+                            "runs": v.runs,
+                            "min_runs": v.min_runs,
+                            "severity": v.severity,
+                            "message": v.message
+                        })
+                    }).collect::<Vec<Value>>(),
+                    "violation_counts": {
+                        "warn": warn_count,
+                        "critical": critical_count
+                    }
                 });
                 match serde_json::to_string_pretty(&out) {
                     Ok(s) => println!("{s}"),
@@ -277,11 +335,12 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
                 }
             } else {
                 crate::cx_eprintln!(
-                    "cxrs broker benchmark: strict check failed (min_runs={})",
-                    parsed.min_runs
+                    "cxrs broker benchmark: strict check failed (min_runs={}, severity={})",
+                    parsed.min_runs,
+                    parsed.severity
                 );
-                for v in violations {
-                    crate::cx_eprintln!("  - {v}");
+                for v in &violations {
+                    crate::cx_eprintln!("  - [{}] {}", v.severity, v.message);
                 }
             }
             return 1;
@@ -308,7 +367,12 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
             "summary": summary,
             "strict": parsed.strict,
             "min_runs": parsed.min_runs,
-            "violations": []
+            "severity": parsed.severity,
+            "violations": [],
+            "violation_counts": {
+                "warn": 0,
+                "critical": 0
+            }
         });
         match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
@@ -337,7 +401,10 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
     }
     if parsed.strict {
         println!();
-        println!("strict: pass (min_runs={})", parsed.min_runs);
+        println!(
+            "strict: pass (min_runs={}, severity={})",
+            parsed.min_runs, parsed.severity
+        );
     }
     0
 }
@@ -415,7 +482,7 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
         "benchmark" => cmd_broker_benchmark(app_name, &args[1..]),
         other => {
             crate::cx_eprintln!(
-                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N]>"
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>"
             );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2
