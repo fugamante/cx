@@ -6,7 +6,9 @@ use crate::execmeta::{is_schema_tool, make_execution_id, prompt_preview, utc_now
 use crate::llm::effective_input_tokens;
 use crate::logs::{append_jsonl, validate_execution_log_row};
 use crate::paths::{repo_root, resolve_log_file, resolve_schema_fail_log_file};
-use crate::provider_adapter::{selected_adapter_name, selected_provider_transport};
+use crate::provider_adapter::{
+    selected_adapter_name, selected_provider_status, selected_provider_transport,
+};
 use crate::quarantine::quarantine_store_with_attempts;
 use crate::runtime::{llm_backend, llm_model};
 use crate::schema::schema_name_for_tool;
@@ -141,7 +143,7 @@ fn base_execution_log(
         llm_model: model_opt.clone(),
         adapter_type: Some(adapter_type),
         provider_transport: Some(selected_provider_transport().to_string()),
-        provider_status: None,
+        provider_status: selected_provider_status().map(str::to_string),
         backend_selected: Some(backend_selected),
         model_selected: model_opt,
         route_policy: Some(broker_policy),

@@ -5,7 +5,9 @@ use crate::capture::rtk_is_usable;
 use crate::config::app_config;
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{resolve_log_file, resolve_quarantine_dir, resolve_state_file};
-use crate::provider_adapter::{current_provider_capabilities, selected_adapter_name};
+use crate::provider_adapter::{
+    current_provider_capabilities, selected_adapter_name, selected_provider_status,
+};
 use crate::runtime::{llm_backend, llm_model, logging_enabled};
 use crate::state::{read_state_value, value_at_path};
 
@@ -54,12 +56,14 @@ fn print_version_paths(log_file: &str, state_file: &str, quarantine_dir: &str) {
 
 fn print_version_runtime(mode: &str, backend: &str, active_model: &str, schema_relaxed: &str) {
     let adapter_name = selected_adapter_name();
+    let provider_status = selected_provider_status().unwrap_or("none");
     let caps = current_provider_capabilities()
         .unwrap_or_else(|_| crate::provider_adapter::selected_provider_capabilities());
     println!("mode: {mode}");
     println!("llm_backend: {backend}");
     println!("provider_adapter: {adapter_name}");
     println!("provider_transport: {}", caps.transport);
+    println!("provider_status: {provider_status}");
     println!("provider_jsonl_native: {}", caps.jsonl_native);
     println!("provider_schema_strict: {}", caps.schema_strict);
     println!("llm_model: {active_model}");
@@ -158,6 +162,7 @@ pub fn cmd_core(app_version: &str) -> i32 {
     let active_model = if model.is_empty() { "<unset>" } else { &model };
     let capture_provider = runtime_cfg.capture_provider.clone();
     let adapter_name = selected_adapter_name();
+    let provider_status = selected_provider_status().unwrap_or("none");
     let caps = current_provider_capabilities()
         .unwrap_or_else(|_| crate::provider_adapter::selected_provider_capabilities());
     let rtk_enabled = env::var("CX_RTK_SYSTEM")
@@ -180,6 +185,7 @@ pub fn cmd_core(app_version: &str) -> i32 {
     println!("backend: {backend}");
     println!("provider_adapter: {adapter_name}");
     println!("provider_transport: {}", caps.transport);
+    println!("provider_status: {provider_status}");
     println!("provider_jsonl_native: {}", caps.jsonl_native);
     println!("provider_schema_strict: {}", caps.schema_strict);
     println!("active_model: {active_model}");

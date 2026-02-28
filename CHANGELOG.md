@@ -20,6 +20,10 @@ All notable changes to this project are documented in this file.
   - added adapter telemetry parity smoke tests covering codex and ollama run paths.
   - added mock-adapter integration tests for schema success and schema-failure quarantine paths without provider binaries.
   - provider capability surface added (`jsonl_native`, `schema_strict`, `transport`) and exposed in `cxversion`/`cxcore`.
+  - added `CX_PROVIDER_ADAPTER=http-stub` fail-fast path for future HTTP transport work:
+    - adapter resolves with `provider_transport=http`.
+    - run logs now tag `provider_status=stub_unimplemented` for this path.
+    - added integration coverage for failure behavior + telemetry tagging.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

@@ -27,10 +27,13 @@ fn adapter_override() -> Option<String> {
 }
 
 pub fn selected_adapter_name() -> &'static str {
-    if let Some(v) = adapter_override()
-        && v == "mock"
-    {
-        return "mock";
+    if let Some(v) = adapter_override() {
+        if v == "mock" {
+            return "mock";
+        }
+        if v == "http-stub" {
+            return "http-stub";
+        }
     }
     if normalized_backend_name(&llm_backend()) == "ollama" {
         "ollama-cli"
@@ -43,11 +46,23 @@ pub fn selected_provider_transport() -> &'static str {
     provider_transport_for_adapter(selected_adapter_name())
 }
 
+pub fn selected_provider_status() -> Option<&'static str> {
+    provider_status_for_adapter(selected_adapter_name())
+}
+
 fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
-    if adapter_name == "mock" {
-        "mock"
+    match adapter_name {
+        "mock" => "mock",
+        "http-stub" => "http",
+        _ => "process",
+    }
+}
+
+fn provider_status_for_adapter(adapter_name: &str) -> Option<&'static str> {
+    if adapter_name == "http-stub" {
+        Some("stub_unimplemented")
     } else {
-        "process"
+        None
     }
 }
 
@@ -67,6 +82,11 @@ pub fn capabilities_for_adapter(adapter_name: &str) -> ProviderCapabilities {
             jsonl_native: false,
             schema_strict: true,
             transport: "mock",
+        },
+        "http-stub" => ProviderCapabilities {
+            jsonl_native: false,
+            schema_strict: true,
+            transport: "http",
         },
         _ => ProviderCapabilities {
             jsonl_native: false,
@@ -187,11 +207,33 @@ impl ProviderAdapter for MockAdapter {
     }
 }
 
+pub struct HttpStubAdapter;
+
+impl ProviderAdapter for HttpStubAdapter {
+    fn run_plain(&self, _prompt: &str) -> Result<String, LlmRunError> {
+        Err(LlmRunError::message(
+            "http-stub adapter selected; HTTP provider transport is not implemented yet"
+                .to_string(),
+        ))
+    }
+
+    fn run_jsonl(&self, _prompt: &str) -> Result<String, LlmRunError> {
+        self.run_plain("")
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        capabilities_for_adapter("http-stub")
+    }
+}
+
 pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunError> {
-    if let Some(v) = adapter_override()
-        && v == "mock"
-    {
-        return Ok(Box::new(MockAdapter::new_from_env()));
+    if let Some(v) = adapter_override() {
+        if v == "mock" {
+            return Ok(Box::new(MockAdapter::new_from_env()));
+        }
+        if v == "http-stub" {
+            return Ok(Box::new(HttpStubAdapter));
+        }
     }
     if normalized_backend_name(&llm_backend()) == "ollama" {
         return Ok(Box::new(OllamaCliAdapter::new()?));
@@ -274,6 +316,11 @@ mod tests {
         assert!(!mock.jsonl_native);
         assert!(mock.schema_strict);
         assert_eq!(mock.transport, "mock");
+
+        let http = super::capabilities_for_adapter("http-stub");
+        assert!(!http.jsonl_native);
+        assert!(http.schema_strict);
+        assert_eq!(http.transport, "http");
     }
 
     #[test]
@@ -282,5 +329,14 @@ mod tests {
         let caps = codex.capabilities();
         assert!(caps.jsonl_native);
         assert_eq!(caps.transport, "process");
+    }
+
+    #[test]
+    fn adapter_override_http_stub_sets_transport_and_status() {
+        assert_eq!(super::provider_transport_for_adapter("http-stub"), "http");
+        assert_eq!(
+            super::provider_status_for_adapter("http-stub"),
+            Some("stub_unimplemented")
+        );
     }
 }

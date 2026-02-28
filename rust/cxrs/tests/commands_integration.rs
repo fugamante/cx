@@ -1297,6 +1297,44 @@ fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
 }
 
 #[test]
+fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
+    let repo = TempRepo::new("cxrs-it");
+    let out = repo.run_with_env(
+        &["cxo", "echo", "http-stub"],
+        &[("CX_PROVIDER_ADAPTER", "http-stub")],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http-stub adapter selected"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+
+    let run_last = common::parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("adapter_type").and_then(Value::as_str),
+        Some("http-stub")
+    );
+    assert_eq!(
+        run_last.get("provider_transport").and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        run_last.get("provider_status").and_then(Value::as_str),
+        Some("stub_unimplemented")
+    );
+}
+
+#[test]
 fn diag_reports_scheduler_distribution_fields() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
