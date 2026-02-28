@@ -1103,6 +1103,20 @@ fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     assert!(retry.get("rows_with_retry_metadata").is_some());
     assert!(retry.get("rows_after_retry_success_rate").is_some());
     assert!(retry.get("attempt_histogram").is_some());
+    let http_modes = v
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats");
+    assert!(
+        http_modes.is_empty()
+            || http_modes.iter().all(|m| {
+                m.get("format").is_some()
+                    && m.get("parser_mode").is_some()
+                    && m.get("runs").and_then(Value::as_u64).is_some()
+                    && m.get("success_rate").is_some()
+            }),
+        "invalid http_mode_stats shape: {v}"
+    );
 }
 
 #[test]
@@ -1185,6 +1199,70 @@ fn logs_stats_strict_and_severity_flags_behave_as_expected() {
         "logs validate and telemetry strict violation counts diverged"
     );
     assert_eq!(required, 33, "unexpected strict contract field count");
+}
+
+#[test]
+fn telemetry_json_groups_http_mode_stats() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"h1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":10,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"h2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":12,"schema_enforced":false,"schema_valid":false,
+            "provider_transport":"http","http_provider_format":"text","http_parser_mode":"envelope"
+        }),
+        serde_json::json!({
+            "execution_id":"h3","timestamp":"2026-01-01T00:00:02Z","command":"cxj","tool":"cxj",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":14,"schema_enforced":false,"schema_valid":true,
+            "provider_transport":"http","http_provider_format":"jsonl","http_parser_mode":"jsonl_passthrough"
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["telemetry", "10", "--json"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let v: Value = serde_json::from_str(&stdout_str(&out)).expect("telemetry json");
+    let modes = v
+        .get("http_mode_stats")
+        .and_then(Value::as_array)
+        .expect("http_mode_stats array");
+    assert!(!modes.is_empty(), "expected grouped http_mode_stats: {v}");
+
+    let text_mode = modes
+        .iter()
+        .find(|m| {
+            m.get("format").and_then(Value::as_str) == Some("text")
+                && m.get("parser_mode").and_then(Value::as_str) == Some("envelope")
+        })
+        .expect("text/envelope mode");
+    assert_eq!(text_mode.get("runs").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        text_mode.get("schema_invalid").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        text_mode.get("healthy_runs").and_then(Value::as_u64),
+        Some(1)
+    );
 }
 
 #[cfg(target_os = "macos")]

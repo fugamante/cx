@@ -40,6 +40,10 @@ All notable changes to this project are documented in this file.
     - run logs now include HTTP-mode telemetry fields:
       - `http_provider_format`
       - `http_parser_mode`
+    - `telemetry --json` / `logs stats --json` now include grouped `http_mode_stats` derived from:
+      - `http_provider_format`
+      - `http_parser_mode`
+      with per-mode run counts and health rates.
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
   - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:

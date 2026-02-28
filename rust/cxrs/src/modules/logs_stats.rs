@@ -106,6 +106,7 @@ struct StatsComputed {
     missing_in_second: Vec<String>,
     severity: &'static str,
     retry: RetryStats,
+    http_mode_stats: Vec<HttpModeStat>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -118,6 +119,17 @@ struct RetryStats {
     tasks_retry_recovered: usize,
     tasks_retry_recovery_rate: f64,
     attempt_histogram: BTreeMap<u64, usize>,
+}
+
+#[derive(Debug, Clone)]
+struct HttpModeStat {
+    format: String,
+    parser_mode: String,
+    runs: usize,
+    schema_invalid: usize,
+    timed_out: usize,
+    policy_blocked: usize,
+    healthy_runs: usize,
 }
 
 fn severity_label(strict_violations: usize, new_keys: usize, missing_keys: usize) -> &'static str {
@@ -158,6 +170,7 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second.len(),
     );
     let retry = compute_retry_stats(rows);
+    let http_mode_stats = compute_http_mode_stats(rows);
     StatsComputed {
         lines,
         strict_violations,
@@ -165,7 +178,57 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second,
         severity,
         retry,
+        http_mode_stats,
     }
+}
+
+fn compute_http_mode_stats(rows: &[Value]) -> Vec<HttpModeStat> {
+    let mut agg: BTreeMap<(String, String), HttpModeStat> = BTreeMap::new();
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        if obj.get("provider_transport").and_then(Value::as_str) != Some("http") {
+            continue;
+        }
+        let format = obj
+            .get("http_provider_format")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let parser_mode = obj
+            .get("http_parser_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let key = (format.clone(), parser_mode.clone());
+        let entry = agg.entry(key).or_insert_with(|| HttpModeStat {
+            format,
+            parser_mode,
+            runs: 0,
+            schema_invalid: 0,
+            timed_out: 0,
+            policy_blocked: 0,
+            healthy_runs: 0,
+        });
+        entry.runs += 1;
+        let schema_invalid = obj.get("schema_valid").and_then(Value::as_bool) == Some(false);
+        let timed_out = obj.get("timed_out").and_then(Value::as_bool) == Some(true);
+        let policy_blocked = obj.get("policy_blocked").and_then(Value::as_bool) == Some(true);
+        if schema_invalid {
+            entry.schema_invalid += 1;
+        }
+        if timed_out {
+            entry.timed_out += 1;
+        }
+        if policy_blocked {
+            entry.policy_blocked += 1;
+        }
+        if !schema_invalid && !timed_out && !policy_blocked {
+            entry.healthy_runs += 1;
+        }
+    }
+    agg.into_values().collect()
 }
 
 fn compute_retry_stats(rows: &[Value]) -> RetryStats {
@@ -295,6 +358,29 @@ fn print_stats_human(
             .join(",")
     };
     println!("- retry_attempt_histogram: {}", attempt_hist);
+    println!("http_mode_stats:");
+    if stats.http_mode_stats.is_empty() {
+        println!("- <none>");
+    } else {
+        for mode in &stats.http_mode_stats {
+            let success_rate = if mode.runs == 0 {
+                0.0
+            } else {
+                mode.healthy_runs as f64 / mode.runs as f64
+            };
+            println!(
+                "- format={} parser_mode={} runs={} healthy={} success_rate={:.2} schema_invalid={} timed_out={} policy_blocked={}",
+                mode.format,
+                mode.parser_mode,
+                mode.runs,
+                mode.healthy_runs,
+                success_rate,
+                mode.schema_invalid,
+                mode.timed_out,
+                mode.policy_blocked
+            );
+        }
+    }
     println!("field_population:");
     for line in &stats.lines {
         println!("- {line}");
@@ -352,6 +438,23 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
             "tasks_retry_recovery_rate": stats.retry.tasks_retry_recovery_rate,
             "attempt_histogram": stats.retry.attempt_histogram
         },
+        "http_mode_stats": stats.http_mode_stats.iter().map(|m| {
+            let success_rate = if m.runs == 0 {
+                0.0
+            } else {
+                m.healthy_runs as f64 / m.runs as f64
+            };
+            json!({
+                "format": m.format,
+                "parser_mode": m.parser_mode,
+                "runs": m.runs,
+                "healthy_runs": m.healthy_runs,
+                "success_rate": success_rate,
+                "schema_invalid": m.schema_invalid,
+                "timed_out": m.timed_out,
+                "policy_blocked": m.policy_blocked
+            })
+        }).collect::<Vec<Value>>()
     });
     match serde_json::to_string_pretty(&payload) {
         Ok(s) => {
