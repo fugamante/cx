@@ -878,6 +878,157 @@ fi
 }
 
 #[test]
+fn judge_convergence_falls_back_on_invalid_model_output() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+prompt="$(cat)"
+if printf '%s' "$prompt" | grep -q "Select the best candidate index"; then
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"not-json"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":40,"cached_input_tokens":4,"output_tokens":8}}'
+else
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+fi
+"#,
+    );
+
+    let add = repo.run(&[
+        "task",
+        "add",
+        "cxo echo judge-fallback",
+        "--role",
+        "implementer",
+        "--backend",
+        "codex",
+        "--converge",
+        "judge",
+        "--replicas",
+        "2",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    let id = stdout_str(&add).trim().to_string();
+
+    let run = repo.run(&["task", "run", &id]);
+    assert!(
+        run.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&run),
+        stderr_str(&run)
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let converge_row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxtask_converge"))
+        .expect("converge row");
+    let votes = converge_row
+        .get("converge_votes")
+        .and_then(Value::as_object)
+        .expect("converge votes object");
+    assert_eq!(
+        votes.get("decision_source").and_then(Value::as_str),
+        Some("score_fallback"),
+        "unexpected converge votes: {votes:?}"
+    );
+}
+
+#[test]
+fn mixed_run_all_round_robin_assigns_backends_deterministically() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+"#,
+    );
+    repo.write_mock(
+        "ollama",
+        r#"#!/usr/bin/env bash
+if [ "$1" = "list" ]; then
+  printf '%s\n' "NAME ID SIZE MODIFIED"
+  printf '%s\n' "llama3.1 abc 4GB now"
+  exit 0
+fi
+printf '%s\n' "ok"
+"#,
+    );
+
+    let mut ids: Vec<String> = Vec::new();
+    for i in 1..=6 {
+        let add = repo.run(&[
+            "task",
+            "add",
+            &format!("cxo echo rr-{i}"),
+            "--role",
+            "implementer",
+            "--backend",
+            "auto",
+            "--mode",
+            "parallel",
+        ]);
+        assert!(add.status.success(), "stderr={}", stderr_str(&add));
+        ids.push(stdout_str(&add).trim().to_string());
+    }
+
+    let run = repo.run_with_env(
+        &[
+            "task",
+            "run-all",
+            "--status",
+            "pending",
+            "--mode",
+            "mixed",
+            "--backend-pool",
+            "codex,ollama",
+            "--backend-cap",
+            "codex=1",
+            "--backend-cap",
+            "ollama=1",
+            "--max-workers",
+            "2",
+            "--fairness",
+            "round_robin",
+        ],
+        &[
+            ("CX_OLLAMA_MODEL", "llama3.1"),
+            ("CX_BROKER_POLICY", "balanced"),
+        ],
+    );
+    assert!(
+        run.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&run),
+        stderr_str(&run)
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    for (idx, id) in ids.iter().enumerate() {
+        let row = runs
+            .iter()
+            .find(|v| {
+                v.get("tool").and_then(Value::as_str) == Some("cxo")
+                    && v.get("task_id").and_then(Value::as_str) == Some(id.as_str())
+            })
+            .unwrap_or_else(|| panic!("missing run row for task {id}"));
+        let backend = row
+            .get("backend_used")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let expected = if idx % 2 == 0 { "codex" } else { "ollama" };
+        assert_eq!(
+            backend, expected,
+            "unexpected backend for task {} (idx={}): row={row:?}",
+            id, idx
+        );
+    }
+}
+
+#[test]
 fn mixed_run_all_queue_ms_increases_for_later_tasks_under_caps() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(

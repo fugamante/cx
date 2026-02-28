@@ -97,14 +97,15 @@ Must remain true:
 
 ## Delivery Schedule (Near-Future)
 
-Current implementation status on `codex/orchestration-mode-phase`:
+Current implementation status on `main`:
 - Milestone A: completed
-- Milestone B: in progress (routing controls + bounded mixed-mode worker scheduling + `cxdiag` scheduler telemetry implemented; remaining work is deeper fairness/ordering stress validation)
-- Milestone B operator tooling now includes `diag --json` for machine-readable scheduler telemetry snapshots.
+- Milestone B: completed (routing controls + bounded mixed-mode worker scheduling + `cxdiag` scheduler telemetry, plus fairness/ordering stress validation)
+- Milestone B operator tooling includes `diag --json` for machine-readable scheduler telemetry snapshots.
 - `diag --window N` scopes scheduler telemetry analysis to a recent run window.
 - `diag --json --strict` enables CI-style severity gating on scheduler signals.
 - broker operator tooling includes `cx broker benchmark` for local run-log backend latency/token snapshots.
-- Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented, including deterministic `judge`/`score` scoring fallback; model-based judge remains pending)
+- Milestone C: completed (task metadata + telemetry scaffold + sequential replica convergence baseline, with model-assisted `judge` and deterministic score fallback)
+- Milestone D: completed (reliability + contract gates for scheduler strictness, backend fallback, convergence telemetry, and schema behavior)
 
 Milestone A: Routing Substrate
 - add task backend/model/profile metadata

@@ -29,6 +29,7 @@ python3 tools/quality_gate.py --max-raw-eprintln 0
 - Preserve stdout pipeline behavior; diagnostics go to stderr.
 - Do not introduce startup side effects.
 - Update `README.md`/`CHANGELOG.md` when behavior or contracts change.
+- Keep function names concise and descriptive; prefer names under ~60 characters (tests included).
 
 ## Commit Guidance
 
