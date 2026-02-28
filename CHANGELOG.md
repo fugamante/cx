@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
   - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
   - execution core now resolves a provider adapter and routes plain/JSONL calls through the adapter contract (no behavior change intended).
   - added adapter-focused unit coverage for backend normalization and Ollama JSONL wrapping.
+  - added centralized adapter invocation helpers for current backend selection.
+  - surfaced `provider_adapter` in `cxversion` and `cxcore` runtime introspection output.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:

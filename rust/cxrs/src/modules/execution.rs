@@ -5,7 +5,7 @@ use crate::config::app_config;
 use crate::execmeta::make_execution_id;
 use crate::execution_logging::{LogExecutionErrorInput, log_execution_error};
 use crate::llm::{LlmRunError, extract_agent_text, usage_from_jsonl};
-use crate::provider_adapter::resolve_provider_adapter;
+use crate::provider_adapter::{resolve_provider_adapter, run_jsonl_with_current_adapter};
 use crate::runlog::log_schema_failure;
 use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
 use crate::types::{
@@ -15,8 +15,7 @@ use crate::types::{
 use crate::util::sha256_hex;
 
 pub fn run_llm_jsonl(prompt: &str) -> Result<String, String> {
-    let adapter = resolve_provider_adapter().map_err(|e| e.message)?;
-    adapter.run_jsonl(prompt).map_err(|e| e.message)
+    run_jsonl_with_current_adapter(prompt).map_err(|e| e.message)
 }
 
 pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {

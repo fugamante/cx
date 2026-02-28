@@ -11,6 +11,14 @@ fn normalized_backend_name(raw: &str) -> &'static str {
     }
 }
 
+pub fn selected_adapter_name() -> &'static str {
+    if normalized_backend_name(&llm_backend()) == "ollama" {
+        "ollama-cli"
+    } else {
+        "codex-cli"
+    }
+}
+
 fn ollama_plain_to_jsonl(text: &str) -> Result<String, LlmRunError> {
     wrap_agent_text_as_jsonl(text).map_err(LlmRunError::message)
 }
@@ -61,6 +69,11 @@ pub fn resolve_provider_adapter() -> Result<Box<dyn ProviderAdapter>, LlmRunErro
     Ok(Box::new(CodexCliAdapter))
 }
 
+pub fn run_jsonl_with_current_adapter(prompt: &str) -> Result<String, LlmRunError> {
+    let adapter = resolve_provider_adapter()?;
+    adapter.run_jsonl(prompt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{normalized_backend_name, ollama_plain_to_jsonl};
@@ -94,5 +107,11 @@ mod tests {
             Some("agent_message")
         );
         assert_eq!(item.get("text").and_then(Value::as_str), Some(raw));
+    }
+
+    #[test]
+    fn selected_adapter_name_follows_backend_normalization() {
+        assert_eq!(normalized_backend_name("ollama"), "ollama");
+        assert_eq!(normalized_backend_name("codex"), "codex");
     }
 }
