@@ -29,7 +29,7 @@ All notable changes to this project are documented in this file.
     - sends prompt payload through `curl` over HTTP transport.
     - accepts provider responses as plain text or JSON envelopes (`text`, `response`, `output`, `content[]`).
     - telemetry tags this path as `provider_transport=http`, `provider_status=experimental`.
-    - added integration coverage for URL-missing failure path + telemetry tagging, plus successful JSON response parsing.
+    - added integration coverage for URL-missing failure path + telemetry tagging, successful JSON response parsing, and live local HTTP fixture round-trip (request method/path/auth/body assertions).
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
   - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:
