@@ -106,6 +106,7 @@ struct StatsComputed {
     missing_in_second: Vec<String>,
     severity: &'static str,
     retry: RetryStats,
+    critical: CriticalStats,
     http_mode_stats: Vec<HttpModeStat>,
 }
 
@@ -119,6 +120,15 @@ struct RetryStats {
     tasks_retry_recovered: usize,
     tasks_retry_recovery_rate: f64,
     attempt_histogram: BTreeMap<u64, usize>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct CriticalStats {
+    summary_rows: usize,
+    halt_enabled_rows: usize,
+    halted_rows: usize,
+    critical_errors_total: u64,
+    runs_with_critical_errors: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +180,7 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second.len(),
     );
     let retry = compute_retry_stats(rows);
+    let critical = compute_critical_stats(rows);
     let http_mode_stats = compute_http_mode_stats(rows);
     StatsComputed {
         lines,
@@ -178,6 +189,7 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second,
         severity,
         retry,
+        critical,
         http_mode_stats,
     }
 }
@@ -307,6 +319,51 @@ fn compute_retry_stats(rows: &[Value]) -> RetryStats {
     }
 }
 
+fn compute_critical_stats(rows: &[Value]) -> CriticalStats {
+    let mut summary_rows = 0usize;
+    let mut halt_enabled_rows = 0usize;
+    let mut halted_rows = 0usize;
+    let mut critical_errors_total = 0u64;
+    let mut runs_with_critical_errors = 0usize;
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        if obj.get("tool").and_then(Value::as_str) != Some("cxtask_runall") {
+            continue;
+        }
+        summary_rows += 1;
+        if obj.get("halt_on_critical").and_then(Value::as_bool) == Some(true) {
+            halt_enabled_rows += 1;
+        }
+        let critical = obj
+            .get("run_all_critical_errors")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        critical_errors_total += critical;
+        if critical > 0 {
+            runs_with_critical_errors += 1;
+        }
+        let halted = obj
+            .get("run_all_scheduled")
+            .and_then(Value::as_u64)
+            .zip(obj.get("run_all_complete").and_then(Value::as_u64))
+            .zip(obj.get("run_all_failed").and_then(Value::as_u64))
+            .map(|((scheduled, complete), failed)| complete + failed < scheduled)
+            .unwrap_or(false);
+        if halted {
+            halted_rows += 1;
+        }
+    }
+    CriticalStats {
+        summary_rows,
+        halt_enabled_rows,
+        halted_rows,
+        critical_errors_total,
+        runs_with_critical_errors,
+    }
+}
+
 fn print_stats_human(
     app_name: &str,
     log_file: &Path,
@@ -358,6 +415,18 @@ fn print_stats_human(
             .join(",")
     };
     println!("- retry_attempt_histogram: {}", attempt_hist);
+    println!("critical_telemetry:");
+    println!("- summary_rows: {}", stats.critical.summary_rows);
+    println!("- halt_enabled_rows: {}", stats.critical.halt_enabled_rows);
+    println!("- halted_rows: {}", stats.critical.halted_rows);
+    println!(
+        "- critical_errors_total: {}",
+        stats.critical.critical_errors_total
+    );
+    println!(
+        "- runs_with_critical_errors: {}",
+        stats.critical.runs_with_critical_errors
+    );
     println!("http_mode_stats:");
     if stats.http_mode_stats.is_empty() {
         println!("- <none>");
@@ -437,6 +506,13 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
             "tasks_retry_recovered": stats.retry.tasks_retry_recovered,
             "tasks_retry_recovery_rate": stats.retry.tasks_retry_recovery_rate,
             "attempt_histogram": stats.retry.attempt_histogram
+        },
+        "critical_telemetry": {
+            "summary_rows": stats.critical.summary_rows,
+            "halt_enabled_rows": stats.critical.halt_enabled_rows,
+            "halted_rows": stats.critical.halted_rows,
+            "critical_errors_total": stats.critical.critical_errors_total,
+            "runs_with_critical_errors": stats.critical.runs_with_critical_errors
         },
         "http_mode_stats": stats.http_mode_stats.iter().map(|m| {
             let success_rate = if m.runs == 0 {

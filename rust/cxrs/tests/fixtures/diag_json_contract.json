@@ -19,6 +19,7 @@
     "schema_registry_files",
     "scheduler",
     "retry",
+    "critical",
     "scheduler_window_requested",
     "severity",
     "severity_reasons",
@@ -48,5 +49,13 @@
     "tasks_retry_recovered",
     "tasks_retry_recovery_rate",
     "attempt_histogram"
+  ],
+  "critical_keys": [
+    "window_runs",
+    "summary_rows",
+    "halt_enabled_rows",
+    "halted_rows",
+    "critical_errors_total",
+    "runs_with_critical_errors"
   ]
 }

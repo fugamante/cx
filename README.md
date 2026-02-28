@@ -203,9 +203,13 @@ Telemetry health:
 ```bash
 ./bin/cx logs stats 200
 ./bin/cx logs stats 200 --json | jq .
+./bin/cx logs stats 200 --json | jq '.critical_telemetry'
 ./bin/cx telemetry 50 --json | jq .
+./bin/cx telemetry 50 --json | jq '.critical_telemetry'
 ./bin/cx diag --json --window 50 | jq .
+./bin/cx diag --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx scheduler --json --window 50 | jq .
+./bin/cx scheduler --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx optimize 200 --json | jq .
 ```
 
@@ -258,6 +262,8 @@ Stage II runtime commands:
 ./bin/cx task run <task_id> --mode deterministic --backend codex
 ./bin/cx task run-all --status pending
 ./bin/cx task run-all --status pending --mode mixed
+./bin/cx task run-all --status pending --mode mixed --halt-on-critical
+CX_TASK_HALT_ON_CRITICAL=1 ./bin/cx task run-all --status pending
 
 ./bin/cx optimize 200
 ./bin/cx optimize 200 --json | jq .

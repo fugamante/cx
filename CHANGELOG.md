@@ -98,6 +98,21 @@ All notable changes to this project are documented in this file.
   - `task run` execution-id surfacing hardened:
     - recover execution id from newly appended run-log rows when objective dispatch path does not return one directly.
     - retries no longer short-circuit on interim `failed` status; only `complete` is terminal for `run_task_by_id`.
+  - critical-error policy controls for `task run-all`:
+    - new flags: `--halt-on-critical` and `--continue-on-critical`.
+    - env default: `CX_TASK_HALT_ON_CRITICAL` (default `0`).
+    - run summary now includes `critical_errors` taxonomy count.
+    - integration coverage now asserts:
+      - halt mode stops after first critical failure.
+      - continue mode processes remaining tasks and reports `critical_errors` in summary.
+    - diagnostics/scheduler observability now includes a `critical` telemetry block with:
+      - `summary_rows`
+      - `halt_enabled_rows`
+      - `halted_rows`
+      - `critical_errors_total`
+      - `runs_with_critical_errors`
+    - `logs stats` / `telemetry --json` now includes `critical_telemetry` with the same run-all critical counters for windowed trend analysis.
+    - strict diagnostics severity now raises `critical_halts_detected` when halted run-all telemetry is present in the diagnostics window.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
 - Observability expansion for retries in `logs stats` / `telemetry`:
