@@ -6,6 +6,13 @@
 - Bash is compatibility/bootstrap only.
 - Keep behavior deterministic and non-interactive unless explicitly required.
 
+## Branding and Command Stability
+
+- Project branding is `XSHELF (formerly CX)`.
+- Canonical command surface remains `cx` unless an explicit migration phase is approved.
+- Preserve `CX_*` environment variable compatibility by default.
+- Do not replace existing `cx` examples in user-facing docs without a scoped migration plan.
+
 ## Start Here
 
 - New contributor issue list: `docs/GOOD_FIRST_ISSUES.md`
