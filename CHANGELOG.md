@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase IV milestone status alignment:
+  - updated `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md` to mark Milestones A-D as completed.
+  - refreshed `docs/ROADMAP.md` to reflect post-Phase-IV priorities and Phase V preparation.
 - Branding Phase 1 (non-breaking):
   - introduced `bin/xshelf` alias entrypoint delegating to canonical `bin/cx`.
   - updated top-level docs to `XSHELF (formerly CX)` while preserving all `cx` commands and `CX_*` environment compatibility.

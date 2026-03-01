@@ -1,6 +1,6 @@
 # Phase IV: Multi-Model Tandem Orchestration
 
-Last updated: 2026-02-27  
+Last updated: 2026-03-01  
 Branch: `codex/orchestration-mode-phase`
 
 ## Objective
@@ -97,31 +97,36 @@ Must remain true:
 
 ## Delivery Schedule (Near-Future)
 
-Current implementation status on `codex/orchestration-mode-phase`:
+Current implementation status:
 - Milestone A: completed
-- Milestone B: in progress (routing controls + bounded mixed-mode worker scheduling + `cxdiag` scheduler telemetry implemented; remaining work is deeper fairness/ordering stress validation)
-- Milestone B operator tooling now includes `diag --json` for machine-readable scheduler telemetry snapshots.
-- `diag --window N` scopes scheduler telemetry analysis to a recent run window.
-- `diag --json --strict` enables CI-style severity gating on scheduler signals.
-- broker operator tooling includes `cx broker benchmark` for local run-log backend latency/token snapshots.
-- Milestone C: in progress (task metadata + telemetry scaffold + sequential replica convergence baseline implemented, including deterministic `judge`/`score` scoring fallback; model-based judge remains pending)
+- Milestone B: completed
+- Milestone C: completed
+- Milestone D: completed
+
+Delivered highlights:
+- bounded mixed-mode scheduling with backend pool and fairness/ordering stress coverage
+- scheduler telemetry in `diag --json`, `scheduler --json`, and strict severity gates
+- broker policy + benchmark surfaces with strict/severity checks
+- replica convergence modes (`first_valid`, `majority`, `judge`, `score`) with deterministic fallback behavior
+- model-judge convergence path implemented and validated in integration coverage
+- reliability matrix expanded for backend fallback, model unset transitions, schema determinism, timeout/retry signals, and quarantine/log contracts
 
 Milestone A: Routing Substrate
 - add task backend/model/profile metadata
 - implement backend availability checks + route selection
 - implement `cx broker show`
 
-Milestone B: Mixed Backend Execution
+Milestone B: Mixed Backend Execution (Completed)
 - add `--backend-pool` and backend caps to `task run-all --mode mixed`
 - emit route telemetry fields
 - keep execution single-worker per scheduled unit
 
-Milestone C: Replica + Convergence
+Milestone C: Replica + Convergence (Completed)
 - add `replicas` and convergence modes (`first_valid`, `majority`)
 - add deterministic tie-break rules
 - add quarantine linkage for all failed candidates
 
-Milestone D: Quality Gates
+Milestone D: Quality Gates (Completed)
 - add reliability tests for:
   - backend unavailability fallback
   - model unset transitions
@@ -129,7 +134,7 @@ Milestone D: Quality Gates
   - schema deterministic behavior under tandem execution
 - add docs and operator playbook updates
 
-## Merge Criteria for Phase IV
+## Merge Criteria for Phase IV (Met)
 
 Required before merge to `main`:
 - `cargo fmt`

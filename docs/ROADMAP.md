@@ -6,9 +6,9 @@
 - Increase Rust command parity with Bash fallback paths.
 - Stabilize replay determinism under repeated runs.
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).
-- Phase III kickoff: switchable orchestration modes (`sequential` + `parallel`) on top of current task graph.
-- Add task execution policy metadata (`run_mode`, `depends_on`, `resource_keys`, optional retries/timeouts).
-- Add deterministic scheduler planning (`task run-plan`) before mixed-mode execution.
+- Close remaining parity/doc hardening for orchestration surfaces now in `main`.
+- Tighten policy and telemetry invariants for mixed-mode run-all edge cases.
+- Prepare Phase V execution plan (provider-agnostic orchestration and convergence health automation).
 
 ## Next (1-2 months)
 
@@ -16,11 +16,9 @@
 - Add CI-level artifact reports for reliability suite failures.
 - Improve task orchestration ergonomics (`task show`/`task run` UX polish).
 - Broaden OS validation matrix (Linux-focused CI pass).
-- Add bounded worker pool for `parallel` tasks with dependency + resource-lock enforcement.
-- Add run-level concurrency telemetry (`worker_id`, queue/start/finish timestamps, attempt).
-- Phase IV kickoff: multi-model tandem orchestration with broker routing policies.
-- Add task-level backend/model/profile assignment (`codex|ollama|auto`).
-- Add convergence modes for tandem runs (`first_valid`, `majority`, `judge`, `score`).
+- Add run-level concurrency telemetry refinement (`worker_id`, queue/start/finish timestamps, attempt) for SLO reporting.
+- Phase V kickoff: provider adapter evolution beyond process mode (HTTP/stub graduation with strict contracts).
+- Add automation-oriented anomaly actions from `diag/scheduler/optimize` outputs.
 
 ## Later (2+ months)
 
