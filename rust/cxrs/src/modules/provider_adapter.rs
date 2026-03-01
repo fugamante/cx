@@ -5,6 +5,30 @@ use crate::llm::{
 use crate::runtime::{llm_backend, resolve_ollama_model_for_run};
 use std::env;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderStatus {
+    Stable,
+    Experimental,
+    StubUnimplemented,
+}
+
+impl ProviderStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Experimental => "experimental",
+            Self::StubUnimplemented => "stub_unimplemented",
+        }
+    }
+
+    pub fn to_log_field(self) -> Option<&'static str> {
+        match self {
+            Self::Stable => None,
+            _ => Some(self.as_str()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProviderCapabilities {
     pub jsonl_native: bool,
@@ -79,7 +103,19 @@ pub fn selected_http_parser_mode_opt() -> Option<&'static str> {
 }
 
 pub fn selected_provider_status() -> Option<&'static str> {
+    selected_provider_status_kind().to_log_field()
+}
+
+pub fn selected_provider_status_kind() -> ProviderStatus {
     provider_status_for_adapter(selected_adapter_name())
+}
+
+pub fn normalize_provider_status(raw: Option<&str>) -> ProviderStatus {
+    match raw.map(str::trim).map(str::to_lowercase).as_deref() {
+        Some("experimental") => ProviderStatus::Experimental,
+        Some("stub_unimplemented") => ProviderStatus::StubUnimplemented,
+        _ => ProviderStatus::Stable,
+    }
 }
 
 fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
@@ -90,11 +126,11 @@ fn provider_transport_for_adapter(adapter_name: &str) -> &'static str {
     }
 }
 
-fn provider_status_for_adapter(adapter_name: &str) -> Option<&'static str> {
+fn provider_status_for_adapter(adapter_name: &str) -> ProviderStatus {
     match adapter_name {
-        "http-stub" => Some("stub_unimplemented"),
-        "http-curl" => Some("experimental"),
-        _ => None,
+        "http-stub" => ProviderStatus::StubUnimplemented,
+        "http-curl" => ProviderStatus::Experimental,
+        _ => ProviderStatus::Stable,
     }
 }
 
@@ -395,7 +431,10 @@ pub fn run_jsonl_with_current_adapter(prompt: &str) -> Result<String, LlmRunErro
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderAdapter, normalized_backend_name, ollama_plain_to_jsonl};
+    use super::{
+        ProviderAdapter, ProviderStatus, normalize_provider_status, normalized_backend_name,
+        ollama_plain_to_jsonl,
+    };
     use serde_json::Value;
 
     #[test]
@@ -488,12 +527,33 @@ mod tests {
         assert_eq!(super::provider_transport_for_adapter("http-stub"), "http");
         assert_eq!(
             super::provider_status_for_adapter("http-stub"),
-            Some("stub_unimplemented")
+            ProviderStatus::StubUnimplemented
         );
         assert_eq!(super::provider_transport_for_adapter("http-curl"), "http");
         assert_eq!(
             super::provider_status_for_adapter("http-curl"),
-            Some("experimental")
+            ProviderStatus::Experimental
         );
+        assert_eq!(
+            super::provider_status_for_adapter("codex-cli"),
+            ProviderStatus::Stable
+        );
+    }
+
+    #[test]
+    fn normalize_provider_status_maps_unknown_to_stable() {
+        assert_eq!(
+            normalize_provider_status(Some("experimental")),
+            ProviderStatus::Experimental
+        );
+        assert_eq!(
+            normalize_provider_status(Some("stub_unimplemented")),
+            ProviderStatus::StubUnimplemented
+        );
+        assert_eq!(
+            normalize_provider_status(Some("totally_unknown")),
+            ProviderStatus::Stable
+        );
+        assert_eq!(normalize_provider_status(None), ProviderStatus::Stable);
     }
 }

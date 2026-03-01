@@ -1,5 +1,6 @@
 use crate::error::{CxError, CxResult};
 use crate::paths::ensure_parent_dir;
+use crate::provider_adapter::normalize_provider_status;
 use crate::types::ExecutionLog;
 use crate::util::{IfEmpty, sha256_hex};
 use serde_json::Value;
@@ -111,7 +112,9 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.llm_model = get_opt_str(obj, "llm_model");
     row.adapter_type = get_opt_str(obj, "adapter_type");
     row.provider_transport = get_opt_str(obj, "provider_transport");
-    row.provider_status = get_opt_str(obj, "provider_status");
+    row.provider_status = normalize_provider_status(get_opt_str(obj, "provider_status").as_deref())
+        .to_log_field()
+        .map(str::to_string);
     row.http_provider_format = get_opt_str(obj, "http_provider_format");
     row.http_parser_mode = get_opt_str(obj, "http_parser_mode");
     row.capture_provider = get_opt_str(obj, "capture_provider");

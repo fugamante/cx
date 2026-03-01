@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V P5-01 provider status contract hardening:
+  - introduced typed provider status taxonomy in `provider_adapter`:
+    - `stable`
+    - `experimental`
+    - `stub_unimplemented`
+  - standardized adapter-status normalization via `normalize_provider_status(...)` for migration paths.
+  - aligned runtime introspection status output with typed provider status mapping.
+  - expanded provider adapter tests for status normalization and mapping determinism.
 - Phase V kickoff docs:
   - added `docs/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md` (execution spec).
   - added `docs/PHASE_V_IMPLEMENTATION_BACKLOG.md` (ticketized backlog and validation checklist).
