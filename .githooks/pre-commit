@@ -4,6 +4,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+if [[ ! -x "./rust/cxrs/scripts/leak_scan.sh" ]]; then
+  echo "pre-commit: missing executable ./rust/cxrs/scripts/leak_scan.sh; refusing commit" >&2
+  exit 1
+fi
+
+echo "pre-commit: running staged leak scan" >&2
+./rust/cxrs/scripts/leak_scan.sh --staged
+
 # Only snapshot when manuals content is being committed.
 if ! git diff --cached --name-only | rg -q '^docs/manuals/' ; then
   exit 0
@@ -26,4 +34,3 @@ if [[ -z "$out" ]]; then
 fi
 
 echo "pre-commit: manuals snapshot -> $out" >&2
-

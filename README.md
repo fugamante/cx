@@ -1,12 +1,13 @@
-# CX
+# XSHELF (formerly CX)
 
-`cx` is a deterministic, Rust-first LLM dev runtime.
+`cx` is a deterministic, Rust-first LLM dev runtime for repositories.
 
 Project naming note:
-- `CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
+- `XSHELF/CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
 
 - Canonical execution engine: `rust/cxrs`
-- Single authoritative entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
+- Canonical entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
+- Brand alias entrypoint: `bin/xshelf` (delegates to `bin/cx`, no behavior change)
 - Deterministic structured commands: schema-enforced JSON + quarantine/replay on failure
 - Unified execution pipeline: capture -> optional RTK/native reduction -> mandatory budgeting -> LLM -> validation -> logging
 - Repo-local state and telemetry under `.codex/` (logs, schemas, tasks, quarantine, state)
@@ -130,6 +131,7 @@ Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible bu
 ```bash
 cd <repo-root>
 ./bin/cx version
+./bin/xshelf version
 ./bin/cx core
 ./bin/cx cxo git status
 ```
@@ -203,9 +205,13 @@ Telemetry health:
 ```bash
 ./bin/cx logs stats 200
 ./bin/cx logs stats 200 --json | jq .
+./bin/cx logs stats 200 --json | jq '.critical_telemetry'
 ./bin/cx telemetry 50 --json | jq .
+./bin/cx telemetry 50 --json | jq '.critical_telemetry'
 ./bin/cx diag --json --window 50 | jq .
+./bin/cx diag --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx scheduler --json --window 50 | jq .
+./bin/cx scheduler --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx optimize 200 --json | jq .
 ```
 
@@ -258,6 +264,8 @@ Stage II runtime commands:
 ./bin/cx task run <task_id> --mode deterministic --backend codex
 ./bin/cx task run-all --status pending
 ./bin/cx task run-all --status pending --mode mixed
+./bin/cx task run-all --status pending --mode mixed --halt-on-critical
+CX_TASK_HALT_ON_CRITICAL=1 ./bin/cx task run-all --status pending
 
 ./bin/cx optimize 200
 ./bin/cx optimize 200 --json | jq .
@@ -316,7 +324,8 @@ Local push guardrails:
 
 ```bash
 ./bin/cx-enable-githooks
-# pre-push now enforces fmt + clippy (including too_many_arguments) + tests
+# pre-commit scans staged content for local-path/PII/secrets leaks
+# pre-push scans tracked content, then enforces fmt + clippy + tests
 git push
 ```
 

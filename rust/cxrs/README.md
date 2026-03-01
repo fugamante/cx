@@ -1,9 +1,9 @@
-# cxrs (Rust canonical runtime)
+# cxrs (Rust runtime for XSHELF/CX)
 
-`cxrs` is the canonical Rust implementation for the `cx` toolchain.
+`cxrs` is the canonical Rust implementation for the `XSHELF/CX` toolchain.
 
 Project naming note:
-- `CX/cxrs` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
+- `XSHELF/CX/cxrs` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
 
 Current scope:
 - standalone binary scaffold

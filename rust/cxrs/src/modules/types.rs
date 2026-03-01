@@ -298,6 +298,15 @@ pub struct ExecutionLog {
     pub retry_max: Option<u32>,
     pub retry_reason: Option<String>,
     pub retry_backoff_ms: Option<u64>,
+    pub run_all_mode: Option<String>,
+    pub halt_on_critical: Option<bool>,
+    pub run_all_scheduled: Option<u64>,
+    pub run_all_complete: Option<u64>,
+    pub run_all_failed: Option<u64>,
+    pub run_all_blocked: Option<u64>,
+    pub run_all_retryable_failures: Option<u64>,
+    pub run_all_non_retryable_failures: Option<u64>,
+    pub run_all_critical_errors: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

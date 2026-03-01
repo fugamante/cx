@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Branding Phase 1 (non-breaking):
+  - introduced `bin/xshelf` alias entrypoint delegating to canonical `bin/cx`.
+  - updated top-level docs to `XSHELF (formerly CX)` while preserving all `cx` commands and `CX_*` environment compatibility.
+  - added integration coverage for `bin/xshelf version`.
 - Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
   - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
   - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
@@ -80,6 +84,9 @@ All notable changes to this project are documented in this file.
   - new test verifies `diag --json --strict` exits non-zero and reports `retry_recovery_low` under poor retry recovery conditions.
 - Guardrail hardening for local pushes and argument-count discipline:
   - added repo-local `pre-push` hook under `.githooks/pre-push`.
+  - added `rust/cxrs/scripts/leak_scan.sh` for local-path/PII/secret pattern scanning.
+  - `pre-commit` now scans staged content for leak patterns before commit.
+  - `pre-push` now scans tracked repo content before running Rust guardrails.
   - added `rust/cxrs/scripts/guardrails.sh` to run:
     - `cargo fmt --check`
     - `cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments`
@@ -98,6 +105,21 @@ All notable changes to this project are documented in this file.
   - `task run` execution-id surfacing hardened:
     - recover execution id from newly appended run-log rows when objective dispatch path does not return one directly.
     - retries no longer short-circuit on interim `failed` status; only `complete` is terminal for `run_task_by_id`.
+  - critical-error policy controls for `task run-all`:
+    - new flags: `--halt-on-critical` and `--continue-on-critical`.
+    - env default: `CX_TASK_HALT_ON_CRITICAL` (default `0`).
+    - run summary now includes `critical_errors` taxonomy count.
+    - integration coverage now asserts:
+      - halt mode stops after first critical failure.
+      - continue mode processes remaining tasks and reports `critical_errors` in summary.
+    - diagnostics/scheduler observability now includes a `critical` telemetry block with:
+      - `summary_rows`
+      - `halt_enabled_rows`
+      - `halted_rows`
+      - `critical_errors_total`
+      - `runs_with_critical_errors`
+    - `logs stats` / `telemetry --json` now includes `critical_telemetry` with the same run-all critical counters for windowed trend analysis.
+    - strict diagnostics severity now raises `critical_halts_detected` when halted run-all telemetry is present in the diagnostics window.
   - integration coverage added for retry success on timeout:
     - first attempt times out, second attempt succeeds, and run logs capture per-attempt retry telemetry.
 - Observability expansion for retries in `logs stats` / `telemetry`:

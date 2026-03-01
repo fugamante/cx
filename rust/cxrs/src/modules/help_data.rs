@@ -341,7 +341,7 @@ pub const TASK_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "task run-all",
-        usage: "cx task run-all [--status pending] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N]",
+        usage: "cx task run-all [--status pending] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded] [--halt-on-critical|--continue-on-critical]",
         description: "Run tasks by status (sequential default; mixed uses run-plan waves and broker-aware backend routing)",
     },
 ];
