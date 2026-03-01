@@ -7,7 +7,6 @@ Project naming note:
 
 - Canonical execution engine: `rust/cxrs`
 - Canonical entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
-- Brand alias entrypoint: `bin/xshelf` (delegates to `bin/cx`, no behavior change)
 - Deterministic structured commands: schema-enforced JSON + quarantine/replay on failure
 - Unified execution pipeline: capture -> optional RTK/native reduction -> mandatory budgeting -> LLM -> validation -> logging
 - Repo-local state and telemetry under `.codex/` (logs, schemas, tasks, quarantine, state)
@@ -131,7 +130,6 @@ Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible bu
 ```bash
 cd <repo-root>
 ./bin/cx version
-./bin/xshelf version
 ./bin/cx core
 ./bin/cx cxo git status
 ```
