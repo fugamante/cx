@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Branding Phase 1 (non-breaking):
+  - introduced `bin/xshelf` alias entrypoint delegating to canonical `bin/cx`.
+  - updated top-level docs to `XSHELF (formerly CX)` while preserving all `cx` commands and `CX_*` environment compatibility.
+  - added integration coverage for `bin/xshelf version`.
 - Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
   - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
   - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.

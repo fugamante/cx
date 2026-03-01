@@ -37,6 +37,25 @@ fn bin_cx_version_reports_runtime() {
 }
 
 #[test]
+fn bin_xshelf_version_reports_runtime() {
+    let repo = repo_root();
+    let out = Command::new(repo.join("bin").join("xshelf"))
+        .arg("version")
+        .current_dir(&repo)
+        .output()
+        .expect("run bin/xshelf version");
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("execution_path:"), "{stdout}");
+}
+
+#[test]
 fn lib_cx_sh_is_sourceable_and_exports_functions() {
     let repo = repo_root();
     let script = format!(
