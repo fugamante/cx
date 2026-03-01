@@ -329,15 +329,60 @@ impl HttpCurlAdapter {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err(LlmRunError::message(
-                "http-curl adapter returned empty JSON payload".to_string(),
+                "http-curl adapter [http_json_empty] returned empty JSON payload".to_string(),
             ));
         }
-        match serde_json::from_str::<serde_json::Value>(trimmed) {
-            Ok(serde_json::Value::String(s)) => Ok(s),
-            Ok(v) => Ok(v.to_string()),
-            Err(e) => Err(LlmRunError::message(format!(
-                "http-curl adapter expected JSON payload: {e}"
-            ))),
+        let parsed = serde_json::from_str::<serde_json::Value>(trimmed).map_err(|e| {
+            LlmRunError::message(format!(
+                "http-curl adapter [http_json_invalid] expected JSON payload: {e}"
+            ))
+        })?;
+
+        match parsed {
+            serde_json::Value::String(s) => Ok(s),
+            serde_json::Value::Object(obj) => {
+                if let Some(s) = obj.get("text").and_then(serde_json::Value::as_str) {
+                    return Ok(s.to_string());
+                }
+                if let Some(s) = obj.get("response").and_then(serde_json::Value::as_str) {
+                    return Ok(s.to_string());
+                }
+                if let Some(s) = obj.get("output").and_then(serde_json::Value::as_str) {
+                    return Ok(s.to_string());
+                }
+                if let Some(arr) = obj.get("content").and_then(serde_json::Value::as_array) {
+                    let mut joined = Vec::new();
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            joined.push(s.to_string());
+                            continue;
+                        }
+                        if let Some(s) = item.get("text").and_then(serde_json::Value::as_str) {
+                            joined.push(s.to_string());
+                            continue;
+                        }
+                        return Err(LlmRunError::message(
+                            "http-curl adapter [http_json_content_invalid] unsupported content item shape"
+                                .to_string(),
+                        ));
+                    }
+                    if joined.is_empty() {
+                        return Err(LlmRunError::message(
+                            "http-curl adapter [http_json_content_empty] content array had no usable text"
+                                .to_string(),
+                        ));
+                    }
+                    return Ok(joined.join("\n"));
+                }
+                Ok(serde_json::Value::Object(obj).to_string())
+            }
+            serde_json::Value::Array(_) => Ok(parsed.to_string()),
+            serde_json::Value::Bool(_) | serde_json::Value::Number(_) | serde_json::Value::Null => {
+                Err(LlmRunError::message(
+                    "http-curl adapter [http_json_type_unsupported] expected string/object/array payload"
+                        .to_string(),
+                ))
+            }
         }
     }
 

@@ -2056,6 +2056,70 @@ printf '%s\n' '{"commands":["echo via-http-json"]}'
 }
 
 #[test]
+fn http_curl_adapter_json_format_rejects_invalid_content_envelope() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"content":[{"unexpected":"shape"}]}'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["next", "echo", "http-json-bad-content"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "json"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http_json_content_invalid"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn http_curl_adapter_json_format_rejects_invalid_json_payload() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "curl",
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{not-json'
+"#,
+    );
+    let out = repo.run_with_env(
+        &["next", "echo", "http-json-invalid"],
+        &[
+            ("CX_PROVIDER_ADAPTER", "http-curl"),
+            ("CX_HTTP_PROVIDER_URL", "http://127.0.0.1:9999/infer"),
+            ("CX_HTTP_PROVIDER_FORMAT", "json"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("http_json_invalid"),
+        "stderr={}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
 fn http_curl_adapter_jsonl_format_passthrough_for_cxj() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(

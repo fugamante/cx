@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V P5-02 HTTP adapter deterministic envelope handling:
+  - hardened `http-curl` JSON payload parsing with deterministic failure classes:
+    - `http_json_empty`
+    - `http_json_invalid`
+    - `http_json_content_invalid`
+    - `http_json_content_empty`
+    - `http_json_type_unsupported`
+  - kept `text` mode fallback behavior unchanged to avoid breaking existing plain-output flows.
+  - added integration coverage for malformed/unrecognized JSON envelope failure paths in schema command execution.
 - Phase V P5-01 provider status contract hardening:
   - introduced typed provider status taxonomy in `provider_adapter`:
     - `stable`
