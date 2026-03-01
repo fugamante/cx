@@ -322,7 +322,8 @@ Local push guardrails:
 
 ```bash
 ./bin/cx-enable-githooks
-# pre-push now enforces fmt + clippy (including too_many_arguments) + tests
+# pre-commit scans staged content for local-path/PII/secrets leaks
+# pre-push scans tracked content, then enforces fmt + clippy + tests
 git push
 ```
 

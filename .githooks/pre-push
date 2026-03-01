@@ -14,5 +14,13 @@ if [[ ! -x "./rust/cxrs/scripts/guardrails.sh" ]]; then
   exit 1
 fi
 
+if [[ ! -x "./rust/cxrs/scripts/leak_scan.sh" ]]; then
+  echo "pre-push: missing executable ./rust/cxrs/scripts/leak_scan.sh; refusing push" >&2
+  exit 1
+fi
+
+echo "pre-push: running repo leak scan" >&2
+./rust/cxrs/scripts/leak_scan.sh --repo
+
 echo "pre-push: running cxrs guardrails (fmt + clippy + tests)" >&2
 ./rust/cxrs/scripts/guardrails.sh

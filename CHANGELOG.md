@@ -80,6 +80,9 @@ All notable changes to this project are documented in this file.
   - new test verifies `diag --json --strict` exits non-zero and reports `retry_recovery_low` under poor retry recovery conditions.
 - Guardrail hardening for local pushes and argument-count discipline:
   - added repo-local `pre-push` hook under `.githooks/pre-push`.
+  - added `rust/cxrs/scripts/leak_scan.sh` for local-path/PII/secret pattern scanning.
+  - `pre-commit` now scans staged content for leak patterns before commit.
+  - `pre-push` now scans tracked repo content before running Rust guardrails.
   - added `rust/cxrs/scripts/guardrails.sh` to run:
     - `cargo fmt --check`
     - `cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments`
