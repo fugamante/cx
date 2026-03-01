@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V kickoff docs:
+  - added `docs/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md` (execution spec).
+  - added `docs/PHASE_V_IMPLEMENTATION_BACKLOG.md` (ticketized backlog and validation checklist).
+  - linked Phase V docs from `docs/ROADMAP.md`.
 - Phase IV milestone status alignment:
   - updated `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md` to mark Milestones A-D as completed.
   - refreshed `docs/ROADMAP.md` to reflect post-Phase-IV priorities and Phase V preparation.

@@ -9,6 +9,8 @@
 - Close remaining parity/doc hardening for orchestration surfaces now in `main`.
 - Tighten policy and telemetry invariants for mixed-mode run-all edge cases.
 - Prepare Phase V execution plan (provider-agnostic orchestration and convergence health automation).
+  - spec: `docs/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md`
+  - tickets: `docs/PHASE_V_IMPLEMENTATION_BACKLOG.md`
 
 ## Next (1-2 months)
 
