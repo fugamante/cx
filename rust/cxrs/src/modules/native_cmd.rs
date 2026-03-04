@@ -50,7 +50,7 @@ pub struct NativeDeps {
     pub print_profile: fn(usize) -> i32,
     pub print_alert: fn(usize) -> i32,
     pub parse_optimize_args: ParseOptimizeArgsFn,
-    pub print_optimize: fn(usize, bool) -> i32,
+    pub print_optimize: fn(crate::optimize_report::OptimizeArgs) -> i32,
     pub print_worklog: fn(usize) -> i32,
     pub print_trace: fn(usize) -> i32,
     pub cmd_next: fn(&[String]) -> i32,
@@ -63,7 +63,8 @@ pub struct NativeDeps {
     pub cmd_quarantine_show: fn(&str) -> i32,
 }
 
-type ParseOptimizeArgsFn = fn(&[String], usize) -> Result<(usize, bool), String>;
+type ParseOptimizeArgsFn =
+    fn(&[String], usize) -> Result<crate::optimize_report::OptimizeArgs, String>;
 
 pub fn handler(ctx: &crate::cmdctx::CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
     native_dispatch::handler(ctx, args, deps)

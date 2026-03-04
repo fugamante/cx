@@ -103,14 +103,14 @@ fn handle_cx(args: &[String], deps: &NativeDeps) -> i32 {
 }
 
 fn handle_optimize(args: &[String], deps: &NativeDeps) -> i32 {
-    let (n, json_out) = match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
+    let parsed = match (deps.parse_optimize_args)(&args[2..], DEFAULT_OPTIMIZE_WINDOW) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{}", format_error("optimize", &e));
             return EXIT_USAGE;
         }
     };
-    (deps.print_optimize)(n, json_out)
+    (deps.print_optimize)(parsed)
 }
 
 fn handle_replay(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {

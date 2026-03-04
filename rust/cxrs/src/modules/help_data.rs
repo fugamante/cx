@@ -18,12 +18,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "diag",
-        usage: "diag [--json] [--window N] [--strict]",
+        usage: "diag [--json] [--window N] [--strict] [--actions] [--severity warning|critical]",
         description: "Non-interactive diagnostic report",
     },
     CommandHelp {
         name: "scheduler",
-        usage: "scheduler [--json] [--window N] [--strict]",
+        usage: "scheduler [--json] [--window N] [--strict] [--actions] [--severity warning|critical]",
         description: "Scheduler-focused diagnostics summary",
     },
     CommandHelp {
@@ -228,7 +228,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "optimize",
-        usage: "optimize [N] [--json]",
+        usage: "optimize [N] [--json] [--actions] [--strict] [--severity warning|critical]",
         description: "Recommend cost/latency improvements from last N runs",
     },
     CommandHelp {

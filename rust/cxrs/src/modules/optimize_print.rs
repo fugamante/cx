@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::optimize_report::optimize_report;
+use crate::optimize_report::{
+    OptimizeArgs, build_optimize_actions, optimize_report, should_fail_strict,
+};
 
 fn print_tool_pairs(label: &str, arr: Option<&Vec<Value>>, suffix: &str) {
     println!("{label}");
@@ -209,7 +211,8 @@ fn print_list_section(title: &str, arr: Option<&Vec<Value>>, empty: &str) {
     }
 }
 
-pub fn print_optimize(n: usize, json_out: bool) -> i32 {
+pub fn print_optimize(args: OptimizeArgs) -> i32 {
+    let (n, json_out, include_actions, strict, severity_floor) = args;
     let report = match optimize_report(n) {
         Ok(v) => v,
         Err(e) => {
@@ -217,9 +220,22 @@ pub fn print_optimize(n: usize, json_out: bool) -> i32 {
             return 1;
         }
     };
+    let actions = if include_actions {
+        build_optimize_actions(&report)
+    } else {
+        Vec::new()
+    };
     if json_out {
-        println!("{report}");
-        return 0;
+        let mut payload = report;
+        if include_actions {
+            payload["actions"] = Value::Array(actions.clone());
+        }
+        println!("{payload}");
+        return if should_fail_strict(strict, severity_floor.as_deref(), &actions) {
+            1
+        } else {
+            0
+        };
     }
 
     println!("== cxrs optimize (last {n} runs) ==");
@@ -245,5 +261,32 @@ pub fn print_optimize(n: usize, json_out: bool) -> i32 {
             .and_then(Value::as_str)
             .unwrap_or("<unknown>")
     );
-    0
+    if include_actions {
+        println!();
+        println!("Actions:");
+        if actions.is_empty() {
+            println!("- none");
+        } else {
+            for action in &actions {
+                println!(
+                    "- [{}] {}: {} -> {}",
+                    action
+                        .get("severity")
+                        .and_then(Value::as_str)
+                        .unwrap_or("ok"),
+                    action.get("id").and_then(Value::as_str).unwrap_or("action"),
+                    action
+                        .get("rationale")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                    action.get("command").and_then(Value::as_str).unwrap_or("")
+                );
+            }
+        }
+    }
+    if should_fail_strict(strict, severity_floor.as_deref(), &actions) {
+        1
+    } else {
+        0
+    }
 }

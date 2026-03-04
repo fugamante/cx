@@ -88,14 +88,14 @@ fn handle_prompt(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {
 }
 
 fn handle_optimize(args: &[String], deps: &CompatDeps) -> i32 {
-    let (n, json_out) = match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
+    let parsed = match (deps.parse_optimize_args)(&args[1..], DEFAULT_OPTIMIZE_WINDOW) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{}", format_error("cx optimize", &e));
             return EXIT_USAGE;
         }
     };
-    (deps.print_optimize)(n, json_out)
+    (deps.print_optimize)(parsed)
 }
 
 fn handle_replay(app_name: &str, args: &[String], deps: &CompatDeps) -> i32 {

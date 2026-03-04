@@ -491,10 +491,28 @@ fn scheduler_diag_value(log_file_path: &str, window: usize) -> Value {
     })
 }
 
-fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
+fn parse_severity_floor(raw: &str) -> Option<&'static str> {
+    match raw {
+        "warn" | "warning" => Some("warning"),
+        "critical" => Some("critical"),
+        _ => None,
+    }
+}
+
+fn severity_rank(level: &str) -> i32 {
+    match level {
+        "critical" => 2,
+        "warning" => 1,
+        _ => 0,
+    }
+}
+
+fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool, bool, Option<String>), String> {
     let mut as_json = false;
     let mut window = 200usize;
     let mut strict = false;
+    let mut actions = false;
+    let mut severity_floor: Option<String> = None;
     let mut i = 0usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -505,6 +523,20 @@ fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
             "--strict" => {
                 strict = true;
                 i += 1;
+            }
+            "--actions" => {
+                actions = true;
+                i += 1;
+            }
+            "--severity" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    return Err("diag: --severity requires a value".to_string());
+                };
+                let Some(normalized) = parse_severity_floor(v) else {
+                    return Err("diag: --severity must be warning|critical".to_string());
+                };
+                severity_floor = Some(normalized.to_string());
+                i += 2;
             }
             "--window" => {
                 let Some(v) = args.get(i + 1).map(String::as_str) else {
@@ -524,7 +556,106 @@ fn parse_diag_args(args: &[String]) -> Result<(bool, usize, bool), String> {
             }
         }
     }
-    Ok((as_json, window, strict))
+    Ok((as_json, window, strict, actions, severity_floor))
+}
+
+fn build_actions_from_reasons(
+    reasons: &[String],
+    window: usize,
+    route_cmd: &str,
+) -> Vec<serde_json::Value> {
+    let mut actions: Vec<serde_json::Value> = Vec::new();
+    for reason in reasons {
+        let reason_key = reason.split(':').next().unwrap_or(reason.as_str());
+        let (id, severity, rationale, command) = match reason_key {
+            "queue_p95_high" => (
+                "queue_p95_high",
+                "warning",
+                "Scheduler queue p95 latency is elevated.",
+                format!("cx scheduler --json --window {window} --strict"),
+            ),
+            "backend_skew_high" => (
+                "backend_skew_high",
+                "warning",
+                "Runs are concentrated on one backend; rebalance or benchmark policy.",
+                format!("cx broker benchmark --window {window} --json"),
+            ),
+            "worker_spread_low" => (
+                "worker_spread_low",
+                "warning",
+                "Worker distribution is narrow for current run volume.",
+                "cx task run-plan --status pending --json".to_string(),
+            ),
+            "retry_recovery_low" => (
+                "retry_recovery_low",
+                "critical",
+                "Retry recovery rate is below target.",
+                "cx logs stats 200 --json --strict --severity critical".to_string(),
+            ),
+            "retry_pressure_high" => (
+                "retry_pressure_high",
+                "warning",
+                "Retry attempt volume is elevated.",
+                "cx optimize 200 --json --actions".to_string(),
+            ),
+            "critical_halts_detected" => (
+                "critical_halts_detected",
+                "critical",
+                "Task run-all critical halts were observed.",
+                route_cmd.to_string(),
+            ),
+            other => (
+                other,
+                "warning",
+                "Scheduler diagnostic anomaly detected.",
+                "cx diag --json --window 200 --actions".to_string(),
+            ),
+        };
+        actions.push(serde_json::json!({
+            "id": id,
+            "severity": severity,
+            "rationale": rationale,
+            "command": command
+        }));
+    }
+    actions
+}
+
+fn max_action_severity(actions: &[serde_json::Value]) -> &'static str {
+    let mut max_level = "ok";
+    for action in actions {
+        let level = action
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("ok");
+        if severity_rank(level) > severity_rank(max_level) {
+            max_level = if level == "critical" {
+                "critical"
+            } else {
+                "warning"
+            };
+        }
+    }
+    max_level
+}
+
+fn should_fail_strict(
+    strict: bool,
+    severity_floor: Option<&str>,
+    diagnostic_severity: &str,
+    actions: &[serde_json::Value],
+) -> bool {
+    if !strict {
+        return false;
+    }
+    let threshold = severity_floor.unwrap_or("warning");
+    let action_severity = max_action_severity(actions);
+    let effective = if severity_rank(action_severity) > severity_rank(diagnostic_severity) {
+        action_severity
+    } else {
+        diagnostic_severity
+    };
+    severity_rank(effective) >= severity_rank(threshold)
 }
 
 fn scheduler_severity(
@@ -615,11 +746,13 @@ fn scheduler_severity(
 }
 
 pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
-    let (as_json, window, strict) = match parse_diag_args(args) {
+    let (as_json, window, strict, include_actions, severity_floor) = match parse_diag_args(args) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{e}");
-            crate::cx_eprintln!("Usage: diag [--json] [--window N] [--strict]");
+            crate::cx_eprintln!(
+                "Usage: diag [--json] [--window N] [--strict] [--actions] [--severity warning|critical]"
+            );
             return 2;
         }
     };
@@ -658,9 +791,18 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
         "no rust route and no bash fallback".to_string()
     };
     let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry, &critical);
+    let actions = if include_actions {
+        build_actions_from_reasons(
+            &severity_reasons,
+            window,
+            "cx task run-all --status pending",
+        )
+    } else {
+        Vec::new()
+    };
 
     if as_json {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "timestamp": utc_now_iso(),
             "version": toolchain_version_string(app_version),
             "mode": cfg.cx_mode,
@@ -690,6 +832,9 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
                 "reason": route_reason
             }
         });
+        if include_actions {
+            payload["actions"] = serde_json::Value::Array(actions.clone());
+        }
         match serde_json::to_string_pretty(&payload) {
             Ok(s) => println!("{s}"),
             Err(e) => {
@@ -697,7 +842,11 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
                 return 1;
             }
         }
-        return if strict && severity != "ok" { 1 } else { 0 };
+        return if should_fail_strict(strict, severity_floor.as_deref(), severity, &actions) {
+            1
+        } else {
+            0
+        };
     }
 
     print_diag_header(app_version, cfg);
@@ -724,20 +873,48 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     if !severity_reasons.is_empty() {
         println!("severity_reasons: {}", severity_reasons.join(","));
     }
+    if include_actions {
+        println!("actions:");
+        if actions.is_empty() {
+            println!("- none");
+        } else {
+            for action in &actions {
+                println!(
+                    "- [{}] {}: {} -> {}",
+                    action
+                        .get("severity")
+                        .and_then(Value::as_str)
+                        .unwrap_or("ok"),
+                    action.get("id").and_then(Value::as_str).unwrap_or("action"),
+                    action
+                        .get("rationale")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                    action.get("command").and_then(Value::as_str).unwrap_or("")
+                );
+            }
+        }
+    }
 
     println!(
         "routing_trace: sample='{}' route={} reason={}",
         sample_cmd, route, route_reason
     );
-    if strict && severity != "ok" { 1 } else { 0 }
+    if should_fail_strict(strict, severity_floor.as_deref(), severity, &actions) {
+        1
+    } else {
+        0
+    }
 }
 
 pub fn cmd_scheduler(args: &[String]) -> i32 {
-    let (as_json, window, strict) = match parse_diag_args(args) {
+    let (as_json, window, strict, include_actions, severity_floor) = match parse_diag_args(args) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{e}");
-            crate::cx_eprintln!("Usage: scheduler [--json] [--window N] [--strict]");
+            crate::cx_eprintln!(
+                "Usage: scheduler [--json] [--window N] [--strict] [--actions] [--severity warning|critical]"
+            );
             return 2;
         }
     };
@@ -748,9 +925,18 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
     let retry = retry_diag_value(&log_file, window);
     let critical = critical_diag_value(&log_file, window);
     let (severity, severity_reasons) = scheduler_severity(&scheduler, &retry, &critical);
+    let actions = if include_actions {
+        build_actions_from_reasons(
+            &severity_reasons,
+            window,
+            "cx task run-all --status pending",
+        )
+    } else {
+        Vec::new()
+    };
 
     if as_json {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "log_file": log_file,
             "scheduler_window_requested": window,
             "scheduler": scheduler,
@@ -759,6 +945,9 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
             "severity": severity,
             "severity_reasons": severity_reasons
         });
+        if include_actions {
+            payload["actions"] = serde_json::Value::Array(actions.clone());
+        }
         match serde_json::to_string_pretty(&payload) {
             Ok(s) => println!("{s}"),
             Err(e) => {
@@ -766,7 +955,11 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
                 return 1;
             }
         }
-        return if strict && severity != "ok" { 1 } else { 0 };
+        return if should_fail_strict(strict, severity_floor.as_deref(), severity, &actions) {
+            1
+        } else {
+            0
+        };
     }
 
     println!("== cxscheduler ==");
@@ -779,7 +972,33 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
     if !severity_reasons.is_empty() {
         println!("severity_reasons: {}", severity_reasons.join(","));
     }
-    if strict && severity != "ok" { 1 } else { 0 }
+    if include_actions {
+        println!("actions:");
+        if actions.is_empty() {
+            println!("- none");
+        } else {
+            for action in &actions {
+                println!(
+                    "- [{}] {}: {} -> {}",
+                    action
+                        .get("severity")
+                        .and_then(Value::as_str)
+                        .unwrap_or("ok"),
+                    action.get("id").and_then(Value::as_str).unwrap_or("action"),
+                    action
+                        .get("rationale")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                    action.get("command").and_then(Value::as_str).unwrap_or("")
+                );
+            }
+        }
+    }
+    if should_fail_strict(strict, severity_floor.as_deref(), severity, &actions) {
+        1
+    } else {
+        0
+    }
 }
 
 pub fn last_appended_json_value(log_file: &Path, offset: u64) -> Option<Value> {

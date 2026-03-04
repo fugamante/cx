@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V P5-03 actionable anomaly output contract:
+  - added `--actions` JSON payload support for:
+    - `cx diag --json --actions`
+    - `cx scheduler --json --actions`
+    - `cx optimize --json --actions`
+  - action object contract is now fixture-backed (`rust/cxrs/tests/fixtures/actions_json_contract.json`) with stable keys:
+    - `id`
+    - `severity`
+    - `rationale`
+    - `command`
+  - added severity-threshold gating for anomaly commands:
+    - `--strict --severity warning|critical`
+    - deterministic non-zero exit when action severity meets/exceeds selected threshold.
+  - expanded integration tests for action contract coverage and strict severity behavior.
 - Phase V P5-02 HTTP adapter deterministic envelope handling:
   - hardened `http-curl` JSON payload parsing with deterministic failure classes:
     - `http_json_empty`

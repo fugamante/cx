@@ -10,6 +10,8 @@ use crate::optimize_rules::{
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
 
+pub type OptimizeArgs = (usize, bool, bool, bool, Option<String>);
+
 fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
@@ -17,23 +19,66 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<(usize, bool), String> {
+fn parse_severity_floor(raw: &str) -> Option<&'static str> {
+    match raw {
+        "warn" | "warning" => Some("warning"),
+        "critical" => Some("critical"),
+        _ => None,
+    }
+}
+
+fn severity_rank(level: &str) -> i32 {
+    match level {
+        "critical" => 2,
+        "warning" => 1,
+        _ => 0,
+    }
+}
+
+pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<OptimizeArgs, String> {
     let mut n = default_n;
     let mut json_out = false;
-    for a in args {
-        if a == "--json" {
-            json_out = true;
-            continue;
+    let mut actions = false;
+    let mut strict = false;
+    let mut severity_floor: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json_out = true;
+                i += 1;
+            }
+            "--actions" => {
+                actions = true;
+                i += 1;
+            }
+            "--strict" => {
+                strict = true;
+                i += 1;
+            }
+            "--severity" => {
+                let Some(v) = args.get(i + 1).map(String::as_str) else {
+                    return Err("optimize: --severity requires a value".to_string());
+                };
+                let Some(normalized) = parse_severity_floor(v) else {
+                    return Err("optimize: --severity must be warning|critical".to_string());
+                };
+                severity_floor = Some(normalized.to_string());
+                i += 2;
+            }
+            a => {
+                if let Ok(v) = a.parse::<usize>()
+                    && v > 0
+                {
+                    n = v;
+                    i += 1;
+                    continue;
+                }
+                return Err(format!("invalid argument: {a}"));
+            }
         }
-        if let Ok(v) = a.parse::<usize>()
-            && v > 0
-        {
-            n = v;
-            continue;
-        }
-        return Err(format!("invalid argument: {a}"));
     }
-    Ok((n, json_out))
+    Ok((n, json_out, actions, strict, severity_floor))
 }
 
 fn empty_report(n: usize, log_file: &std::path::Path) -> Value {
@@ -386,6 +431,110 @@ fn build_full_report(
         "recommendations": recommendations,
         "log_file": log_file.display().to_string()
     })
+}
+
+pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
+    let mut actions: Vec<Value> = Vec::new();
+    let Some(scoreboard) = report.get("scoreboard") else {
+        return actions;
+    };
+    if let Some(top_dur) = scoreboard
+        .get("top_avg_duration_ms")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(Value::as_array)
+        && top_dur.len() == 2
+    {
+        let tool = top_dur[0].as_str().unwrap_or("unknown");
+        let dur = top_dur[1].as_u64().unwrap_or(0);
+        if dur > 0 {
+            actions.push(json!({
+                "id": "latency_hotspot",
+                "severity": "warning",
+                "rationale": format!("Highest average duration is concentrated on {tool} ({dur}ms)."),
+                "command": "cx optimize 200 --json --actions"
+            }));
+        }
+    }
+    let schema_rate = scoreboard
+        .get("schema_failure_frequency")
+        .and_then(|v| v.get("rate"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if schema_rate > 0.0 {
+        actions.push(json!({
+            "id": "schema_failure_frequency",
+            "severity": if schema_rate > 0.05 { "critical" } else { "warning" },
+            "rationale": format!("Schema failure rate detected at {}%.", (schema_rate * 100.0).round() as i64),
+            "command": "cx diag --json --strict --actions"
+        }));
+    }
+    let timeout_rate = scoreboard
+        .get("timeout_frequency")
+        .and_then(|v| v.get("rate"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if timeout_rate > 0.03 {
+        actions.push(json!({
+            "id": "timeout_frequency",
+            "severity": "warning",
+            "rationale": format!("Timeout frequency is elevated at {}% of runs.", (timeout_rate * 100.0).round() as i64),
+            "command": "cx logs stats 200 --json --strict"
+        }));
+    }
+    let clip_rate = scoreboard
+        .get("budget_clipping_frequency")
+        .and_then(|v| v.get("rate"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if clip_rate > 0.30 {
+        actions.push(json!({
+            "id": "budget_clipping_frequency",
+            "severity": "warning",
+            "rationale": format!("Budget clipping occurs in {}% of captured runs.", (clip_rate * 100.0).round() as i64),
+            "command": "cx budget"
+        }));
+    }
+    let cache_delta = scoreboard
+        .get("cache_hit_trend")
+        .and_then(|v| v.get("delta"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if cache_delta < -0.05 {
+        actions.push(json!({
+            "id": "cache_hit_degradation",
+            "severity": "warning",
+            "rationale": format!("Cache hit trend regressed by {} percentage points.", (cache_delta * 100.0).round() as i64),
+            "command": "cx promptlint 200"
+        }));
+    }
+    actions
+}
+
+pub fn action_gate_severity(actions: &[Value]) -> &'static str {
+    let mut max_level = "ok";
+    for action in actions {
+        let level = action
+            .get("severity")
+            .and_then(Value::as_str)
+            .unwrap_or("ok");
+        if severity_rank(level) > severity_rank(max_level) {
+            max_level = if level == "critical" {
+                "critical"
+            } else {
+                "warning"
+            };
+        }
+    }
+    max_level
+}
+
+pub fn should_fail_strict(strict: bool, severity_floor: Option<&str>, actions: &[Value]) -> bool {
+    if !strict {
+        return false;
+    }
+    let threshold = severity_floor.unwrap_or("warning");
+    severity_rank(action_gate_severity(actions)) >= severity_rank(threshold)
 }
 
 pub fn optimize_report(n: usize) -> Result<Value, String> {
