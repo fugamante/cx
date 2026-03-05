@@ -23,6 +23,9 @@ on:
       - .github/workflows/cxrs-compat.yml
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   compat-check:
     runs-on: ${{ matrix.os }}
