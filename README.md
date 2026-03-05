@@ -217,6 +217,9 @@ Examples:
 ./bin/cx llm unset model
 ```
 
+`llm use`/`llm set-*` now triggers an automatic quota probe notice to stderr.
+For local providers (`ollama`), CX reports a local-unmetered fallback notice when provider quota cannot be resolved.
+
 ## Structured Commands
 
 Schema-enforced commands:

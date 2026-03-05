@@ -28,6 +28,10 @@ Notes:
     - `quota_limit_type`
     - `quota_source_url`
   - probe resolution now falls back to catalog (`catalog:<backend>:<tier>`) when env/state totals are unset.
+- Automatic model-selection quota probe:
+  - `llm use`, `llm set-backend`, and `llm set-model` now automatically attempt quota probe and emit a stderr notice.
+  - local model selection emits explicit fallback warning:
+    - `service_kind=local_unmetered` with quota unavailable notice.
 - Quota probing support:
   - `cx quota probe [days] [--json]` reports backend-aware quota visibility:
     - `quota_source`

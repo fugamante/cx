@@ -14,6 +14,11 @@ fn llm_use_persists_backend_and_model() {
         stdout_str(&out),
         stderr_str(&out)
     );
+    assert!(
+        stderr_str(&out).contains("quota_probe: backend=ollama service_kind=local_unmetered"),
+        "stderr={}",
+        stderr_str(&out)
+    );
 
     let show = repo.run(&["llm", "show"]);
     assert!(
@@ -40,6 +45,23 @@ fn llm_use_persists_backend_and_model() {
             .and_then(|v| v.get("ollama_model"))
             .and_then(Value::as_str),
         Some("llama3.1")
+    );
+}
+
+#[test]
+fn llm_use_codex_triggers_quota_probe_notice() {
+    let repo = TempRepo::new("cxrs-llm");
+    let out = repo.run(&["llm", "use", "codex"]);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("quota_probe: backend=codex"),
+        "stderr={}",
+        stderr_str(&out)
     );
 }
 

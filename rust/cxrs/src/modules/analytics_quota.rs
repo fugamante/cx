@@ -914,7 +914,7 @@ fn cmd_quota_guard_check(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let probe = quota_probe_payload(days, &log_file, &rows);
+    let probe = quota_probe_payload(days, &log_file, &rows, None, None);
     let cfg = guard_config_from_state();
     let (payload, code) = evaluate_quota_guard(&probe, &cfg, apply, strict);
     if as_json {
@@ -1119,9 +1119,19 @@ fn configured_quota_total(backend: &str) -> QuotaResolution {
     }
 }
 
-fn quota_probe_payload(days: usize, log_file: &std::path::Path, rows: &[Value]) -> Value {
-    let backend = llm_backend();
-    let model = llm_model();
+fn quota_probe_payload(
+    days: usize,
+    log_file: &std::path::Path,
+    rows: &[Value],
+    backend_override: Option<&str>,
+    model_override: Option<&str>,
+) -> Value {
+    let backend = backend_override
+        .map(|v| v.to_string())
+        .unwrap_or_else(llm_backend);
+    let model = model_override
+        .map(|v| v.to_string())
+        .unwrap_or_else(llm_model);
     let used_effective: u64 = rows
         .iter()
         .map(|r| {
@@ -1180,6 +1190,21 @@ fn read_window_rows(days: usize) -> Result<(std::path::PathBuf, Vec<Value>), Str
         .filter(|row| parse_ts_epoch(row).is_some_and(|t| t >= cutoff))
         .collect::<Vec<Value>>();
     Ok((log_file, filtered))
+}
+
+pub fn quota_probe_for_backend_days(
+    days: usize,
+    backend: &str,
+    model: Option<&str>,
+) -> Result<Value, String> {
+    let (log_file, rows) = read_window_rows(days)?;
+    Ok(quota_probe_payload(
+        days,
+        &log_file,
+        &rows,
+        Some(backend),
+        model,
+    ))
 }
 
 fn top_commands(rows: &[Value]) -> Vec<Value> {
@@ -1347,7 +1372,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
 
     if as_json {
         let out = if probe {
-            quota_probe_payload(days, &log_file, &rows)
+            quota_probe_payload(days, &log_file, &rows, None, None)
         } else {
             payload
         };
@@ -1362,7 +1387,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
     }
 
     if probe {
-        let probe_payload = quota_probe_payload(days, &log_file, &rows);
+        let probe_payload = quota_probe_payload(days, &log_file, &rows, None, None);
         println!("== cx quota probe (last {days} days) ==");
         println!(
             "backend: {}",

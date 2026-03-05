@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::analytics::quota_probe_for_backend_days;
 use crate::runtime::{llm_backend, llm_model, ollama_model_preference};
 use crate::state::{
     ensure_state_value, parse_cli_value, set_state_path, set_value_at_path, state_cache_clear,
@@ -93,6 +94,50 @@ fn llm_show() -> i32 {
     0
 }
 
+fn emit_quota_probe_notice(backend: &str, model: Option<&str>) {
+    let Ok(payload) = quota_probe_for_backend_days(30, backend, model) else {
+        crate::cx_eprintln!("quota_probe: unavailable");
+        return;
+    };
+    let backend = payload
+        .get("backend")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let service_kind = payload
+        .get("service_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source = payload
+        .get("quota_source")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let remaining = payload.get("quota_remaining_pct").and_then(Value::as_f64);
+
+    if service_kind == "local_unmetered" {
+        crate::cx_eprintln!(
+            "quota_probe: backend={} service_kind=local_unmetered (provider quota unavailable for local model)",
+            backend
+        );
+        return;
+    }
+
+    if let Some(rem) = remaining {
+        let remaining_pct = format!("{}%", (rem * 100.0).round() as i64);
+        crate::cx_eprintln!(
+            "quota_probe: backend={} remaining={} source={}",
+            backend,
+            remaining_pct,
+            source
+        );
+    } else {
+        crate::cx_eprintln!(
+            "quota_probe: backend={} remaining=unknown source={} (set quota total or refresh catalog)",
+            backend,
+            source
+        );
+    }
+}
+
 fn llm_use(app_name: &str, args: &[String]) -> i32 {
     let Some(target) = args.get(1).map(|s| s.to_lowercase()) else {
         print_llm_usage(app_name);
@@ -126,10 +171,19 @@ fn llm_use(app_name: &str, args: &[String]) -> i32 {
             "ollama_model: {}",
             if pref.is_empty() { "<unset>" } else { &pref }
         );
+        state_cache_clear();
+        let model_opt = if pref.is_empty() {
+            None
+        } else {
+            Some(pref.as_str())
+        };
+        emit_quota_probe_notice("ollama", model_opt);
         return 0;
     }
     println!("ok");
     println!("llm_backend: codex");
+    state_cache_clear();
+    emit_quota_probe_notice("codex", None);
     0
 }
 
@@ -190,6 +244,8 @@ fn llm_set_backend(app_name: &str, args: &[String]) -> i32 {
     }
     println!("ok");
     println!("llm_backend: {v}");
+    state_cache_clear();
+    emit_quota_probe_notice(&v, None);
     0
 }
 
@@ -211,6 +267,8 @@ fn llm_set_model(app_name: &str, args: &[String]) -> i32 {
     }
     println!("ok");
     println!("ollama_model: {}", model.trim());
+    state_cache_clear();
+    emit_quota_probe_notice("ollama", Some(model.trim()));
     0
 }
 

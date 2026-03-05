@@ -14,5 +14,5 @@ pub use crate::analytics_worklog::print_worklog;
 pub use analytics_alert::print_alert;
 pub use analytics_profile_metrics::{print_metrics, print_profile};
 pub use analytics_prompt_stats::cmd_prompt_stats;
-pub use analytics_quota::cmd_quota;
+pub use analytics_quota::{cmd_quota, quota_probe_for_backend_days};
 pub use analytics_shared::parse_ts_epoch;
