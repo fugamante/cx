@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+use crate::contract_versions::OPTIMIZE_JSON_CONTRACT_VERSION;
 use crate::logs::load_runs;
 use crate::optimize_rules::{
     RecommendationInput, build_recommendations, push_cache_anomaly, push_clip_anomaly,
@@ -83,6 +84,7 @@ pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<Optimize
 
 fn empty_report(n: usize, log_file: &std::path::Path) -> Value {
     json!({
+        "contract_version": OPTIMIZE_JSON_CONTRACT_VERSION,
         "window": n,
         "runs": 0,
         "scoreboard": {"runs": 0},
@@ -424,6 +426,7 @@ fn build_full_report(
     log_file: &std::path::Path,
 ) -> Value {
     json!({
+        "contract_version": OPTIMIZE_JSON_CONTRACT_VERSION,
         "window": n,
         "runs": total,
         "scoreboard": scoreboard,

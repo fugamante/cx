@@ -3,6 +3,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use crate::config::app_config;
+use crate::contract_versions::BROKER_BENCHMARK_JSON_CONTRACT_VERSION;
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
 use crate::runtime::{llm_backend, llm_model};
@@ -146,13 +147,18 @@ fn parse_benchmark_args(args: &[String]) -> Result<BenchmarkArgs, String> {
                     return Err("cxrs broker benchmark: --severity requires a value".to_string());
                 };
                 let parsed = v.trim().to_lowercase();
-                if !matches!(parsed.as_str(), "warn" | "critical") {
+                let normalized = match parsed.as_str() {
+                    "warn" | "warning" => "warn",
+                    "critical" => "critical",
+                    _ => "",
+                };
+                if normalized.is_empty() {
                     return Err(format!(
-                        "cxrs broker benchmark: --severity expects warn|critical, got '{}'",
+                        "cxrs broker benchmark: --severity expects warn|warning|critical, got '{}'",
                         v
                     ));
                 }
-                severity = parsed;
+                severity = normalized.to_string();
                 i += 2;
             }
             other => {
@@ -264,7 +270,7 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!(
-                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]"
+                "{e}\nUsage: {app_name} broker benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|warning|critical]"
             );
             return 2;
         }
@@ -301,6 +307,7 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
         if should_fail {
             if parsed.as_json {
                 let out = json!({
+                    "contract_version": BROKER_BENCHMARK_JSON_CONTRACT_VERSION,
                     "window": parsed.window,
                     "log_file": log_file.display().to_string(),
                     "summary": entries.iter().map(|(backend, s)| {
@@ -365,6 +372,7 @@ fn cmd_broker_benchmark(app_name: &str, args: &[String]) -> i32 {
             })
             .collect();
         let out = json!({
+            "contract_version": BROKER_BENCHMARK_JSON_CONTRACT_VERSION,
             "window": parsed.window,
             "log_file": log_file.display().to_string(),
             "summary": summary,
@@ -485,7 +493,7 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
         "benchmark" => cmd_broker_benchmark(app_name, &args[1..]),
         other => {
             crate::cx_eprintln!(
-                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>"
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|warning|critical]>"
             );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2

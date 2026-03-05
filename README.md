@@ -97,7 +97,7 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 
 `VERSION` is intentionally a single-line, machine-readable current version:
 
-- `2026.02.21`
+- `2026.03.05`
 
 Human-readable release history lives in tags + changelog:
 
@@ -237,6 +237,11 @@ Retry-health JSON surfaces:
 - `diag --json`: top-level `retry`
 - `scheduler --json`: top-level `retry`
 - `optimize --json`: `scoreboard.retry_health`
+- contract markers: top-level `contract_version` on JSON diagnostics surfaces
+- actions markers: top-level `actions_contract_version` when `--actions` is used
+
+Contract policy:
+- [`docs/CONTRACT_COMPATIBILITY.md`](docs/CONTRACT_COMPATIBILITY.md)
 
 Expected JSON shape (key excerpts):
 

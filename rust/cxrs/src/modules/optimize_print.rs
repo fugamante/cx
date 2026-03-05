@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use crate::contract_versions::ACTIONS_JSON_CONTRACT_VERSION;
 use crate::optimize_report::{
     OptimizeArgs, build_optimize_actions, optimize_report, should_fail_strict,
 };
@@ -228,6 +229,8 @@ pub fn print_optimize(args: OptimizeArgs) -> i32 {
     if json_out {
         let mut payload = report;
         if include_actions {
+            payload["actions_contract_version"] =
+                Value::String(ACTIONS_JSON_CONTRACT_VERSION.to_string());
             payload["actions"] = Value::Array(actions.clone());
         }
         println!("{payload}");

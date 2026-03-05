@@ -2,15 +2,11 @@
 
 ## Now (0-4 weeks)
 
-- Expand reliability matrix coverage for backend/capture/policy permutations.
-- Increase Rust command parity with Bash fallback paths.
-- Stabilize replay determinism under repeated runs.
+- Preserve JSON contract stability on automation surfaces (`diag/scheduler/optimize/telemetry/broker`).
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).
-- Close remaining parity/doc hardening for orchestration surfaces now in `main`.
-- Tighten policy and telemetry invariants for mixed-mode run-all edge cases.
-- Prepare Phase V execution plan (provider-agnostic orchestration and convergence health automation).
-  - spec: `docs/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md`
-  - tickets: `docs/PHASE_V_IMPLEMENTATION_BACKLOG.md`
+- Maintain reliability matrix coverage for backend/capture/policy permutations.
+- Guard mixed-mode orchestration invariants (fairness, retry, timeout, policy).
+- Maintain release hygiene (contract policy + changelog + tagged releases).
 
 ## Next (1-2 months)
 
@@ -19,8 +15,8 @@
 - Improve task orchestration ergonomics (`task show`/`task run` UX polish).
 - Broaden OS validation matrix (Linux-focused CI pass).
 - Add run-level concurrency telemetry refinement (`worker_id`, queue/start/finish timestamps, attempt) for SLO reporting.
-- Phase V kickoff: provider adapter evolution beyond process mode (HTTP/stub graduation with strict contracts).
-- Add automation-oriented anomaly actions from `diag/scheduler/optimize` outputs.
+- Begin Phase VI (parallel execution substrate) on top of mixed-mode scheduler.
+- Expand provider adapter coverage beyond current HTTP/process parity.
 
 ## Later (2+ months)
 

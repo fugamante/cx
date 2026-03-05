@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::config::app_config;
+use crate::contract_versions::{
+    ACTIONS_JSON_CONTRACT_VERSION, DIAG_JSON_CONTRACT_VERSION, SCHEDULER_JSON_CONTRACT_VERSION,
+};
 use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::logs::file_len;
 use crate::logs::load_values;
@@ -803,6 +806,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
 
     if as_json {
         let mut payload = serde_json::json!({
+            "contract_version": DIAG_JSON_CONTRACT_VERSION,
             "timestamp": utc_now_iso(),
             "version": toolchain_version_string(app_version),
             "mode": cfg.cx_mode,
@@ -833,6 +837,8 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             }
         });
         if include_actions {
+            payload["actions_contract_version"] =
+                serde_json::Value::String(ACTIONS_JSON_CONTRACT_VERSION.to_string());
             payload["actions"] = serde_json::Value::Array(actions.clone());
         }
         match serde_json::to_string_pretty(&payload) {
@@ -937,6 +943,7 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
 
     if as_json {
         let mut payload = serde_json::json!({
+            "contract_version": SCHEDULER_JSON_CONTRACT_VERSION,
             "log_file": log_file,
             "scheduler_window_requested": window,
             "scheduler": scheduler,
@@ -946,6 +953,8 @@ pub fn cmd_scheduler(args: &[String]) -> i32 {
             "severity_reasons": severity_reasons
         });
         if include_actions {
+            payload["actions_contract_version"] =
+                serde_json::Value::String(ACTIONS_JSON_CONTRACT_VERSION.to_string());
             payload["actions"] = serde_json::Value::Array(actions.clone());
         }
         match serde_json::to_string_pretty(&payload) {

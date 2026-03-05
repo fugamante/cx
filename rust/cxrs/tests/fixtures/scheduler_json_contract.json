@@ -1,5 +1,6 @@
 {
   "top_level_keys": [
+    "contract_version",
     "log_file",
     "scheduler_window_requested",
     "scheduler",

@@ -1,7 +1,7 @@
 # Phase V: Provider-Agnostic Orchestration and Convergence Health
 
-Last updated: 2026-03-01  
-Status: kickoff
+Last updated: 2026-03-05  
+Status: complete
 
 ## Objective
 
@@ -77,3 +77,12 @@ Acceptance:
 - `cargo test --tests -- --test-threads=1`
 - no log contract regression in `logs validate` fixtures/tests
 - no policy/safety regression in reliability suite
+
+## Completion Notes
+
+- Provider adapter contract stabilized with typed status normalization and parity coverage.
+- HTTP envelope parsing hardened with deterministic failure classes.
+- `diag/scheduler/optimize` actions contract implemented and strict severity gating enforced.
+- Telemetry contract drift/statistics surfaced with fixture-backed JSON contracts.
+- Mixed-mode queue/worker telemetry and fairness coverage expanded.
+- JSON diagnostics surfaces now expose explicit `contract_version` markers.

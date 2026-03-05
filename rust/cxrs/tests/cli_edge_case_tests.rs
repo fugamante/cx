@@ -140,6 +140,29 @@ fn broker_set_accepts_quota_saver_policy() {
 }
 
 #[test]
+fn broker_benchmark_accepts_warning_severity_alias() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    fs::write(&log, "").expect("write empty runs log");
+    let out = repo.run(&[
+        "broker",
+        "benchmark",
+        "--window",
+        "10",
+        "--severity",
+        "warning",
+        "--json",
+    ]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("broker benchmark json");
+    assert_eq!(
+        payload.get("severity").and_then(Value::as_str),
+        Some("warn")
+    );
+}
+
+#[test]
 fn quota_json_reports_projection_and_top_commands() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

@@ -1,5 +1,6 @@
 {
   "top_level_keys": [
+    "contract_version",
     "window",
     "runs",
     "scoreboard",

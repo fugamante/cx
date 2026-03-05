@@ -1,3 +1,4 @@
+use crate::contract_versions::TELEMETRY_JSON_CONTRACT_VERSION;
 use crate::log_contract::REQUIRED_STRICT_FIELDS;
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
@@ -487,6 +488,7 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
         })
         .collect();
     let payload = json!({
+        "contract_version": TELEMETRY_JSON_CONTRACT_VERSION,
         "log_file": log_file.display().to_string(),
         "window_runs": rows.len(),
         "required_fields": REQUIRED_STRICT_FIELDS.len(),

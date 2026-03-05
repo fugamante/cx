@@ -1,10 +1,19 @@
 # Phase V Backlog (Execution Tickets)
 
-Last updated: 2026-03-01
+Last updated: 2026-03-05
+
+Status summary:
+- P5-01: complete
+- P5-02: complete
+- P5-03: complete
+- P5-04: complete
+- P5-05: complete
+- P5-06: complete
 
 Priority order is intended to be execution order.
 
 ## P5-01 Adapter Contract Finalization
+Status: complete
 
 Goal:
 - unify adapter capability and status semantics across process/HTTP adapters
@@ -18,6 +27,7 @@ Acceptance:
 - parity tests pass across codex/ollama/mock/http modes
 
 ## P5-02 HTTP Adapter Deterministic Envelope Handling
+Status: complete
 
 Goal:
 - make HTTP mode response parsing robust and schema-safe
@@ -31,6 +41,7 @@ Acceptance:
 - no silent parse failures
 
 ## P5-03 Actionable Anomaly Output Contract
+Status: complete
 
 Goal:
 - add machine-actionable recommendations to diagnostics surfaces
@@ -44,6 +55,7 @@ Acceptance:
 - strict/severity modes can gate CI based on action severity
 
 ## P5-04 Telemetry Completeness and Drift Classes
+Status: complete
 
 Goal:
 - improve observability around field-population health and drift
@@ -57,6 +69,7 @@ Acceptance:
 - contract drift reports include actionable field-level diagnostics
 
 ## P5-05 Mixed-Mode Queue/Worker Telemetry Refinement
+Status: complete
 
 Goal:
 - increase SLO usefulness of run-all scheduling telemetry
@@ -70,6 +83,7 @@ Acceptance:
 - queue metrics remain consistent in repeated runs
 
 ## P5-06 Operator UX Hardening (Non-breaking)
+Status: complete
 
 Goal:
 - make task/orchestration diagnostics easier to operate under failure
@@ -98,3 +112,9 @@ cd ../..
 ./bin/cx optimize 200 --json | jq .
 ./bin/cx logs validate --strict
 ```
+
+## Contract Freeze Addendum
+
+- JSON automation surfaces now include explicit `contract_version` markers.
+- `--actions` payloads include `actions_contract_version`.
+- Compatibility policy is documented in `docs/CONTRACT_COMPATIBILITY.md`.

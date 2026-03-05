@@ -1,4 +1,9 @@
 {
+  "top_level_keys": [
+    "actions_contract_version",
+    "actions"
+  ],
+  "actions_contract_version": "actions.v1",
   "action_keys": [
     "id",
     "severity",

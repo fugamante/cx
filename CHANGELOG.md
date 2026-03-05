@@ -4,6 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## Release Index
 
+- `v2026.03.05` (2026-03-05): Phase V closure release with contract freeze markers and compatibility policy.
 - `v2026.02.21` (2026-02-20): schema extraction hardening, strict routing, bootstrap reliability baseline.
 - `v2026.02.21-20260225T151634Z` (2026-02-25): manuals/docs snapshot and migration milestone.
 
@@ -14,6 +15,19 @@ Notes:
 ## [Unreleased]
 
 ### Added
+- Contract freeze markers and policy:
+  - JSON automation surfaces now emit explicit `contract_version` fields:
+    - `diag.v1`
+    - `scheduler.v1`
+    - `optimize.v1`
+    - `telemetry.v1`
+    - `broker-benchmark.v1`
+  - `--actions` payloads now include `actions_contract_version=actions.v1`.
+  - added compatibility policy doc: `docs/CONTRACT_COMPATIBILITY.md`.
+- Broker strictness hardening:
+  - `broker benchmark --severity` now accepts `warning` as alias to `warn`.
+  - usage/help text updated to `warn|warning|critical`.
+  - integration coverage added for alias normalization behavior.
 - Prompt efficiency observability:
   - added `cx prompt-stats [N] [--json]` (`cxprompt_stats` compat alias) to track prompt filtering impact.
   - reports raw vs filtered prompt chars, saved chars/percent, filter-applied counts, and per-tool breakdown.

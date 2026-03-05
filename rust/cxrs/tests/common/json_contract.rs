@@ -50,6 +50,20 @@ pub fn assert_fixture_contract(
 
 pub fn assert_actions_contract(payload: &Value) {
     let fixture = load_fixture_json("actions_json_contract.json");
+    let top_keys = fixture_keys(&fixture, "top_level_keys");
+    assert_has_keys(payload, &top_keys, "actions.top");
+    let expected_version = fixture
+        .get("actions_contract_version")
+        .and_then(Value::as_str)
+        .expect("actions contract version");
+    let got_version = payload
+        .get("actions_contract_version")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    assert_eq!(
+        got_version, expected_version,
+        "actions contract version mismatch"
+    );
     let keys = fixture_keys(&fixture, "action_keys");
     let actions = payload
         .get("actions")
