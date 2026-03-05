@@ -138,6 +138,64 @@ fi
 }
 
 #[test]
+fn judge_convergence_falls_back_on_invalid_model_output() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "codex",
+        r#"#!/usr/bin/env bash
+prompt="$(cat)"
+if printf '%s' "$prompt" | grep -q "Select the best candidate index"; then
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"not-json"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":40,"cached_input_tokens":4,"output_tokens":8}}'
+else
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":2,"output_tokens":5}}'
+fi
+"#,
+    );
+
+    let add = repo.run(&[
+        "task",
+        "add",
+        "cxo echo judge-fallback",
+        "--role",
+        "implementer",
+        "--backend",
+        "codex",
+        "--converge",
+        "judge",
+        "--replicas",
+        "2",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+    let id = stdout_str(&add).trim().to_string();
+
+    let run = repo.run(&["task", "run", &id]);
+    assert!(
+        run.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&run),
+        stderr_str(&run)
+    );
+
+    let runs = common::parse_jsonl(&repo.runs_log());
+    let converge_row = runs
+        .iter()
+        .rev()
+        .find(|v| v.get("tool").and_then(Value::as_str) == Some("cxtask_converge"))
+        .expect("converge row");
+    let votes = converge_row
+        .get("converge_votes")
+        .and_then(Value::as_object)
+        .expect("converge votes object");
+    assert_eq!(
+        votes.get("decision_source").and_then(Value::as_str),
+        Some("score_fallback"),
+        "unexpected converge votes: {votes:?}"
+    );
+}
+
+#[test]
 fn diag_json_strict_fails_on_retry_recovery_degradation() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
