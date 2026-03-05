@@ -19,7 +19,7 @@ Current scope:
 - operational helpers: `budget`, `log-tail`, `health`
 - RTK inspection helper: `rtk-status` (and compat alias `cxrtk`)
 - process-local utility toggles: `log-off`, `alert-show`, `alert-off`
-- system capture path includes RTK routing (when available) + context clipping budgets
+- system capture path is native-first reduction + context clipping budgets (RTK remains optional/explicit)
 - chunking utility: `chunk` (stdin -> `----- cx chunk i/N -----` blocks by char budget)
 - Rust command runs now emit repo-aware `runs.jsonl` entries with token usage (when available)
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
@@ -106,7 +106,8 @@ Platform notes:
 - Shell examples assume POSIX `bash`.
 - RTK routing is guarded by a supported-version range (`CX_RTK_MIN_VERSION`, `CX_RTK_MAX_VERSION`).
 - System capture provider is selectable with `CX_CAPTURE_PROVIDER=auto|rtk|native`.
-- Native reduction can be toggled with `CX_NATIVE_REDUCE=1|0` (default `1`).
+- `auto` is native-first by default (`CX_CAPTURE_PREFER_NATIVE=1`); set `CX_CAPTURE_PREFER_NATIVE=0` to let `auto` choose RTK when usable.
+- Native reduction can be toggled with `CX_NATIVE_REDUCE=1|0` (default `1`) and tuned with `CX_CAPTURE_PROFILE=fast|balanced|deep` (default `balanced`).
 
 ## Install
 
@@ -152,8 +153,9 @@ GitHub Actions:
 RTK version guard:
 - Default: `CX_RTK_MIN_VERSION=0.22.1`, `CX_RTK_MAX_VERSION` unset.
 - If installed `rtk` is outside range, `cxrs` warns and falls back to raw system capture.
-- Default capture provider: `auto` (RTK when usable; native fallback otherwise).
-- To force RTK independence, use `CX_CAPTURE_PROVIDER=native`.
+- Default capture provider: `auto` (native-first).
+- To route through RTK explicitly, use `CX_CAPTURE_PROVIDER=rtk`.
+- To force RTK independence, use `CX_CAPTURE_PROVIDER=native` (or keep `auto` + `CX_CAPTURE_PREFER_NATIVE=1`).
 
 ## Codex access and session modes
 

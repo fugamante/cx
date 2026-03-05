@@ -55,7 +55,9 @@ fn jsonl_append_integrity() {
 fn rtk_unavailable_path_uses_native() {
     let cmd = vec!["git".to_string(), "status".to_string()];
     assert!(!should_use_rtk(&cmd, "auto", true, false));
+    assert!(!should_use_rtk(&cmd, "auto", true, true));
     assert!(!should_use_rtk(&cmd, "native", true, true));
+    assert!(should_use_rtk(&cmd, "rtk", true, true));
 }
 
 #[test]

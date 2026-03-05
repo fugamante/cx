@@ -104,6 +104,10 @@ pub fn should_use_rtk(
     rtk_enabled: bool,
     rtk_usable: bool,
 ) -> bool {
+    let auto_prefers_native = env::var("CX_CAPTURE_PREFER_NATIVE")
+        .ok()
+        .map(|v| v.trim() != "0")
+        .unwrap_or(true);
     let supported = cmd
         .first()
         .map(|c| is_rtk_supported_prefix(c))
@@ -111,6 +115,12 @@ pub fn should_use_rtk(
     match provider_mode {
         "rtk" => rtk_enabled && supported && rtk_usable,
         "native" => false,
-        _ => rtk_enabled && supported && rtk_usable,
+        _ => {
+            if auto_prefers_native {
+                false
+            } else {
+                rtk_enabled && supported && rtk_usable
+            }
+        }
     }
 }

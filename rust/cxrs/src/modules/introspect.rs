@@ -78,6 +78,7 @@ fn print_version_runtime(mode: &str, backend: &str, active_model: &str, schema_r
 fn print_version_capture(
     capture_provider: &str,
     native_reduce: &str,
+    prefer_native: &str,
     rtk_available: bool,
     rtk_min: &str,
     rtk_max: &str,
@@ -85,6 +86,7 @@ fn print_version_capture(
 ) {
     println!("capture_provider: {capture_provider}");
     println!("native_reduce: {native_reduce}");
+    println!("capture_prefer_native: {prefer_native}");
     println!("rtk_available: {rtk_available}");
     println!("rtk_supported_range_min: {rtk_min}");
     println!(
@@ -140,11 +142,13 @@ pub fn print_version(app_name: &str, app_version: &str) {
     );
 
     let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
+    let prefer_native = env::var("CX_CAPTURE_PREFER_NATIVE").unwrap_or_else(|_| "1".to_string());
     let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
     let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
     print_version_capture(
         &cfg.capture_provider,
         &native_reduce,
+        &prefer_native,
         bin_in_path("rtk"),
         &rtk_min,
         &rtk_max,
@@ -174,6 +178,10 @@ pub fn cmd_core(app_version: &str) -> i32 {
         .and_then(|v| v.parse::<u8>().ok())
         .unwrap_or(1)
         == 1;
+    let capture_prefer_native = env::var("CX_CAPTURE_PREFER_NATIVE")
+        .ok()
+        .map(|v| v.trim() != "0")
+        .unwrap_or(true);
     let rtk_available = rtk_is_usable();
     let budget_cfg = budget_config_from_env();
     let log_file = resolve_log_file()
@@ -198,6 +206,7 @@ pub fn cmd_core(app_version: &str) -> i32 {
     println!("active_model: {active_model}");
     println!("execution_mode: {mode}");
     println!("capture_provider: {capture_provider}");
+    println!("capture_prefer_native: {capture_prefer_native}");
     println!("capture_rtk_enabled: {rtk_enabled}");
     println!("capture_rtk_available: {rtk_available}");
     println!("budget_chars: {}", budget_cfg.budget_chars);

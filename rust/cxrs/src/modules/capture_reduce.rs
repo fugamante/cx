@@ -1,3 +1,25 @@
+use std::env;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReduceProfile {
+    Fast,
+    Balanced,
+    Deep,
+}
+
+fn reduce_profile_from_env() -> ReduceProfile {
+    match env::var("CX_CAPTURE_PROFILE")
+        .unwrap_or_else(|_| "balanced".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "fast" => ReduceProfile::Fast,
+        "deep" => ReduceProfile::Deep,
+        _ => ReduceProfile::Balanced,
+    }
+}
+
 fn normalize_generic(input: &str) -> String {
     let mut out = String::new();
     let mut blank_seen = false;
@@ -80,13 +102,93 @@ fn reduce_diff_like(input: &str) -> String {
     }
 }
 
+fn reduce_git_log(input: &str) -> String {
+    input
+        .lines()
+        .filter(|line| {
+            line.starts_with("commit ")
+                || line.starts_with("Author:")
+                || line.starts_with("Date:")
+                || line.trim_start().starts_with('*')
+                || line.trim_start().starts_with('-')
+                || line.trim_start().starts_with("Merge:")
+        })
+        .take(250)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn reduce_grep_like(input: &str) -> String {
+    input
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(400)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn reduce_test_output(input: &str) -> String {
+    input
+        .lines()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("fail")
+                || lower.contains("error")
+                || lower.contains("panic")
+                || lower.contains("warning")
+                || lower.contains("passed")
+                || lower.contains("test result")
+                || lower.contains("running ")
+        })
+        .take(400)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn reduce_tree_or_ls(input: &str) -> String {
+    input
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(300)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn native_reduce_output(cmd: &[String], input: &str) -> String {
+    let profile = reduce_profile_from_env();
     let cmd0 = cmd.first().map(String::as_str).unwrap_or("");
     let cmd1 = cmd.get(1).map(String::as_str).unwrap_or("");
-    let reduced = match (cmd0, cmd1) {
-        ("git", "status") => reduce_git_status(input),
-        ("git", "diff") | ("diff", _) => reduce_diff_like(input),
+    let reduced = match (cmd0, cmd1, profile) {
+        ("git", "status", _) => reduce_git_status(input),
+        ("git", "diff", _) | ("diff", _, _) => reduce_diff_like(input),
+        ("git", "log", _) | ("log", _, _) => reduce_git_log(input),
+        ("grep", _, _) => reduce_grep_like(input),
+        ("tree", _, _) | ("ls", _, _) => reduce_tree_or_ls(input),
+        ("test", _, _) => reduce_test_output(input),
+        (_, _, ReduceProfile::Deep) => reduce_test_output(input),
         _ => input.to_string(),
     };
     normalize_generic(&reduced)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduce_git_status_keeps_semantic_lines() {
+        let input = "On branch main\n  modified: src/main.rs\nrandom noise\n";
+        let out = native_reduce_output(&["git".into(), "status".into()], input);
+        assert!(out.contains("On branch main"));
+        assert!(out.contains("modified: src/main.rs"));
+        assert!(!out.contains("random noise"));
+    }
+
+    #[test]
+    fn reduce_test_output_surfaces_failures() {
+        let input = "line 1\nFAIL test_x\nwarning: foo\nline 2\n";
+        let out = native_reduce_output(&["test".into()], input);
+        assert!(out.contains("FAIL test_x"));
+        assert!(out.contains("warning: foo"));
+    }
 }
