@@ -6,9 +6,9 @@ Project naming note:
 - `XSHELF/CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
 
 - Canonical execution engine: `rust/cxrs`
-- Canonical entrypoint: `bin/cx` (Rust-first routing, explicit Bash fallback)
+- Canonical entrypoint: `bin/cx` (Rust-only dispatch)
 - Deterministic structured commands: schema-enforced JSON + quarantine/replay on failure
-- Unified execution pipeline: capture -> optional RTK/native reduction -> mandatory budgeting -> LLM -> validation -> logging
+- Unified execution pipeline: capture -> internal native reduction -> mandatory budgeting -> LLM -> validation -> logging
 - Repo-local state and telemetry under `.codex/` (logs, schemas, tasks, quarantine, state)
 - Built-in task graph and run orchestration (`task add/fanout/run/run-all`)
 - Safety layer for command execution boundaries and policy visibility (`policy show`)
@@ -29,7 +29,7 @@ Current refactor highlights:
 - centralized runtime configuration in `src/modules/config.rs` (`AppConfig` loaded once at startup)
 - command families extracted into dedicated modules:
   - `src/modules/introspect.rs` (`version`, `core`)
-  - `src/modules/runtime_controls.rs` (`log-on/off`, `alert-*`, `rtk-status`)
+  - `src/modules/runtime_controls.rs` (`log-on/off`, `alert-*`, `capture-status`)
   - `src/modules/agentcmds.rs` (`cx/cxj/cxo/cxol/cxcopy/fix`)
   - `src/modules/logview.rs` (`budget`, `log-tail`)
   - `src/modules/analytics.rs` (`metrics/profile/trace/alert/worklog`)
@@ -72,13 +72,12 @@ Key defaults:
 The runtime pipeline is unified in Rust:
 
 1. Capture system output
-2. Optional RTK routing (system output only)
-3. Optional native reduction
-4. Mandatory context budgeting (chars + lines)
-5. LLM execution
-6. Schema validation (for structured commands)
-7. Quarantine on schema failure
-8. Append-only JSONL logging
+2. Internal native reduction
+3. Mandatory context budgeting (chars + lines)
+4. LLM execution
+5. Schema validation (for structured commands)
+6. Quarantine on schema failure
+7. Append-only JSONL logging
 
 Structured commands are schema-enforced from `.codex/schemas/` and deterministic by default.
 
@@ -88,7 +87,7 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 - `rust/cxrs/src/main.rs` - module entrypoint
 - `rust/cxrs/src/app/mod.rs` - command routing/orchestration
 - `rust/cxrs/src/modules/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
-- `lib/cx/*.sh` - compatibility shell layer
+- `lib/cx.sh` - thin shell shim that delegates to `bin/cx`
 - `.codex/schemas/` - JSON schema registry
 - `.codex/cxlogs/` - run + schema failure logs (runtime)
 - `.codex/quarantine/` - invalid schema outputs (runtime)
@@ -130,7 +129,6 @@ cat VERSION
 | Dependency | Minimum | Validated in this repo | Notes |
 |---|---:|---:|---|
 | `ollama` | 0.17.0+ | 0.17.0 | Optional local LLM backend |
-| `rtk` | 0.22.1+ | 0.22.2 | Optional capture compression; auto-fallback to native if unsupported |
 
 ### Development / CI
 
@@ -407,7 +405,7 @@ git push
 
 - No automatic checks run during shell startup.
 - Diagnostics are sent to stderr; pipeline-oriented command output remains on stdout.
-- RTK is never used to transform schema JSON outputs.
+- Capture is internal-native only; schema JSON outputs are never transformed.
 
 ## License
 

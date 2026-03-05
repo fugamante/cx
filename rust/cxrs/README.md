@@ -17,9 +17,9 @@ Current scope:
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
 - execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
 - operational helpers: `budget`, `log-tail`, `health`
-- RTK inspection helper: `rtk-status` (and compat alias `cxrtk`)
+- capture inspection helper: `capture-status`
 - process-local utility toggles: `log-off`, `alert-show`, `alert-off`
-- system capture path is native-first reduction + context clipping budgets (RTK remains optional/explicit)
+- system capture path is internal native reduction + context clipping budgets
 - chunking utility: `chunk` (stdin -> `----- cx chunk i/N -----` blocks by char budget)
 - Rust command runs now emit repo-aware `runs.jsonl` entries with token usage (when available)
 - `cx-compat` shim for bash-style command names (also auto-routed via `cx <cxcommand>`)
@@ -39,7 +39,7 @@ Current scope:
 - quality gate currently clean (`file_violations=0`, `function_violations=0`)
 
 This crate is authoritative runtime behavior for `cx`.
-Bash remains compatibility/bootstrap fallback.
+Bash is reduced to a thin bootstrap shim and no longer provides command fallback.
 
 ## Configuration
 
@@ -88,7 +88,6 @@ cargo build
 | Dependency | Minimum | Validated in this repo | Notes |
 |---|---:|---:|---|
 | `ollama` | 0.17.0+ | 0.17.0 | Optional local backend |
-| `rtk` | 0.22.1+ | 0.22.2 | Optional capture compressor; unsupported versions auto-fallback to native |
 
 ### Development / CI
 
@@ -104,9 +103,7 @@ Rust crate dependencies are pinned in `Cargo.lock`.
 Platform notes:
 - `cxcopy` auto-selects clipboard backend: `pbcopy` (macOS), `wl-copy` (Wayland), or `xclip` (X11).
 - Shell examples assume POSIX `bash`.
-- RTK routing is guarded by a supported-version range (`CX_RTK_MIN_VERSION`, `CX_RTK_MAX_VERSION`).
-- System capture provider is selectable with `CX_CAPTURE_PROVIDER=auto|rtk|native`.
-- `auto` is native-first by default (`CX_CAPTURE_PREFER_NATIVE=1`); set `CX_CAPTURE_PREFER_NATIVE=0` to let `auto` choose RTK when usable.
+- System capture provider is internal native only.
 - Native reduction can be toggled with `CX_NATIVE_REDUCE=1|0` (default `1`) and tuned with `CX_CAPTURE_PROFILE=fast|balanced|deep` (default `balanced`).
 
 ## Install
@@ -150,12 +147,9 @@ GitHub Actions:
 - Triggered on pushes/PRs that touch Rust/Bash-compat paths.
 - Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
 
-RTK version guard:
-- Default: `CX_RTK_MIN_VERSION=0.22.1`, `CX_RTK_MAX_VERSION` unset.
-- If installed `rtk` is outside range, `cxrs` warns and falls back to raw system capture.
-- Default capture provider: `auto` (native-first).
-- To route through RTK explicitly, use `CX_CAPTURE_PROVIDER=rtk`.
-- To force RTK independence, use `CX_CAPTURE_PROVIDER=native` (or keep `auto` + `CX_CAPTURE_PREFER_NATIVE=1`).
+Capture provider:
+- Native internal capture/reduction path only.
+- Optional tuning: `CX_NATIVE_REDUCE=1|0` and `CX_CAPTURE_PROFILE=fast|balanced|deep`.
 
 ## Codex access and session modes
 
@@ -202,7 +196,7 @@ cargo run -- fix ls /does-not-exist
 cargo run -- budget
 cargo run -- log-tail 3
 cargo run -- health
-cargo run -- rtk-status
+cargo run -- capture-status
 CX_CAPTURE_PROVIDER=native cargo run -- cxo git status
 printf 'very long text...' | CX_CONTEXT_BUDGET_CHARS=2000 cargo run -- chunk
 cargo run -- metrics 50
@@ -215,7 +209,6 @@ cargo run -- promptlint 200
 cargo run -- cx-compat cxmetrics 50 | jq .
 cargo run -- cx-compat cxdiffsum_staged
 cargo run -- cx-compat cxcommitmsg
-cargo run -- cx-compat cxrtk
 cargo run -- cx cxmetrics 50 | jq .   # auto-routed compat
 ./scripts/compat_check.sh 50
 cargo run -- profile

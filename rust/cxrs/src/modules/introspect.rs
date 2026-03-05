@@ -1,7 +1,6 @@
 use std::env;
 
 use crate::capture::budget_config_from_env;
-use crate::capture::rtk_is_usable;
 use crate::config::app_config;
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{resolve_log_file, resolve_quarantine_dir, resolve_state_file};
@@ -17,14 +16,6 @@ fn value_to_display(v: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         _ => v.to_string(),
     }
-}
-
-fn bin_in_path(bin: &str) -> bool {
-    let path = match env::var_os("PATH") {
-        Some(v) => v,
-        None => return false,
-    };
-    env::split_paths(&path).any(|dir| dir.join(bin).is_file())
 }
 
 fn state_pref(path: &str) -> String {
@@ -75,29 +66,11 @@ fn print_version_runtime(mode: &str, backend: &str, active_model: &str, schema_r
     println!("schema_relaxed: {schema_relaxed}");
 }
 
-fn print_version_capture(
-    capture_provider: &str,
-    native_reduce: &str,
-    prefer_native: &str,
-    rtk_available: bool,
-    rtk_min: &str,
-    rtk_max: &str,
-    rtk_usable: bool,
-) {
+fn print_version_capture(capture_provider: &str, native_reduce: &str, prefer_native: &str) {
     println!("capture_provider: {capture_provider}");
     println!("native_reduce: {native_reduce}");
     println!("capture_prefer_native: {prefer_native}");
-    println!("rtk_available: {rtk_available}");
-    println!("rtk_supported_range_min: {rtk_min}");
-    println!(
-        "rtk_supported_range_max: {}",
-        if rtk_max.is_empty() {
-            "<unset>"
-        } else {
-            rtk_max
-        }
-    );
-    println!("rtk_usable: {rtk_usable}");
+    println!("capture_external_dependencies: none");
 }
 
 fn print_version_preferences() {
@@ -143,17 +116,7 @@ pub fn print_version(app_name: &str, app_version: &str) {
 
     let native_reduce = env::var("CX_NATIVE_REDUCE").unwrap_or_else(|_| "1".to_string());
     let prefer_native = env::var("CX_CAPTURE_PREFER_NATIVE").unwrap_or_else(|_| "1".to_string());
-    let rtk_min = env::var("CX_RTK_MIN_VERSION").unwrap_or_else(|_| "0.22.1".to_string());
-    let rtk_max = env::var("CX_RTK_MAX_VERSION").unwrap_or_default();
-    print_version_capture(
-        &cfg.capture_provider,
-        &native_reduce,
-        &prefer_native,
-        bin_in_path("rtk"),
-        &rtk_min,
-        &rtk_max,
-        rtk_is_usable(),
-    );
+    print_version_capture(&cfg.capture_provider, &native_reduce, &prefer_native);
 
     println!("budget_chars: {}", cfg.budget_chars);
     println!("budget_lines: {}", cfg.budget_lines);
@@ -173,16 +136,10 @@ pub fn cmd_core(app_version: &str) -> i32 {
     let provider_status = selected_provider_status_kind().as_str();
     let caps = current_provider_capabilities()
         .unwrap_or_else(|_| crate::provider_adapter::selected_provider_capabilities());
-    let rtk_enabled = env::var("CX_RTK_SYSTEM")
-        .ok()
-        .and_then(|v| v.parse::<u8>().ok())
-        .unwrap_or(1)
-        == 1;
     let capture_prefer_native = env::var("CX_CAPTURE_PREFER_NATIVE")
         .ok()
         .map(|v| v.trim() != "0")
         .unwrap_or(true);
-    let rtk_available = rtk_is_usable();
     let budget_cfg = budget_config_from_env();
     let log_file = resolve_log_file()
         .map(|p| p.display().to_string())
@@ -207,8 +164,7 @@ pub fn cmd_core(app_version: &str) -> i32 {
     println!("execution_mode: {mode}");
     println!("capture_provider: {capture_provider}");
     println!("capture_prefer_native: {capture_prefer_native}");
-    println!("capture_rtk_enabled: {rtk_enabled}");
-    println!("capture_rtk_available: {rtk_available}");
+    println!("capture_external_dependencies: none");
     println!("budget_chars: {}", budget_cfg.budget_chars);
     println!("budget_lines: {}", budget_cfg.budget_lines);
     println!("cmd_timeout_secs: {}", runtime_cfg.cmd_timeout_secs);

@@ -98,6 +98,5 @@ pub fn with_parity_env(cmd: &mut Command, mock_dir: &Path, temp_repo: &Path) {
     cmd.current_dir(temp_repo)
         .env("PATH", prefixed)
         .env("CX_CAPTURE_PROVIDER", "native")
-        .env("CX_RTK_SYSTEM", "0")
         .env("CX_NATIVE_REDUCE", "0");
 }

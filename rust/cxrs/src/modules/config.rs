@@ -125,8 +125,7 @@ impl AppConfig {
             cx_mode: env::var("CX_MODE").unwrap_or_else(|_| "lean".to_string()),
             schema_relaxed: env_bool("CX_SCHEMA_RELAXED", false),
             cxlog_enabled: env_bool("CXLOG_ENABLED", true),
-            capture_provider: env::var("CX_CAPTURE_PROVIDER")
-                .unwrap_or_else(|_| "auto".to_string()),
+            capture_provider: "native".to_string(),
             broker_policy: resolve_broker_policy(&state),
             cmd_timeout_secs: env_usize("CX_CMD_TIMEOUT_SECS", DEFAULT_CMD_TIMEOUT_SECS).max(1),
             task_halt_on_critical: env_bool("CX_TASK_HALT_ON_CRITICAL", false),

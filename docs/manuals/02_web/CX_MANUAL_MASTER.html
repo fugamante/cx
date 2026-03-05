@@ -50,8 +50,8 @@
             <li><strong>Dev:</strong> <code>cargo</code>/<code>rustc</code> (build/run <code>cxrs</code>)</li>
           </ul>
           <pre><code>./bin/cx doctor
-./bin/cx rtk-status</code></pre>
-          <p class="meta">Optional: <code>rtk</code> (system output only), <code>ollama</code> (local backend).</p>
+./bin/cx capture-status</code></pre>
+          <p class="meta">Optional: <code>ollama</code> (local backend).</p>
         </div>
       </section>
 
@@ -108,8 +108,7 @@
         <h2>The Pipeline (Capture → Budget → Embed)</h2>
         <p>System output is constrained before it becomes prompt text.</p>
         <pre><code>raw system output
-  -&gt; optional RTK routing (system output only)
-  -&gt; optional native reduction
+  -&gt; internal native reduction
   -&gt; mandatory budgeting (clip/chunk)
   -&gt; embed into prompt</code></pre>
         <p class="callout"><strong>Budgets.</strong> Use <code>CX_CONTEXT_BUDGET_CHARS</code>, <code>CX_CONTEXT_BUDGET_LINES</code>, <code>CX_CONTEXT_CLIP_MODE</code>, <code>CX_CONTEXT_CLIP_FOOTER</code>.</p>

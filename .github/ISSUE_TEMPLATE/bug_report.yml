@@ -52,7 +52,7 @@ body:
         jq:
         codex:
         ollama (if used):
-        rtk (if used):
+        capture provider config:
         rustc/cargo:
     validations:
       required: true

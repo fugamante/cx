@@ -45,8 +45,7 @@ cx treats system output as a first-class input with a strict pipeline:
 
 \begin{lstlisting}[style=cx]
 raw system output
-  -> optional RTK routing (system output only)
-  -> optional native reduction
+  -> internal native reduction
   -> mandatory budgeting (clip/chunk)
   -> embed into prompt
 \end{lstlisting}

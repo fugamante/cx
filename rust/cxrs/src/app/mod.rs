@@ -34,7 +34,7 @@ use crate::prompting::{cmd_fanout, cmd_prompt, cmd_promptlint, cmd_roles};
 use crate::quarantine::{cmd_quarantine_list, cmd_quarantine_show};
 use crate::routing::{cmd_routes, print_where};
 use crate::runtime_controls::{
-    cmd_alert_off, cmd_alert_on, cmd_alert_show, cmd_log_off, cmd_log_on, cmd_rtk_status,
+    cmd_alert_off, cmd_alert_on, cmd_alert_show, cmd_capture_status, cmd_log_off, cmd_log_on,
 };
 use crate::schema_ops::{cmd_ci, cmd_schema};
 use crate::settings_cmds::{cmd_llm, cmd_state_get, cmd_state_set, cmd_state_show};

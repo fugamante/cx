@@ -66,7 +66,7 @@ Recommended smoke:
 - Repo-aware log resolution and global fallback.
 - Deterministic schema handling by default for structured commands.
 - Quarantine record + schema failure row with `quarantine_id`.
-- Context capture pipeline: raw -> (optional RTK) -> native reduce -> clip budget.
+- Context capture pipeline: raw -> native reduce -> clip budget.
 - Logged capture fields available for optimization analysis.
 
 ## 7) LLM backend contract

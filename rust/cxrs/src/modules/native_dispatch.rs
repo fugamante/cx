@@ -228,7 +228,7 @@ fn dispatch_runtime_commands(cmd: &str, args: &[String], deps: &NativeDeps) -> O
         "budget" => (deps.cmd_budget)(),
         "log-tail" => (deps.cmd_log_tail)(parse_n(args, 2, 10)),
         "health" => (deps.cmd_health)(),
-        "rtk-status" => (deps.cmd_rtk_status)(),
+        "capture-status" => (deps.cmd_capture_status)(),
         "log-on" => (deps.cmd_log_on)(),
         "log-off" => (deps.cmd_log_off)(),
         "alert-show" => (deps.cmd_alert_show)(),

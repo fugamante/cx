@@ -277,7 +277,7 @@ fn dispatch_runtime_commands(
         "cxbudget" | "budget" => (deps.cmd_budget)(),
         "cxlog_tail" | "log-tail" => (deps.cmd_log_tail)(parse_n(args, 1, 10)),
         "cxhealth" | "health" => (deps.cmd_health)(),
-        "cxrtk" | "rtk-status" => (deps.cmd_rtk_status)(),
+        "capture-status" => (deps.cmd_capture_status)(),
         "cxlog_on" | "log-on" => (deps.cmd_log_on)(),
         "cxlog_off" | "log-off" => (deps.cmd_log_off)(),
         "cxalert_show" | "alert-show" => (deps.cmd_alert_show)(),

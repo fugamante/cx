@@ -4,7 +4,6 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use crate::config::app_config;
 use crate::contract_versions::{
@@ -14,47 +13,12 @@ use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::logs::file_len;
 use crate::logs::load_values;
 use crate::paths::{repo_root_hint, resolve_log_file};
-use crate::process::{run_command_output_with_timeout, run_command_status_with_timeout};
 use crate::routing::{bash_type_of_function, route_handler_for};
 use crate::runtime::{llm_backend, llm_model};
 
-fn bin_in_path(bin: &str) -> bool {
-    let mut cmd = Command::new("bash");
-    cmd.args(["-lc", &format!("command -v {} >/dev/null 2>&1", bin)]);
-    run_command_status_with_timeout(cmd, "command -v")
-        .ok()
-        .is_some_and(|s| s.success())
-}
-
-fn rtk_version_string() -> String {
-    let mut cmd = Command::new("rtk");
-    cmd.arg("--version");
-    let out = match run_command_output_with_timeout(cmd, "rtk --version") {
-        Ok(v) if v.status.success() => v,
-        _ => return "<unavailable>".to_string(),
-    };
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        "<unavailable>".to_string()
-    } else {
-        s
-    }
-}
-
 fn resolved_provider(cfg_provider: &str) -> &'static str {
-    match cfg_provider {
-        "rtk" => "rtk",
-        "native" => "native",
-        _ => {
-            if bin_in_path("rtk")
-                && std::env::var("CX_RTK_SYSTEM").unwrap_or_else(|_| "1".to_string()) == "1"
-            {
-                "rtk"
-            } else {
-                "native"
-            }
-        }
-    }
+    let _ = cfg_provider;
+    "native"
 }
 
 fn schema_count(schema_dir: &Path) -> usize {
@@ -814,8 +778,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "active_model": active_model,
             "capture_provider_config": provider,
             "capture_provider_resolved": resolved_provider(&cfg.capture_provider),
-            "rtk_available": bin_in_path("rtk"),
-            "rtk_version": rtk_version_string(),
+            "capture_external_dependencies": "none",
             "budget_chars": cfg.budget_chars,
             "budget_lines": cfg.budget_lines,
             "clip_mode": cfg.clip_mode,
@@ -861,8 +824,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
         "capture_provider_resolved: {}",
         resolved_provider(&provider)
     );
-    println!("rtk_available: {}", bin_in_path("rtk"));
-    println!("rtk_version: {}", rtk_version_string());
+    println!("capture_external_dependencies: none");
     println!("budget_chars: {}", cfg.budget_chars);
     println!("budget_lines: {}", cfg.budget_lines);
     println!("clip_mode: {}", cfg.clip_mode);

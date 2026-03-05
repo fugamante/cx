@@ -42,7 +42,7 @@ pub struct NativeDeps {
     pub cmd_budget: fn() -> i32,
     pub cmd_log_tail: fn(usize) -> i32,
     pub cmd_health: fn() -> i32,
-    pub cmd_rtk_status: fn() -> i32,
+    pub cmd_capture_status: fn() -> i32,
     pub cmd_log_on: fn() -> i32,
     pub cmd_log_off: fn() -> i32,
     pub cmd_alert_show: fn() -> i32,

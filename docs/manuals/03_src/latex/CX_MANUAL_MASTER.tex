@@ -25,7 +25,7 @@ This master manual synthesizes three viewpoints:
 \begin{itemize}
   \item Canonical engine: \texttt{cxrs} (Rust). Bash is fallback only.
   \item Authoritative entrypoint: \texttt{bin/cx} routes Rust-first with explicit fallback.
-  \item Capture pipeline applies to \emph{system output} only (optional RTK, then budgets).
+  \item Capture pipeline applies to \emph{system output} only (internal native reduction, then budgets).
   \item Structured commands are schema-enforced (JSON-only, validated, replayable).
   \item Schema failures are quarantined (\texttt{.codex/quarantine/}) and logged with \texttt{quarantine\_id}.
   \item Run telemetry is append-only JSONL (\texttt{.codex/cxlogs/runs.jsonl}).
@@ -76,9 +76,9 @@ cd <repo-root>
 
 \begin{lstlisting}[style=cx]
 ./bin/cx doctor
-./bin/cx rtk-status
+./bin/cx capture-status
 \end{lstlisting}
-Optional: \texttt{rtk} (system output only), \texttt{ollama} (local backend).
+Optional: \texttt{ollama} (local backend).
 
 \section*{Troubleshooting (Fast)}
 \begin{itemize}
@@ -109,8 +109,7 @@ The core reliability move is this: \textbf{system output is constrained before i
 
 \begin{lstlisting}[style=cx]
 raw system output
-  -> optional RTK routing (system output only)
-  -> optional native reduction
+  -> internal native reduction
   -> mandatory budgeting (clip/chunk)
   -> embed into prompt
 \end{lstlisting}

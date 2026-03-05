@@ -3,7 +3,6 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use crate::capture::rtk_is_usable;
 use crate::llm::extract_agent_text;
 use crate::process::run_command_output_with_timeout;
 use crate::runtime::{llm_backend, llm_bin_name};
@@ -24,7 +23,6 @@ fn bin_in_path(bin: &str) -> bool {
 
 fn check_required_bins(backend: &str, llm_bin: &str) -> usize {
     let required = ["git", "jq"];
-    let optional = ["rtk"];
     let mut missing_required = 0usize;
     for bin in required {
         if bin_in_path(bin) {
@@ -46,16 +44,6 @@ fn check_required_bins(backend: &str, llm_bin: &str) -> usize {
         } else {
             println!("WARN: codex not found (recommended primary backend)");
         }
-    }
-    for bin in optional {
-        if bin_in_path(bin) {
-            println!("OK: {bin} (optional)");
-        } else {
-            println!("WARN: {bin} not found (optional)");
-        }
-    }
-    if bin_in_path("rtk") && !rtk_is_usable() {
-        println!("WARN: rtk version unsupported by configured range; raw fallback will be used.");
     }
     missing_required
 }

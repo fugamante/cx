@@ -152,9 +152,9 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Run end-to-end selected-LLM/cx smoke checks",
     },
     CommandHelp {
-        name: "rtk-status",
-        usage: "rtk-status",
-        description: "Show RTK version/range decision and fallback mode",
+        name: "capture-status",
+        usage: "capture-status",
+        description: "Show internal capture pipeline status",
     },
     CommandHelp {
         name: "log-on",

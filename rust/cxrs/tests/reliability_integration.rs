@@ -561,32 +561,17 @@ echo '{"commands":["git status --short","cargo test -q"]}'
 }
 
 #[test]
-fn rtk_failure_falls_back_to_native_and_logs_capture_provider() {
+fn capture_pipeline_is_native_and_logs_provider_fields() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
-    repo.write_mock(
-        "rtk",
-        r#"#!/usr/bin/env bash
-if [ "$1" = "--help" ]; then exit 0; fi
-if [ "$1" = "--version" ]; then
-  echo "rtk 0.22.1"
-  exit 0
-fi
-exit 2
-"#,
-    );
 
     let out = repo.run_with_env(
         &["cxo", "git", "status", "--short"],
-        &[
-            ("CX_CAPTURE_PROVIDER", "rtk"),
-            ("CX_RTK_SYSTEM", "1"),
-            ("CX_NATIVE_REDUCE", "0"),
-        ],
+        &[("CX_NATIVE_REDUCE", "0")],
     );
     assert!(
         out.status.success(),
-        "expected success with native fallback; stdout={} stderr={}",
+        "expected success with native capture; stdout={} stderr={}",
         stdout_str(&out),
         stderr_str(&out)
     );

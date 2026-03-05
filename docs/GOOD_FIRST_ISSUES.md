@@ -34,13 +34,13 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - examples render in `cx help`
   - no command parser changes required
 
-## 5) Add test for native capture fallback when `rtk --version` malformed
+## 5) Add test for native capture stability under malformed system output
 
 - Area: `rust/cxrs/tests/reliability_integration.rs`
-- Goal: verify malformed RTK version always falls back to native capture.
+- Goal: verify malformed command output never breaks internal native capture/logging.
 - Acceptance:
   - `capture_provider=native`
-  - `rtk_used=false`
+  - command still exits successfully in non-error path
 
 ## 6) Add `--json` output for `cx policy show`
 
@@ -78,4 +78,3 @@ This list is intentionally scoped for first-time contributors. Every item includ
 - Goal: ensure command-surface changes include docs/changelog updates.
 - Acceptance:
   - CI check fails if command files changed without doc update
-

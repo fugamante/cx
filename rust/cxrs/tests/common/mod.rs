@@ -145,8 +145,7 @@ impl TempRepo {
         cmd.args(args)
             .current_dir(&self.root)
             .env("HOME", &self.home)
-            .env("PATH", path)
-            .env("CX_RTK_SYSTEM", "0");
+            .env("PATH", path);
         for (k, v) in envs {
             cmd.env(k, v);
         }

@@ -1,4 +1,4 @@
-use crate::capture::{BudgetConfig, choose_clip_mode, clip_text_with_config, should_use_rtk};
+use crate::capture::{BudgetConfig, choose_clip_mode, clip_text_with_config};
 use crate::logs::append_jsonl;
 use crate::runlog::log_schema_failure;
 use serde_json::Value;
@@ -52,12 +52,9 @@ fn jsonl_append_integrity() {
 }
 
 #[test]
-fn rtk_unavailable_path_uses_native() {
-    let cmd = vec!["git".to_string(), "status".to_string()];
-    assert!(!should_use_rtk(&cmd, "auto", true, false));
-    assert!(!should_use_rtk(&cmd, "auto", true, true));
-    assert!(!should_use_rtk(&cmd, "native", true, true));
-    assert!(should_use_rtk(&cmd, "rtk", true, true));
+fn capture_pipeline_is_native_only() {
+    let cfg = crate::config::AppConfig::from_env();
+    assert_eq!(cfg.capture_provider, "native");
 }
 
 #[test]
