@@ -251,6 +251,55 @@ fn quota_probe_reports_configured_total_and_remaining() {
 }
 
 #[test]
+fn quota_guard_check_reports_warning_and_options() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = vec![serde_json::json!({
+        "execution_id":"qg1","timestamp":now,"command":"cxo","tool":"cxo",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":900,"input_tokens":900,"cached_input_tokens":100,"effective_input_tokens":800,"output_tokens":60
+    })];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let on = repo.run(&[
+        "quota",
+        "guard",
+        "on",
+        "--warn-pct",
+        "25",
+        "--critical-pct",
+        "10",
+        "--auto-action",
+        "none",
+    ]);
+    assert!(on.status.success(), "stderr={}", stderr_str(&on));
+
+    let out = repo.run_with_env(
+        &["quota", "guard", "check", "30", "--json"],
+        &[("CX_QUOTA_CODEX_TOTAL_TOKENS", "1000")],
+    );
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("quota guard json");
+    assert_eq!(
+        payload.get("status").and_then(Value::as_str),
+        Some("warning")
+    );
+    assert!(
+        payload
+            .get("options")
+            .and_then(Value::as_array)
+            .is_some_and(|arr| !arr.is_empty())
+    );
+}
+
+#[test]
 fn prompt_stats_json_reports_filter_savings() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

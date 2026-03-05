@@ -193,8 +193,8 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "quota",
-        usage: "quota [probe] [days] [--json]",
-        description: "Token-burn view or provider quota probe with used/remaining estimates",
+        usage: "quota [probe] [days] [--json] | quota guard <show|on|off|check>",
+        description: "Token-burn, provider quota probe, and dynamic quota-guard warnings",
     },
     CommandHelp {
         name: "prompt-stats",

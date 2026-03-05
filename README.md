@@ -175,6 +175,11 @@ Note:
 ```bash
 ./bin/cx broker set --policy quota_saver
 ```
+- Optional dynamic quota guard:
+```bash
+./bin/cx quota guard on --warn-pct 25 --critical-pct 10 --auto-action none
+./bin/cx quota guard check 30 --json | jq .
+```
 
 ## Backend Selection
 
@@ -254,6 +259,8 @@ Telemetry health:
 ./bin/cx scheduler --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx optimize 200 --json | jq .
 ./bin/cx quota probe 30 --json | jq .
+./bin/cx quota guard show
+./bin/cx quota guard check 30 --json | jq .
 ```
 
 Retry-health JSON surfaces:
