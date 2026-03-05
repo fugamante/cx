@@ -93,6 +93,25 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 - `.codex/cxlogs/` - run + schema failure logs (runtime)
 - `.codex/quarantine/` - invalid schema outputs (runtime)
 
+## Versioning
+
+`VERSION` is intentionally a single-line, machine-readable current version:
+
+- `2026.02.21`
+
+Human-readable release history lives in tags + changelog:
+
+- [`v2026.02.21`](https://github.com/fugamante/cx/releases/tag/v2026.02.21) - schema hardening + strict routing baseline
+- [`v2026.02.21-20260225T151634Z`](https://github.com/fugamante/cx/releases/tag/v2026.02.21-20260225T151634Z) - docs/manual snapshot milestone
+- current development head tracked in [`CHANGELOG.md`](CHANGELOG.md) under `Unreleased`
+
+Quick checks:
+
+```bash
+git tag --list --sort=creatordate
+cat VERSION
+```
+
 ## Requirements
 
 ### Runtime (required)

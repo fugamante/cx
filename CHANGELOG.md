@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## Release Index
+
+- `v2026.02.21` (2026-02-20): schema extraction hardening, strict routing, bootstrap reliability baseline.
+- `v2026.02.21-20260225T151634Z` (2026-02-25): manuals/docs snapshot and migration milestone.
+
+Notes:
+- `VERSION` stores the current machine-readable version only.
+- This file tracks rolling changes under `Unreleased` until the next tagged release.
+
 ## [Unreleased]
 
 ### Added
