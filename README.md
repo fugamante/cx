@@ -146,12 +146,27 @@ cat VERSION
 Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible builds.
 
 ## Quick Start
-
 ```bash
 cd <repo-root>
 ./bin/cx version
 ./bin/cx core
 ./bin/cx cxo git status
+```
+
+## Lean Daily Session
+
+Start a low-noise, quota-aware operator session:
+
+```bash
+cd <repo-root>
+./bin/cx-lean-session
+```
+
+Strict gate mode (non-zero exit on warning/critical actions):
+
+```bash
+cd <repo-root>
+./bin/cx-lean-session --strict
 ```
 
 ## Backend Selection

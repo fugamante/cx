@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CX="$ROOT/bin/cx"
+STRICT=0
+WINDOW=50
+OPT_WINDOW=200
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) STRICT=1; shift ;;
+    --window) WINDOW="${2:-}"; shift 2 ;;
+    --opt-window) OPT_WINDOW="${2:-}"; shift 2 ;;
+    -h|--help)
+      cat <<USAGE
+Usage: cx-lean-session [--strict] [--window N] [--opt-window N]
+
+Sets lean daily defaults and runs compact diagnostic gates.
+- --strict: exit non-zero if any gate reports warning/critical actions
+- --window N: diagnostics window (default 50)
+- --opt-window N: optimize window (default 200)
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "cx-lean-session: unknown arg '$1'" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ ! -x "$CX" ]]; then
+  echo "cx-lean-session: missing executable $CX" >&2
+  exit 1
+fi
+
+# Lean defaults for token efficiency.
+"$CX" broker set --policy quota_saver >/dev/null
+"$CX" state set preferences.conventional_commits true >/dev/null
+"$CX" state set preferences.pr_summary_format standard >/dev/null
+"$CX" log-on >/dev/null || true
+"$CX" alert-on >/dev/null || true
+
+print_json_summary() {
+  local file="$1"
+  jq -r '{contract_version,actions_contract_version,severity,actions:(.actions|length)}' "$file"
+}
+
+run_gate() {
+  local name="$1"; shift
+  local out_file
+  out_file="$(mktemp)"
+  if "$@" >"$out_file" 2>/dev/null; then
+    local rc=0
+  else
+    local rc=$?
+  fi
+  echo "[$name] exit=$rc"
+  if [[ -s "$out_file" ]]; then
+    print_json_summary "$out_file"
+  fi
+  rm -f "$out_file"
+  return "$rc"
+}
+
+echo "== cx lean session =="
+"$CX" version | sed -n '1,8p'
+echo "---"
+"$CX" broker show --json | jq -r '.broker_policy as $p | "broker_policy=\($p)"'
+"$CX" llm show | sed -n '1,3p'
+echo "---"
+
+if [[ "$STRICT" -eq 1 ]]; then
+  fail=0
+  run_gate diag "$CX" diag --json --actions --strict --severity warning --window "$WINDOW" || fail=1
+  run_gate scheduler "$CX" scheduler --json --actions --strict --severity warning --window "$WINDOW" || fail=1
+  run_gate optimize "$CX" optimize "$OPT_WINDOW" --json --actions --strict --severity warning || fail=1
+  echo "---"
+  "$CX" prompt-stats "$WINDOW" --json | jq -r '"prompt_saved_pct=\((.saved_pct*100)|floor)%"'
+  "$CX" quota 30 --json | jq -r '"quota_projected_30d_eff_in=\(.projected_30d_effective_input_tokens // 0)"'
+  exit "$fail"
+else
+  run_gate diag "$CX" diag --json --actions --window "$WINDOW" || true
+  run_gate scheduler "$CX" scheduler --json --actions --window "$WINDOW" || true
+  run_gate optimize "$CX" optimize "$OPT_WINDOW" --json --actions || true
+  echo "---"
+  "$CX" prompt-stats "$WINDOW" --json | jq -r '"prompt_saved_pct=\((.saved_pct*100)|floor)%"'
+  "$CX" quota 30 --json | jq -r '"quota_projected_30d_eff_in=\(.projected_30d_effective_input_tokens // 0)"'
+fi
