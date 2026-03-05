@@ -549,6 +549,8 @@ fn log_convergence_summary(
     let _ = log_codex_run(RunLogInput {
         tool: "cxtask_converge",
         prompt: &task.objective,
+        prompt_raw: None,
+        prompt_filtered: None,
         schema_prompt: None,
         schema_raw: None,
         schema_attempt: None,

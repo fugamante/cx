@@ -5,6 +5,7 @@ use crate::config::app_config;
 use crate::execmeta::make_execution_id;
 use crate::execution_logging::{LogExecutionErrorInput, log_execution_error};
 use crate::llm::{LlmRunError, extract_agent_text, usage_from_jsonl};
+use crate::prompt_filter::process_prompt;
 use crate::provider_adapter::{resolve_provider_adapter, run_jsonl_with_current_adapter};
 use crate::runlog::log_schema_failure;
 use crate::schema::{build_schema_prompt_envelope, validate_schema_instance};
@@ -34,6 +35,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
         .as_ref()
         .cloned()
         .unwrap_or(capture_stats);
+    let prompt_raw = prompt.clone();
+    let prompt_tx = process_prompt(&prompt_raw, spec.output_kind == LlmOutputKind::SchemaJson);
+    let prompt = prompt_tx.filtered.clone();
 
     let mut schema_valid: Option<bool> = None;
     let mut quarantine_id: Option<String> = None;
@@ -49,6 +53,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             log_execution_error(LogExecutionErrorInput {
                 spec: &spec,
                 prompt: &prompt,
+                prompt_raw: &prompt_raw,
+                prompt_filtered: &prompt,
                 capture_stats: &capture_stats,
                 usage: &usage,
                 schema_name: None,
@@ -70,6 +76,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                     log_execution_error(LogExecutionErrorInput {
                         spec: &spec,
                         prompt: &prompt,
+                        prompt_raw: &prompt_raw,
+                        prompt_filtered: &prompt,
                         capture_stats: &capture_stats,
                         usage: &usage,
                         schema_name: None,
@@ -90,6 +98,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                     log_execution_error(LogExecutionErrorInput {
                         spec: &spec,
                         prompt: &prompt,
+                        prompt_raw: &prompt_raw,
+                        prompt_filtered: &prompt,
                         capture_stats: &capture_stats,
                         usage: &usage,
                         schema_name: None,
@@ -112,6 +122,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                     log_execution_error(LogExecutionErrorInput {
                         spec: &spec,
                         prompt: &prompt,
+                        prompt_raw: &prompt_raw,
+                        prompt_filtered: &prompt,
                         capture_stats: &capture_stats,
                         usage: &usage,
                         schema_name: None,
@@ -145,15 +157,16 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             let mut prompt_envelope =
                 build_schema_prompt_envelope(&schema_pretty, &task_input, None);
             schema_raw_for_log = Some(schema_pretty.clone());
-            schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
             schema_attempt_for_log = Some(1);
 
-            let run_attempt = |full_prompt: &str| -> Result<(String, UsageStats), LlmRunError> {
-                let jsonl = adapter.run_jsonl(full_prompt)?;
-                let usage = usage_from_jsonl(&jsonl);
-                let raw = extract_agent_text(&jsonl).unwrap_or_default();
-                Ok((raw, usage))
-            };
+            let run_attempt =
+                |full_prompt: &str| -> Result<(String, UsageStats, String), LlmRunError> {
+                    let prompt_tx = process_prompt(full_prompt, true);
+                    let jsonl = adapter.run_jsonl(&prompt_tx.filtered)?;
+                    let usage = usage_from_jsonl(&jsonl);
+                    let raw = extract_agent_text(&jsonl).unwrap_or_default();
+                    Ok((raw, usage, prompt_tx.filtered))
+                };
 
             let validate_raw = |raw: &str| -> Result<Value, String> {
                 if raw.trim().is_empty() {
@@ -162,24 +175,30 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 validate_schema_instance(schema, raw)
             };
 
-            let (first_raw, first_usage) = match run_attempt(&prompt_envelope.full_prompt) {
-                Ok(v) => v,
-                Err(e) => {
-                    log_execution_error(LogExecutionErrorInput {
-                        spec: &spec,
-                        prompt: &task_input,
-                        capture_stats: &capture_stats,
-                        usage: &usage,
-                        schema_name: Some(schema.name.as_str()),
-                        schema_prompt: Some(prompt_envelope.full_prompt.as_str()),
-                        schema_raw: Some(schema_pretty.as_str()),
-                        schema_attempt: Some(1),
-                        err: &e,
-                        started: &started,
-                    });
-                    return Err(e.message);
-                }
-            };
+            let (first_raw, first_usage, first_prompt_filtered) =
+                match run_attempt(&prompt_envelope.full_prompt) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log_execution_error(LogExecutionErrorInput {
+                            spec: &spec,
+                            prompt: &task_input,
+                            prompt_raw: &prompt_envelope.full_prompt,
+                            prompt_filtered: &prompt_envelope.full_prompt,
+                            capture_stats: &capture_stats,
+                            usage: &usage,
+                            schema_name: Some(schema.name.as_str()),
+                            schema_prompt: Some(prompt_envelope.full_prompt.as_str()),
+                            schema_raw: Some(schema_pretty.as_str()),
+                            schema_attempt: Some(1),
+                            err: &e,
+                            started: &started,
+                        });
+                        return Err(e.message);
+                    }
+                };
+            let mut last_schema_prompt_raw = prompt_envelope.full_prompt.clone();
+            let mut last_schema_prompt_filtered = first_prompt_filtered.clone();
+            schema_prompt_for_log = Some(first_prompt_filtered.clone());
             usage = first_usage;
 
             match validate_raw(&first_raw) {
@@ -202,15 +221,16 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                             &task_input,
                             Some(&reason_first),
                         );
-                        schema_prompt_for_log = Some(prompt_envelope.full_prompt.clone());
                         schema_attempt_for_log = Some(2);
-                        let (retry_raw, retry_usage) =
+                        let (retry_raw, retry_usage, retry_prompt_filtered) =
                             match run_attempt(&prompt_envelope.full_prompt) {
                                 Ok(v) => v,
                                 Err(e) => {
                                     log_execution_error(LogExecutionErrorInput {
                                         spec: &spec,
                                         prompt: &task_input,
+                                        prompt_raw: &prompt_envelope.full_prompt,
+                                        prompt_filtered: &prompt_envelope.full_prompt,
                                         capture_stats: &capture_stats,
                                         usage: &usage,
                                         schema_name: Some(schema.name.as_str()),
@@ -223,6 +243,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                                     return Err(e.message);
                                 }
                             };
+                        last_schema_prompt_raw = prompt_envelope.full_prompt.clone();
+                        last_schema_prompt_filtered = retry_prompt_filtered.clone();
+                        schema_prompt_for_log = Some(retry_prompt_filtered.clone());
                         usage = retry_usage;
                         match validate_raw(&retry_raw) {
                             Ok(valid) => {
@@ -269,7 +292,9 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                     if spec.logging_enabled {
                         let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
                             tool: &spec.command_name,
-                            prompt: &task_input,
+                            prompt: &last_schema_prompt_filtered,
+                            prompt_raw: Some(&last_schema_prompt_raw),
+                            prompt_filtered: Some(&last_schema_prompt_filtered),
                             schema_prompt: schema_prompt_for_log.as_deref(),
                             schema_raw: schema_raw_for_log.as_deref(),
                             schema_attempt: schema_attempt_for_log,
@@ -307,6 +332,8 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
         let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
             tool: &spec.command_name,
             prompt: &prompt,
+            prompt_raw: Some(&prompt_raw),
+            prompt_filtered: Some(&prompt),
             schema_prompt: schema_prompt_for_log.as_deref(),
             schema_raw: schema_raw_for_log.as_deref(),
             schema_attempt: schema_attempt_for_log,

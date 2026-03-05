@@ -20,6 +20,8 @@ use crate::util::sha256_hex;
 pub struct RunLogInput<'a> {
     pub tool: &'a str,
     pub prompt: &'a str,
+    pub prompt_raw: Option<&'a str>,
+    pub prompt_filtered: Option<&'a str>,
     pub schema_prompt: Option<&'a str>,
     pub schema_raw: Option<&'a str>,
     pub schema_attempt: Option<u64>,
@@ -212,6 +214,8 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     let cap = input.capture.cloned().unwrap_or_default();
 
     let mut row = base_run_row(input.tool, cwd, scope, root);
+    let raw_prompt = input.prompt_raw.unwrap_or(input.prompt);
+    let filtered_prompt = input.prompt_filtered.unwrap_or(input.prompt);
     row.duration_ms = Some(input.duration_ms);
     row.schema_name = input.schema_name.map(|s| s.to_string());
     row.schema_valid = input.schema_ok;
@@ -235,14 +239,19 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.clip_mode = cap.clip_mode;
     row.clip_footer = cap.clip_footer;
     row.rtk_used = cap.rtk_used;
-    row.prompt_sha256 = Some(sha256_hex(input.prompt));
+    row.prompt_sha256 = Some(sha256_hex(filtered_prompt));
+    row.prompt_sha256_raw = Some(sha256_hex(raw_prompt));
+    row.prompt_sha256_filtered = Some(sha256_hex(filtered_prompt));
+    row.prompt_len_raw = Some(raw_prompt.chars().count() as u64);
+    row.prompt_len_filtered = Some(filtered_prompt.chars().count() as u64);
+    row.prompt_filter_applied = Some(raw_prompt != filtered_prompt);
     row.schema_prompt_sha256 = input.schema_prompt.map(sha256_hex);
     row.schema_sha256 = input.schema_raw.map(sha256_hex);
     row.schema_attempt = input.schema_attempt;
     row.timed_out = input.timed_out;
     row.timeout_secs = input.timeout_secs;
     row.command_label = input.command_label.map(|s| s.to_string());
-    row.prompt_preview = Some(prompt_preview(input.prompt, 180));
+    row.prompt_preview = Some(prompt_preview(filtered_prompt, 180));
     row.policy_blocked = input.policy_blocked;
     row.policy_reason = input.policy_reason.map(|s| s.to_string());
 

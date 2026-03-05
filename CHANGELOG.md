@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Prompt-efficiency filter in Rust execution core:
+  - all LLM-bound prompts now pass through a deterministic prompt preprocessing stage before provider execution.
+  - added environment controls:
+    - `CX_PROMPT_FILTER` (default enabled)
+    - `CX_PROMPT_FILTER_STRICT` (allow filtering schema prompts when enabled)
+    - `CX_PROMPT_FILTER_MAX_CHARS` (optional hard cap after filtering)
+  - run telemetry now records prompt-efficiency fields:
+    - `prompt_len_raw`
+    - `prompt_len_filtered`
+    - `prompt_sha256_raw`
+    - `prompt_sha256_filtered`
+    - `prompt_filter_applied`
+  - added prompt-filter unit coverage and integrated execution logging updates.
 - Phase V quota-efficiency controls:
   - added `cx quota [days] [--json]` for local token-burn visibility, monthly projection, top command hotspots, and quota-saving recommendations.
   - added `quota_saver` broker policy support across config/runtime selection (`broker set --policy quota_saver`).

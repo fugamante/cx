@@ -34,6 +34,16 @@ pub struct RunEntry {
     #[serde(default)]
     pub prompt_sha256: Option<String>,
     #[serde(default)]
+    pub prompt_sha256_raw: Option<String>,
+    #[serde(default)]
+    pub prompt_sha256_filtered: Option<String>,
+    #[serde(default)]
+    pub prompt_len_raw: Option<u64>,
+    #[serde(default)]
+    pub prompt_len_filtered: Option<u64>,
+    #[serde(default)]
+    pub prompt_filter_applied: Option<bool>,
+    #[serde(default)]
     pub schema_prompt_sha256: Option<String>,
     #[serde(default)]
     pub schema_sha256: Option<String>,
@@ -285,6 +295,11 @@ pub struct ExecutionLog {
     pub clip_footer: Option<bool>,
     pub rtk_used: Option<bool>,
     pub prompt_sha256: Option<String>,
+    pub prompt_sha256_raw: Option<String>,
+    pub prompt_sha256_filtered: Option<String>,
+    pub prompt_len_raw: Option<u64>,
+    pub prompt_len_filtered: Option<u64>,
+    pub prompt_filter_applied: Option<bool>,
     pub schema_prompt_sha256: Option<String>,
     pub schema_sha256: Option<String>,
     pub schema_attempt: Option<u64>,

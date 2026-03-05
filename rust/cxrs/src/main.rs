@@ -67,6 +67,8 @@ mod paths;
 mod policy;
 #[path = "modules/process.rs"]
 mod process;
+#[path = "modules/prompt_filter.rs"]
+mod prompt_filter;
 #[path = "modules/prompting.rs"]
 mod prompting;
 #[path = "modules/provider_adapter.rs"]

@@ -7,6 +7,8 @@ use crate::types::{CaptureStats, TaskSpec, UsageStats};
 pub(crate) struct LogExecutionErrorInput<'a> {
     pub spec: &'a TaskSpec,
     pub prompt: &'a str,
+    pub prompt_raw: &'a str,
+    pub prompt_filtered: &'a str,
     pub capture_stats: &'a CaptureStats,
     pub usage: &'a UsageStats,
     pub schema_name: Option<&'a str>,
@@ -21,6 +23,8 @@ pub(crate) fn log_execution_error(input: LogExecutionErrorInput<'_>) {
     let LogExecutionErrorInput {
         spec,
         prompt,
+        prompt_raw,
+        prompt_filtered,
         capture_stats,
         usage,
         schema_name,
@@ -39,6 +43,8 @@ pub(crate) fn log_execution_error(input: LogExecutionErrorInput<'_>) {
     let _ = log_codex_run(RunLogInput {
         tool: &spec.command_name,
         prompt,
+        prompt_raw: Some(prompt_raw),
+        prompt_filtered: Some(prompt_filtered),
         schema_prompt,
         schema_raw,
         schema_attempt,
