@@ -182,6 +182,10 @@ impl TempRepo {
     pub fn state_file(&self) -> PathBuf {
         self.root.join(".codex").join("state.json")
     }
+
+    pub fn quota_catalog_file(&self) -> PathBuf {
+        self.root.join(".codex").join("quota_catalog.json")
+    }
 }
 
 impl Drop for TempRepo {

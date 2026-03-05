@@ -185,6 +185,12 @@ Note:
 ./bin/cx quota set codex 2000000
 ./bin/cx quota unset codex
 ```
+- Maintain a provider-source quota catalog (tier metadata + source URLs):
+```bash
+./bin/cx quota catalog refresh
+./bin/cx quota catalog show --json | jq .
+./bin/cx quota probe 30 --json | jq .
+```
 
 ## Backend Selection
 

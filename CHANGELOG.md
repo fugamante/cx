@@ -15,6 +15,14 @@ Notes:
 ## [Unreleased]
 
 ### Added
+- Provider quota catalog commands:
+  - added `cx quota catalog refresh` to seed `.codex/quota_catalog.json` from curated official-source references.
+  - added `cx quota catalog show [--json]` for tier/source inspection.
+  - `quota probe` now includes:
+    - `quota_tier`
+    - `quota_limit_type`
+    - `quota_source_url`
+  - probe resolution now falls back to catalog (`catalog:<backend>:<tier>`) when env/state totals are unset.
 - Quota probing support:
   - `cx quota probe [days] [--json]` reports backend-aware quota visibility:
     - `quota_source`

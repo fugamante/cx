@@ -86,6 +86,13 @@ pub fn resolve_state_file() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".codex").join("state.json"))
 }
 
+pub fn resolve_quota_catalog_file() -> Option<PathBuf> {
+    if let Some(root) = repo_root() {
+        return Some(root.join(".codex").join("quota_catalog.json"));
+    }
+    home_dir().map(|h| h.join(".codex").join("quota_catalog.json"))
+}
+
 pub fn resolve_tasks_file() -> Result<PathBuf, String> {
     let root = repo_root().ok_or_else(|| "cx task: not inside a git repository".to_string())?;
     Ok(root.join(".codex").join("tasks.json"))

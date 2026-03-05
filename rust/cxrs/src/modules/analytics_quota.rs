@@ -1,11 +1,13 @@
 use chrono::Utc;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
 
 use crate::logs::load_values;
-use crate::paths::resolve_log_file;
+use crate::paths::{resolve_log_file, resolve_quota_catalog_file};
 use crate::runtime::{llm_backend, llm_model};
-use crate::state::{read_state_value, set_state_path, value_at_path};
+use crate::state::{read_state_value, set_state_path, value_at_path, write_json_atomic};
 
 fn parse_ts_epoch(v: &Value) -> Option<i64> {
     let ts = v
@@ -99,6 +101,292 @@ fn parse_pct(input: &str) -> Result<f64, String> {
             "percentage must be between 0 and 100, got {}",
             input
         ))
+    }
+}
+
+fn quota_tier_for_backend(backend: &str) -> String {
+    let env_backend = format!("CX_QUOTA_{}_TIER", backend.to_uppercase());
+    if let Ok(v) = std::env::var(&env_backend) {
+        let tier = v.trim().to_lowercase();
+        if !tier.is_empty() {
+            return tier;
+        }
+    }
+    if let Ok(v) = std::env::var("CX_QUOTA_TIER") {
+        let tier = v.trim().to_lowercase();
+        if !tier.is_empty() {
+            return tier;
+        }
+    }
+    if let Some(state) = read_state_value() {
+        let key = format!("preferences.quota_tier.{backend}");
+        if let Some(v) = value_at_path(&state, &key).and_then(Value::as_str) {
+            let tier = v.trim().to_lowercase();
+            if !tier.is_empty() {
+                return tier;
+            }
+        }
+        if let Some(v) =
+            value_at_path(&state, "preferences.quota_tier.default").and_then(Value::as_str)
+        {
+            let tier = v.trim().to_lowercase();
+            if !tier.is_empty() {
+                return tier;
+            }
+        }
+    }
+    "free".to_string()
+}
+
+fn quota_catalog_path() -> Option<PathBuf> {
+    resolve_quota_catalog_file()
+}
+
+fn embedded_quota_catalog() -> Value {
+    let now = Utc::now().to_rfc3339();
+    json!({
+        "version": 1,
+        "updated_at": now,
+        "notes": "Catalog of provider-published quota/rate-limit statements. Values may be dynamic; verify against source URLs.",
+        "sources": [
+            { "provider":"openai", "url":"https://help.openai.com/en/articles/11909943-gpt-53-and-52-in-chatgpt", "kind":"help_center" },
+            { "provider":"openai", "url":"https://help.openai.com/en/articles/12003714-chatgpt-business-models-limits", "kind":"help_center" },
+            { "provider":"openai", "url":"https://help.openai.com/en/articles/9793128/", "kind":"help_center" },
+            { "provider":"anthropic", "url":"https://support.anthropic.com/en/articles/8324991-about-claude-s-pro-plan-usage", "kind":"support" },
+            { "provider":"google", "url":"https://gemini.google/us/subscriptions/?hl=en", "kind":"marketing" },
+            { "provider":"perplexity", "url":"https://docs.perplexity.ai/docs/admin/rate-limits-usage-tiers", "kind":"docs" }
+        ],
+        "entries": [
+            {
+                "provider":"openai",
+                "backend":"codex",
+                "tier":"free",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://help.openai.com/en/articles/11909943-gpt-53-and-52-in-chatgpt",
+                "retrieved_at": now,
+                "notes":"Public ChatGPT limits are product/tier-dependent and can change."
+            },
+            {
+                "provider":"openai",
+                "backend":"codex",
+                "tier":"plus",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://help.openai.com/en/articles/11909943-gpt-53-and-52-in-chatgpt",
+                "retrieved_at": now,
+                "notes":"Plus limits may vary by model and rolling window."
+            },
+            {
+                "provider":"openai",
+                "backend":"codex",
+                "tier":"pro",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://help.openai.com/en/articles/9793128/",
+                "retrieved_at": now,
+                "notes":"Pro may be described with dynamic or guardrail-based usage."
+            },
+            {
+                "provider":"openai",
+                "backend":"codex",
+                "tier":"business",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://help.openai.com/en/articles/12003714-chatgpt-business-models-limits",
+                "retrieved_at": now,
+                "notes":"Business limits are model-specific and may be updated."
+            },
+            {
+                "provider":"anthropic",
+                "backend":"anthropic",
+                "tier":"free",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://support.anthropic.com/en/articles/8324991-about-claude-s-pro-plan-usage",
+                "retrieved_at": now,
+                "notes":"Anthropic usage limits are dynamic."
+            },
+            {
+                "provider":"anthropic",
+                "backend":"anthropic",
+                "tier":"pro",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://support.anthropic.com/en/articles/8324991-about-claude-s-pro-plan-usage",
+                "retrieved_at": now,
+                "notes":"Anthropic Pro usage is dynamic."
+            },
+            {
+                "provider":"google",
+                "backend":"gemini",
+                "tier":"free",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://gemini.google/us/subscriptions/?hl=en",
+                "retrieved_at": now,
+                "notes":"Gemini subscription pages publish feature limits; quotas may change."
+            },
+            {
+                "provider":"google",
+                "backend":"gemini",
+                "tier":"advanced",
+                "service_kind":"remote_metered",
+                "limit_type":"dynamic",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://gemini.google/us/subscriptions/?hl=en",
+                "retrieved_at": now,
+                "notes":"Gemini Advanced limits may vary over time."
+            },
+            {
+                "provider":"perplexity",
+                "backend":"perplexity",
+                "tier":"free",
+                "service_kind":"remote_metered",
+                "limit_type":"rate_limited",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://docs.perplexity.ai/docs/admin/rate-limits-usage-tiers",
+                "retrieved_at": now,
+                "notes":"Perplexity documents request/rate tiers rather than token budgets."
+            },
+            {
+                "provider":"ollama",
+                "backend":"ollama",
+                "tier":"local",
+                "service_kind":"local_unmetered",
+                "limit_type":"unmetered",
+                "quota_total_tokens": null,
+                "window_days": null,
+                "source_url":"https://ollama.com",
+                "retrieved_at": now,
+                "notes":"Local inference; no provider-enforced quota."
+            }
+        ]
+    })
+}
+
+fn load_quota_catalog() -> Option<Value> {
+    let path = quota_catalog_path()?;
+    if !path.exists() {
+        return None;
+    }
+    let text = fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<Value>(&text).ok()
+}
+
+fn cmd_quota_catalog(args: &[String]) -> i32 {
+    let sub = args.first().map(String::as_str).unwrap_or("show");
+    let as_json = args.iter().any(|a| a == "--json");
+    match sub {
+        "refresh" => {
+            let Some(path) = quota_catalog_path() else {
+                crate::cx_eprintln!("quota catalog: unable to resolve catalog path");
+                return 1;
+            };
+            let catalog = embedded_quota_catalog();
+            if let Err(e) = write_json_atomic(&path, &catalog) {
+                crate::cx_eprintln!("quota catalog refresh: {e}");
+                return 1;
+            }
+            if as_json {
+                match serde_json::to_string_pretty(&catalog) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => {
+                        crate::cx_eprintln!("quota catalog refresh: failed to render json: {e}");
+                        return 1;
+                    }
+                }
+            } else {
+                let entries = catalog
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                println!("quota_catalog_refreshed: {}", path.display());
+                println!("entries: {entries}");
+            }
+            0
+        }
+        "show" => {
+            let Some(path) = quota_catalog_path() else {
+                crate::cx_eprintln!("quota catalog: unable to resolve catalog path");
+                return 1;
+            };
+            let catalog = load_quota_catalog().unwrap_or_else(|| {
+                json!({
+                    "version": 1,
+                    "updated_at": Value::Null,
+                    "entries": [],
+                    "sources": [],
+                    "notes": "Catalog missing. Run: cx quota catalog refresh"
+                })
+            });
+            if as_json {
+                match serde_json::to_string_pretty(&catalog) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => {
+                        crate::cx_eprintln!("quota catalog show: failed to render json: {e}");
+                        return 1;
+                    }
+                }
+                return 0;
+            }
+            let entries = catalog
+                .get("entries")
+                .and_then(Value::as_array)
+                .map(|a| a.len())
+                .unwrap_or(0);
+            println!("== cx quota catalog ==");
+            println!("path: {}", path.display());
+            println!(
+                "updated_at: {}",
+                catalog
+                    .get("updated_at")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            );
+            println!("entries: {entries}");
+            if let Some(arr) = catalog.get("entries").and_then(Value::as_array) {
+                for row in arr {
+                    let backend = row
+                        .get("backend")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let tier = row.get("tier").and_then(Value::as_str).unwrap_or("unknown");
+                    let kind = row
+                        .get("limit_type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let total = row
+                        .get("quota_total_tokens")
+                        .and_then(Value::as_u64)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".to_string());
+                    println!("- {backend}:{tier} limit_type={kind} total_tokens={total}");
+                }
+            }
+            0
+        }
+        _ => {
+            crate::cx_eprintln!("Usage: quota catalog <show|refresh> [--json]");
+            2
+        }
     }
 }
 
@@ -447,6 +735,18 @@ fn cmd_quota_guard_check(args: &[String]) -> i32 {
                 .unwrap_or("unknown")
         );
         println!(
+            "quota_tier: {}",
+            p.get("quota_tier")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
+            "quota_limit_type: {}",
+            p.get("quota_limit_type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
             "quota_source: {}",
             p.get("quota_source")
                 .and_then(Value::as_str)
@@ -495,33 +795,115 @@ fn cmd_quota_guard_check(args: &[String]) -> i32 {
     code
 }
 
-fn configured_quota_total(backend: &str) -> (Option<u64>, String) {
+struct QuotaResolution {
+    total_tokens: Option<u64>,
+    source: String,
+    tier: String,
+    limit_type: String,
+    source_url: Option<String>,
+}
+
+fn configured_quota_total(backend: &str) -> QuotaResolution {
+    let tier = quota_tier_for_backend(backend);
     let env_backend = format!("CX_QUOTA_{}_TOTAL_TOKENS", backend.to_uppercase());
     if let Ok(v) = std::env::var(&env_backend)
         && let Ok(parsed) = v.trim().parse::<u64>()
     {
-        return (Some(parsed), format!("env:{env_backend}"));
+        return QuotaResolution {
+            total_tokens: Some(parsed),
+            source: format!("env:{env_backend}"),
+            tier,
+            limit_type: "hard".to_string(),
+            source_url: None,
+        };
     }
     if let Ok(v) = std::env::var("CX_QUOTA_TOTAL_TOKENS")
         && let Ok(parsed) = v.trim().parse::<u64>()
     {
-        return (Some(parsed), "env:CX_QUOTA_TOTAL_TOKENS".to_string());
+        return QuotaResolution {
+            total_tokens: Some(parsed),
+            source: "env:CX_QUOTA_TOTAL_TOKENS".to_string(),
+            tier,
+            limit_type: "hard".to_string(),
+            source_url: None,
+        };
     }
     if let Some(state) = read_state_value() {
         let key = format!("preferences.quota.{}_total_tokens", backend);
         if let Some(v) = value_at_path(&state, &key)
             && let Some(parsed) = v.as_u64()
         {
-            return (Some(parsed), format!("state:{key}"));
+            return QuotaResolution {
+                total_tokens: Some(parsed),
+                source: format!("state:{key}"),
+                tier,
+                limit_type: "hard".to_string(),
+                source_url: None,
+            };
         }
         let key_default = "preferences.quota.default_total_tokens";
         if let Some(v) = value_at_path(&state, key_default)
             && let Some(parsed) = v.as_u64()
         {
-            return (Some(parsed), format!("state:{key_default}"));
+            return QuotaResolution {
+                total_tokens: Some(parsed),
+                source: format!("state:{key_default}"),
+                tier,
+                limit_type: "hard".to_string(),
+                source_url: None,
+            };
         }
     }
-    (None, "unknown".to_string())
+
+    if let Some(catalog) = load_quota_catalog()
+        && let Some(entries) = catalog.get("entries").and_then(Value::as_array)
+    {
+        let mut matched: Option<&Value> = None;
+        for row in entries {
+            if row.get("backend").and_then(Value::as_str) == Some(backend)
+                && row.get("tier").and_then(Value::as_str) == Some(tier.as_str())
+            {
+                matched = Some(row);
+                break;
+            }
+        }
+        if matched.is_none() {
+            for row in entries {
+                if row.get("backend").and_then(Value::as_str) == Some(backend)
+                    && row.get("tier").and_then(Value::as_str) == Some("default")
+                {
+                    matched = Some(row);
+                    break;
+                }
+            }
+        }
+        if let Some(row) = matched {
+            let total = row.get("quota_total_tokens").and_then(Value::as_u64);
+            let limit_type = row
+                .get("limit_type")
+                .and_then(Value::as_str)
+                .unwrap_or("dynamic")
+                .to_string();
+            let source_url = row
+                .get("source_url")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            return QuotaResolution {
+                total_tokens: total,
+                source: format!("catalog:{backend}:{tier}"),
+                tier,
+                limit_type,
+                source_url,
+            };
+        }
+    }
+    QuotaResolution {
+        total_tokens: None,
+        source: "unknown".to_string(),
+        tier,
+        limit_type: "unknown".to_string(),
+        source_url: None,
+    }
 }
 
 fn quota_probe_payload(days: usize, log_file: &std::path::Path, rows: &[Value]) -> Value {
@@ -536,11 +918,12 @@ fn quota_probe_payload(days: usize, log_file: &std::path::Path, rows: &[Value]) 
         })
         .sum();
 
-    let (total_opt, mut source) = configured_quota_total(&backend);
+    let mut resolved = configured_quota_total(&backend);
     let (service_kind, total, remaining, remaining_pct) = if backend == "ollama" {
-        source = "service:local_unmetered".to_string();
+        resolved.source = "service:local_unmetered".to_string();
+        resolved.limit_type = "unmetered".to_string();
         ("local_unmetered", Value::Null, Value::Null, Value::Null)
-    } else if let Some(total_tokens) = total_opt {
+    } else if let Some(total_tokens) = resolved.total_tokens {
         let rem = total_tokens.saturating_sub(used_effective);
         let pct = if total_tokens == 0 {
             Value::Null
@@ -557,8 +940,11 @@ fn quota_probe_payload(days: usize, log_file: &std::path::Path, rows: &[Value]) 
         "log_file": log_file.display().to_string(),
         "backend": backend,
         "model": if model.is_empty() { Value::Null } else { json!(model) },
+        "quota_tier": resolved.tier,
         "service_kind": service_kind,
-        "quota_source": source,
+        "quota_source": resolved.source,
+        "quota_limit_type": resolved.limit_type,
+        "quota_source_url": resolved.source_url,
         "quota_total_tokens": total,
         "quota_used_tokens_window": used_effective,
         "quota_remaining_tokens": remaining,
@@ -656,6 +1042,9 @@ fn daily_burn(rows: &[Value]) -> Vec<Value> {
 }
 
 pub fn cmd_quota(args: &[String]) -> i32 {
+    if args.first().map(String::as_str) == Some("catalog") {
+        return cmd_quota_catalog(&args[1..]);
+    }
     if args.first().map(String::as_str) == Some("set") {
         return cmd_quota_set(&args[1..]);
     }
@@ -670,7 +1059,9 @@ pub fn cmd_quota(args: &[String]) -> i32 {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{e}");
-            crate::cx_eprintln!("Usage: quota [probe] [days] [--json]");
+            crate::cx_eprintln!(
+                "Usage: quota [probe] [days] [--json] | quota catalog <show|refresh> [--json]"
+            );
             return 2;
         }
     };
@@ -717,6 +1108,8 @@ pub fn cmd_quota(args: &[String]) -> i32 {
     let top = top_commands(&rows);
     let recommendations = vec![
         "Set a provider quota total with CX_QUOTA_<BACKEND>_TOTAL_TOKENS or CX_QUOTA_TOTAL_TOKENS."
+            .to_string(),
+        "Use quota catalog for official-source references: cx quota catalog refresh && cx quota catalog show."
             .to_string(),
         "Use --actions + --strict gates to avoid broad retries.".to_string(),
         "Prefer lean mode and tighter context budgets on token-heavy commands.".to_string(),
@@ -780,11 +1173,32 @@ pub fn cmd_quota(args: &[String]) -> i32 {
                 .unwrap_or("unknown")
         );
         println!(
+            "quota_tier: {}",
+            probe_payload
+                .get("quota_tier")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
+            "quota_limit_type: {}",
+            probe_payload
+                .get("quota_limit_type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
             "quota_source: {}",
             probe_payload
                 .get("quota_source")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
+        );
+        println!(
+            "quota_source_url: {}",
+            probe_payload
+                .get("quota_source_url")
+                .and_then(Value::as_str)
+                .unwrap_or("n/a")
         );
         println!(
             "quota_total_tokens: {}",

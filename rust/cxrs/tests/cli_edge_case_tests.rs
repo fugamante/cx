@@ -346,6 +346,70 @@ fn quota_set_and_unset_updates_probe_source_and_totals() {
 }
 
 #[test]
+fn quota_catalog_refresh_and_show_work() {
+    let repo = TempRepo::new("cxrs-it");
+    let refresh = repo.run(&["quota", "catalog", "refresh"]);
+    assert!(refresh.status.success(), "stderr={}", stderr_str(&refresh));
+    assert!(
+        repo.quota_catalog_file().exists(),
+        "missing {}",
+        repo.quota_catalog_file().display()
+    );
+
+    let show = repo.run(&["quota", "catalog", "show", "--json"]);
+    assert!(show.status.success(), "stderr={}", stderr_str(&show));
+    let payload: Value = serde_json::from_str(&stdout_str(&show)).expect("catalog json");
+    assert_eq!(payload.get("version").and_then(Value::as_u64), Some(1));
+    assert!(
+        payload
+            .get("entries")
+            .and_then(Value::as_array)
+            .is_some_and(|arr| !arr.is_empty())
+    );
+}
+
+#[test]
+fn quota_probe_uses_catalog_when_no_env_or_state_total_is_set() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let row = serde_json::json!({
+        "execution_id":"qc1","timestamp":now,"command":"cxo","tool":"cxo",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":500,"input_tokens":300,"cached_input_tokens":0,"effective_input_tokens":300,"output_tokens":20
+    });
+    fs::write(
+        &log,
+        format!("{}\n", serde_json::to_string(&row).expect("serialize row")),
+    )
+    .expect("write runs");
+
+    let refresh = repo.run(&["quota", "catalog", "refresh"]);
+    assert!(refresh.status.success(), "stderr={}", stderr_str(&refresh));
+
+    let probe = repo.run_with_env(
+        &["quota", "probe", "30", "--json"],
+        &[("CX_QUOTA_CODEX_TIER", "plus")],
+    );
+    assert!(probe.status.success(), "stderr={}", stderr_str(&probe));
+    let payload: Value = serde_json::from_str(&stdout_str(&probe)).expect("quota probe json");
+    assert_eq!(
+        payload.get("quota_source").and_then(Value::as_str),
+        Some("catalog:codex:plus")
+    );
+    assert_eq!(
+        payload.get("quota_limit_type").and_then(Value::as_str),
+        Some("dynamic")
+    );
+    assert_eq!(
+        payload.get("quota_total_tokens"),
+        Some(&Value::Null),
+        "catalog dynamic limits should remain null unless explicitly set"
+    );
+}
+
+#[test]
 fn prompt_stats_json_reports_filter_savings() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

@@ -193,7 +193,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "quota",
-        usage: "quota [probe] [days] [--json] | quota set <backend|default> <total_tokens> | quota unset <backend|default|all> | quota guard <show|on|off|check>",
+        usage: "quota [probe] [days] [--json] | quota catalog <show|refresh> [--json] | quota set <backend|default> <total_tokens> | quota unset <backend|default|all> | quota guard <show|on|off|check>",
         description: "Token-burn, provider quota probe, and dynamic quota-guard warnings",
     },
     CommandHelp {
