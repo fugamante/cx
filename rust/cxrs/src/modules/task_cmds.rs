@@ -853,6 +853,15 @@ fn choose_backend_for_task(
                 Some(pool[index % pool.len()].clone())
             }
         }
+        "quota_saver" => {
+            if pool.iter().any(|b| b == "ollama") {
+                Some("ollama".to_string())
+            } else if pool.iter().any(|b| b == "codex") {
+                Some("codex".to_string())
+            } else {
+                Some(pool[index % pool.len()].clone())
+            }
+        }
         _ => Some(pool[index % pool.len()].clone()),
     }
 }

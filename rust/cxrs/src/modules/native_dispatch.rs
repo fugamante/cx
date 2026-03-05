@@ -188,6 +188,7 @@ fn dispatch_prompt_commands(
     let out = match cmd {
         "bench" => handle_bench(app_name, args, deps),
         "metrics" => (deps.print_metrics)(parse_n(args, 2, DEFAULT_RUN_WINDOW)),
+        "quota" => (deps.cmd_quota)(&args[2..]),
         "prompt" => handle_prompt(app_name, args, deps),
         "roles" => (deps.cmd_roles)(args.get(2).map(String::as_str)),
         "fanout" => {

@@ -4,7 +4,9 @@ use std::io::Read;
 mod deps;
 
 use crate::agentcmds;
-use crate::analytics::{print_alert, print_metrics, print_profile, print_trace, print_worklog};
+use crate::analytics::{
+    cmd_quota, print_alert, print_metrics, print_profile, print_trace, print_worklog,
+};
 use crate::bench_parity;
 use crate::broker::cmd_broker as broker_cmd;
 use crate::capture::{chunk_text_by_budget, run_system_command_capture};

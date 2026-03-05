@@ -68,7 +68,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "broker",
-        usage: "broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>",
+        usage: "broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>",
         description: "Show/set broker policy and benchmark backend performance from local run logs",
     },
     CommandHelp {
@@ -190,6 +190,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         name: "metrics",
         usage: "metrics [N]",
         description: "Token and duration aggregates from last N runs",
+    },
+    CommandHelp {
+        name: "quota",
+        usage: "quota [days] [--json]",
+        description: "Token-burn view with monthly projection from recent logs",
     },
     CommandHelp {
         name: "prompt",

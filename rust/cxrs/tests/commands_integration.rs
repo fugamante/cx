@@ -2880,6 +2880,60 @@ fn broker_benchmark_strict_warn_fails_on_warn_violations() {
 }
 
 #[test]
+fn broker_set_accepts_quota_saver_policy() {
+    let repo = TempRepo::new("cxrs-it");
+    let set = repo.run(&["broker", "set", "--policy", "quota_saver"]);
+    assert!(set.status.success(), "stderr={}", stderr_str(&set));
+    assert!(stdout_str(&set).contains("quota_saver"));
+
+    let show = repo.run(&["broker", "show", "--json"]);
+    assert!(show.status.success(), "stderr={}", stderr_str(&show));
+    let payload: Value = serde_json::from_str(&stdout_str(&show)).expect("broker show json");
+    assert_eq!(
+        payload.get("broker_policy").and_then(Value::as_str),
+        Some("quota_saver")
+    );
+}
+
+#[test]
+fn quota_json_reports_projection_and_top_commands() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"q1","timestamp":now,"command":"cxdiffsum_staged","tool":"cxdiffsum_staged",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":2200,"input_tokens":2000,"cached_input_tokens":500,"effective_input_tokens":1500,"output_tokens":120
+        }),
+        serde_json::json!({
+            "execution_id":"q2","timestamp":chrono::Utc::now().to_rfc3339(),"command":"cxcommitmsg","tool":"cxcommitmsg",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":1800,"input_tokens":900,"cached_input_tokens":100,"effective_input_tokens":800,"output_tokens":80
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["quota", "30", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("quota json");
+    assert_eq!(payload.get("window_days").and_then(Value::as_u64), Some(30));
+    assert!(payload.get("monthly_effective_projection").is_some());
+    assert!(
+        payload
+            .get("top_commands")
+            .and_then(Value::as_array)
+            .is_some()
+    );
+}
+
+#[test]
 fn diag_json_strict_fails_on_retry_recovery_degradation() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

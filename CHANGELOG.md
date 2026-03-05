@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Phase V quota-efficiency controls:
+  - added `cx quota [days] [--json]` for local token-burn visibility, monthly projection, top command hotspots, and quota-saving recommendations.
+  - added `quota_saver` broker policy support across config/runtime selection (`broker set --policy quota_saver`).
+  - wired `quota`/`cxquota` into routing, help, and command discovery surfaces.
+  - added integration coverage for quota JSON output and broker policy persistence.
 - Phase V P5-03 actionable anomaly output contract:
   - added `--actions` JSON payload support for:
     - `cx diag --json --actions`

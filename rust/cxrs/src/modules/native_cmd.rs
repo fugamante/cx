@@ -26,6 +26,7 @@ pub struct NativeDeps {
     pub cmd_broker: fn(&[String]) -> i32,
     pub cmd_bench: fn(usize, &[String]) -> i32,
     pub print_metrics: fn(usize) -> i32,
+    pub cmd_quota: fn(&[String]) -> i32,
     pub cmd_prompt: fn(&str, &str) -> i32,
     pub cmd_roles: fn(Option<&str>) -> i32,
     pub cmd_fanout: fn(&str) -> i32,

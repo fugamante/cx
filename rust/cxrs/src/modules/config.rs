@@ -101,7 +101,7 @@ fn resolve_broker_policy(state: &Option<Value>) -> String {
         .or_else(|| state_pref_str(state, "preferences.broker_policy"))
         .unwrap_or_else(|| "balanced".to_string());
     match raw.as_str() {
-        "latency" | "quality" | "cost" | "balanced" => raw,
+        "latency" | "quality" | "cost" | "balanced" | "quota_saver" => raw,
         _ => "balanced".to_string(),
     }
 }

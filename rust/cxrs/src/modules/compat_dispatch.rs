@@ -163,6 +163,7 @@ fn dispatch_meta_commands(
 fn dispatch_analytics_commands(sub: &str, args: &[String], deps: &CompatDeps) -> Option<i32> {
     let out = match sub {
         "cxmetrics" | "metrics" => (deps.print_metrics)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
+        "cxquota" | "quota" => (deps.cmd_quota)(&args[1..]),
         "cxprofile" | "profile" => (deps.print_profile)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),
         "cxtrace" | "trace" => (deps.print_trace)(parse_n(args, 1, 1)),
         "cxalert" | "alert" => (deps.print_alert)(parse_n(args, 1, DEFAULT_RUN_WINDOW)),

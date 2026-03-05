@@ -9,7 +9,10 @@ use crate::runtime::{llm_backend, llm_model};
 use crate::state::set_state_path;
 
 fn valid_policy(s: &str) -> bool {
-    matches!(s, "latency" | "quality" | "cost" | "balanced")
+    matches!(
+        s,
+        "latency" | "quality" | "cost" | "balanced" | "quota_saver"
+    )
 }
 
 fn parse_set_policy(args: &[String]) -> Result<String, String> {
@@ -465,7 +468,7 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
                 Ok(v) => v,
                 Err(e) => {
                     crate::cx_eprintln!(
-                        "{e}\nUsage: {app_name} broker set --policy latency|quality|cost|balanced"
+                        "{e}\nUsage: {app_name} broker set --policy latency|quality|cost|balanced|quota_saver"
                     );
                     return 2;
                 }
@@ -482,7 +485,7 @@ pub fn cmd_broker(app_name: &str, args: &[String]) -> i32 {
         "benchmark" => cmd_broker_benchmark(app_name, &args[1..]),
         other => {
             crate::cx_eprintln!(
-                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>"
+                "Usage: {app_name} broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|critical]>"
             );
             crate::cx_eprintln!("cxrs broker: unknown subcommand '{other}'");
             2
