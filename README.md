@@ -104,6 +104,7 @@ Human-readable release history lives in tags + changelog:
 - [`v2026.02.21`](https://github.com/fugamante/cx/releases/tag/v2026.02.21) - schema hardening + strict routing baseline
 - [`v2026.02.21-20260225T151634Z`](https://github.com/fugamante/cx/releases/tag/v2026.02.21-20260225T151634Z) - docs/manual snapshot milestone
 - current development head tracked in [`CHANGELOG.md`](CHANGELOG.md) under `Unreleased`
+- historical version definitions in [`VERSION_HISTORY.md`](VERSION_HISTORY.md)
 
 Quick checks:
 
