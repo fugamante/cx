@@ -300,6 +300,52 @@ fn quota_guard_check_reports_warning_and_options() {
 }
 
 #[test]
+fn quota_set_and_unset_updates_probe_source_and_totals() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let row = serde_json::json!({
+        "execution_id":"qs1","timestamp":now,"command":"cxo","tool":"cxo",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":500,"input_tokens":300,"cached_input_tokens":0,"effective_input_tokens":300,"output_tokens":20
+    });
+    fs::write(
+        &log,
+        format!("{}\n", serde_json::to_string(&row).expect("serialize row")),
+    )
+    .expect("write runs");
+
+    let set = repo.run(&["quota", "set", "codex", "1000"]);
+    assert!(set.status.success(), "stderr={}", stderr_str(&set));
+
+    let probed = repo.run(&["quota", "probe", "30", "--json"]);
+    assert!(probed.status.success(), "stderr={}", stderr_str(&probed));
+    let payload: Value = serde_json::from_str(&stdout_str(&probed)).expect("quota probe json");
+    assert_eq!(
+        payload.get("quota_source").and_then(Value::as_str),
+        Some("state:preferences.quota.codex_total_tokens")
+    );
+    assert_eq!(
+        payload.get("quota_total_tokens").and_then(Value::as_u64),
+        Some(1000)
+    );
+    assert_eq!(
+        payload
+            .get("quota_remaining_tokens")
+            .and_then(Value::as_u64),
+        Some(700)
+    );
+
+    let unset = repo.run(&["quota", "unset", "codex"]);
+    assert!(unset.status.success(), "stderr={}", stderr_str(&unset));
+    let probed2 = repo.run(&["quota", "probe", "30", "--json"]);
+    assert!(probed2.status.success(), "stderr={}", stderr_str(&probed2));
+    let payload2: Value = serde_json::from_str(&stdout_str(&probed2)).expect("quota probe json");
+    assert_eq!(payload2.get("quota_total_tokens"), Some(&Value::Null));
+}
+
+#[test]
 fn prompt_stats_json_reports_filter_savings() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

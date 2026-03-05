@@ -225,6 +225,72 @@ fn cmd_quota_guard(args: &[String]) -> i32 {
     }
 }
 
+fn cmd_quota_set(args: &[String]) -> i32 {
+    let backend = args.first().map(String::as_str).unwrap_or_default();
+    let total_raw = args.get(1).map(String::as_str).unwrap_or_default();
+    if backend.is_empty() || total_raw.is_empty() {
+        crate::cx_eprintln!("Usage: quota set <backend|default> <total_tokens>");
+        return 2;
+    }
+    let backend_norm = backend.trim().to_lowercase();
+    if !matches!(backend_norm.as_str(), "codex" | "ollama" | "default") {
+        crate::cx_eprintln!("quota set: backend must be codex|ollama|default");
+        return 2;
+    }
+    let total = match total_raw.trim().parse::<u64>() {
+        Ok(v) if v > 0 => v,
+        _ => {
+            crate::cx_eprintln!("quota set: total_tokens must be a positive integer");
+            return 2;
+        }
+    };
+    let key = if backend_norm == "default" {
+        "preferences.quota.default_total_tokens".to_string()
+    } else {
+        format!("preferences.quota.{}_total_tokens", backend_norm)
+    };
+    if let Err(e) = set_state_path(&key, json!(total)) {
+        crate::cx_eprintln!("quota set: {e}");
+        return 1;
+    }
+    println!(
+        "quota_total_set: backend={} total_tokens={}",
+        backend_norm, total
+    );
+    0
+}
+
+fn cmd_quota_unset(args: &[String]) -> i32 {
+    let backend = args.first().map(String::as_str).unwrap_or_default();
+    if backend.is_empty() {
+        crate::cx_eprintln!("Usage: quota unset <backend|default|all>");
+        return 2;
+    }
+    let backend_norm = backend.trim().to_lowercase();
+    let mut keys: Vec<String> = Vec::new();
+    match backend_norm.as_str() {
+        "codex" | "ollama" => keys.push(format!("preferences.quota.{}_total_tokens", backend_norm)),
+        "default" => keys.push("preferences.quota.default_total_tokens".to_string()),
+        "all" => {
+            keys.push("preferences.quota.codex_total_tokens".to_string());
+            keys.push("preferences.quota.ollama_total_tokens".to_string());
+            keys.push("preferences.quota.default_total_tokens".to_string());
+        }
+        _ => {
+            crate::cx_eprintln!("quota unset: backend must be codex|ollama|default|all");
+            return 2;
+        }
+    }
+    for key in keys {
+        if let Err(e) = set_state_path(&key, Value::Null) {
+            crate::cx_eprintln!("quota unset: {e}");
+            return 1;
+        }
+    }
+    println!("quota_total_unset: {backend_norm}");
+    0
+}
+
 fn evaluate_quota_guard(
     probe: &Value,
     cfg: &GuardConfig,
@@ -448,6 +514,12 @@ fn configured_quota_total(backend: &str) -> (Option<u64>, String) {
         {
             return (Some(parsed), format!("state:{key}"));
         }
+        let key_default = "preferences.quota.default_total_tokens";
+        if let Some(v) = value_at_path(&state, key_default)
+            && let Some(parsed) = v.as_u64()
+        {
+            return (Some(parsed), format!("state:{key_default}"));
+        }
     }
     (None, "unknown".to_string())
 }
@@ -584,6 +656,12 @@ fn daily_burn(rows: &[Value]) -> Vec<Value> {
 }
 
 pub fn cmd_quota(args: &[String]) -> i32 {
+    if args.first().map(String::as_str) == Some("set") {
+        return cmd_quota_set(&args[1..]);
+    }
+    if args.first().map(String::as_str) == Some("unset") {
+        return cmd_quota_unset(&args[1..]);
+    }
     if args.first().map(String::as_str) == Some("guard") {
         return cmd_quota_guard(&args[1..]);
     }

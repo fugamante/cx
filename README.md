@@ -180,6 +180,11 @@ Note:
 ./bin/cx quota guard on --warn-pct 25 --critical-pct 10 --auto-action none
 ./bin/cx quota guard check 30 --json | jq .
 ```
+- Set or clear known quota totals explicitly:
+```bash
+./bin/cx quota set codex 2000000
+./bin/cx quota unset codex
+```
 
 ## Backend Selection
 

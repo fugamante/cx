@@ -30,6 +30,17 @@ Notes:
 - Lean-session behavior hardening:
   - `bin/cx-lean-session` no longer sets broker policy implicitly.
   - session output now surfaces `quota probe` summary instead of forcing quota-saver policy.
+- Dynamic quota guard:
+  - added `cx quota guard show|on|off|check`.
+  - guard check emits `status`, `reason`, and optioned remediation actions.
+  - optional strict mode: `cx quota guard check ... --strict` exits non-zero on warning/critical.
+  - optional auto-apply path: `--apply` with `--auto-action quota_saver` (explicit only).
+- Quota total management helpers:
+  - added `cx quota set <backend|default> <total_tokens>`.
+  - added `cx quota unset <backend|default|all>`.
+  - `quota probe` now also reads state totals from:
+    - `preferences.quota.<backend>_total_tokens`
+    - `preferences.quota.default_total_tokens`
 - Contract freeze markers and policy:
   - JSON automation surfaces now emit explicit `contract_version` fields:
     - `diag.v1`
