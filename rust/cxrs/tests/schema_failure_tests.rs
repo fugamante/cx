@@ -67,7 +67,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
 }
 
 #[test]
-fn mock_adapter_next_schema_success_without_provider_binaries() {
+fn mock_next_schema_success_without_bins() {
     let repo = TempRepo::new("cxrs-it");
     let out = repo.run_with_env(
         &["next", "echo", "mock-adapter"],
@@ -110,7 +110,7 @@ fn mock_adapter_next_schema_success_without_provider_binaries() {
 }
 
 #[test]
-fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
+fn mock_schema_failure_creates_quarantine_logs() {
     let repo = TempRepo::new("cxrs-it");
     let out = repo.run_with_env(
         &["next", "echo", "mock-fail"],
@@ -166,7 +166,7 @@ fn mock_adapter_schema_failure_creates_quarantine_and_logs() {
 }
 
 #[test]
-fn schema_command_parity_next_between_codex_cli_and_mock_adapter() {
+fn next_parity_codex_cli_vs_mock_adapter() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock_codex(
         r#"#!/usr/bin/env bash
@@ -223,7 +223,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":14,"cached_input
 }
 
 #[test]
-fn http_curl_adapter_json_format_supports_schema_commands() {
+fn http_curl_json_supports_schema_commands() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -250,7 +250,7 @@ printf '%s\n' '{"commands":["echo via-http-json"]}'
 }
 
 #[test]
-fn http_curl_adapter_json_format_rejects_invalid_content_envelope() {
+fn http_curl_json_rejects_bad_content_envelope() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -282,7 +282,7 @@ printf '%s\n' '{"content":[{"unexpected":"shape"}]}'
 }
 
 #[test]
-fn http_curl_adapter_json_format_rejects_invalid_json_payload() {
+fn http_curl_json_rejects_invalid_payload() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -314,7 +314,7 @@ printf '%s\n' '{not-json'
 }
 
 #[test]
-fn http_curl_adapter_jsonl_format_passthrough_for_cxj() {
+fn http_curl_jsonl_passthrough_for_cxj() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -344,7 +344,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_
 }
 
 #[test]
-fn http_curl_adapter_jsonl_format_rejects_non_jsonl_payload() {
+fn http_curl_jsonl_rejects_non_jsonl_payload() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",

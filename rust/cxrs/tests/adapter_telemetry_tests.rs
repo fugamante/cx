@@ -115,7 +115,7 @@ printf '%s\n' "ok"
 }
 
 #[test]
-fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
+fn http_stub_fails_fast_logs_transport() {
     let repo = TempRepo::new("cxrs-it");
     let out = repo.run_with_env(
         &["cxo", "echo", "http-stub"],
@@ -161,7 +161,7 @@ fn http_stub_adapter_fails_fast_and_logs_http_transport_status() {
 }
 
 #[test]
-fn http_curl_adapter_requires_url_and_logs_experimental_status() {
+fn http_curl_requires_url_logs_experimental_status() {
     let repo = TempRepo::new("cxrs-it");
     let out = repo.run_with_env(
         &["cxo", "echo", "http-curl"],
@@ -206,7 +206,7 @@ fn http_curl_adapter_requires_url_and_logs_experimental_status() {
 }
 
 #[test]
-fn http_curl_adapter_parses_json_text_payload_from_curl() {
+fn http_curl_parses_json_text_payload() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -253,7 +253,7 @@ printf '%s\n' '{"text":"http adapter ok"}'
 }
 
 #[test]
-fn http_curl_adapter_hits_local_server_and_sends_auth_and_prompt() {
+fn http_curl_hits_server_with_auth_prompt() {
     if std::process::Command::new("curl")
         .arg("--version")
         .output()

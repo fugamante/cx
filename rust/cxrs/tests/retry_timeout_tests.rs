@@ -4,7 +4,7 @@ use common::*;
 use serde_json::Value;
 
 #[test]
-fn run_all_retries_timeout_then_succeeds_and_logs_attempts() {
+fn run_all_retry_timeout_then_succeeds_logs() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -80,7 +80,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
-fn judge_convergence_uses_model_path_and_logs_decision_source() {
+fn judge_convergence_uses_model_path_logs_source() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -138,7 +138,7 @@ fi
 }
 
 #[test]
-fn judge_convergence_falls_back_on_invalid_model_output() {
+fn judge_convergence_falls_back_on_bad_output() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -196,7 +196,7 @@ fi
 }
 
 #[test]
-fn diag_json_strict_fails_on_retry_recovery_degradation() {
+fn diag_json_strict_fails_on_retry_degradation() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
         serde_json::json!({
@@ -314,7 +314,7 @@ fn optimize_json_includes_retry_health_metrics() {
 }
 
 #[test]
-fn optimize_recommendations_include_retry_actions_when_recovery_is_low() {
+fn optimize_reco_has_retry_actions_recovery_low() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
         serde_json::json!({

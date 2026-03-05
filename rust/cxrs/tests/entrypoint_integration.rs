@@ -56,7 +56,7 @@ fn bin_xshelf_version_reports_runtime() {
 }
 
 #[test]
-fn lib_cx_sh_is_sourceable_and_exports_functions() {
+fn lib_cx_sh_exports_functions() {
     let repo = repo_root();
     let script = format!(
         "source '{}' >/dev/null 2>&1; declare -F cx >/dev/null && declare -F cxversion >/dev/null",

@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn http_body_parser_unknown_json_envelope_falls_back_to_raw() {
+    fn http_body_parser_unknown_envelope_falls_back() {
         let raw = r#"{"unexpected":"shape"}"#;
         let parsed = parse_http_provider_body(raw);
         assert_eq!(parsed, raw);

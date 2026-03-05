@@ -7,7 +7,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 #[test]
-fn mixed_run_all_enforces_backend_cap_and_records_queue_ms() {
+fn run_all_enforces_backend_cap_records_queue() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -122,7 +122,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 
 #[cfg(unix)]
 #[test]
-fn run_all_halt_on_critical_stops_after_first_critical_failure() {
+fn run_all_halt_on_critical_first_failure() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -182,7 +182,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 
 #[cfg(unix)]
 #[test]
-fn run_all_continue_on_critical_processes_remaining_tasks() {
+fn run_all_continue_on_critical_remaining_tasks() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -249,7 +249,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
-fn mixed_run_all_respects_dependency_waves_with_concurrency() {
+fn run_all_respects_dependency_waves_concurrency() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -357,7 +357,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
-fn mixed_run_all_queue_ms_increases_for_later_tasks_under_caps() {
+fn run_all_queue_increases_for_later_tasks() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",

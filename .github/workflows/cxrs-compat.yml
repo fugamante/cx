@@ -61,6 +61,14 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           ./rust/cxrs/scripts/check_rs_max_lines.sh 600 "$GITHUB_WORKSPACE"
 
+      - name: Function Name Length Guardrail
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 ./rust/cxrs/scripts/check_rust_naming.py --root rust/cxrs --max-fn-len 52 --max-type-len 48 --max-const-len 48
+          python3 ./rust/cxrs/scripts/check_fn_name_length.py --root rust/cxrs --max-len 52
+          python3 ./rust/cxrs/scripts/check_fn_name_length.py --root rust/cxrs/tests --max-len 52 --max-segments 7
+          python3 ./rust/cxrs/scripts/check_test_naming.py --root rust/cxrs/tests --max-len 48 --max-segments 7
+
       - name: Integration Refactor Guardrails
         run: |
           cd "$GITHUB_WORKSPACE"

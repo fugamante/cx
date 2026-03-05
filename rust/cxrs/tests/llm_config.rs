@@ -66,7 +66,7 @@ fn llm_use_codex_triggers_quota_probe_notice() {
 }
 
 #[test]
-fn llm_unset_can_clear_model_backend_and_all() {
+fn llm_unset_clears_model_backend_all() {
     let repo = TempRepo::new("cxrs-llm");
 
     let out = repo.run(&["llm", "use", "ollama", "llama3.1"]);
@@ -121,7 +121,7 @@ fn llm_unset_can_clear_model_backend_and_all() {
 }
 
 #[test]
-fn ollama_without_model_fails_non_interactive_with_clear_error() {
+fn ollama_without_model_fails_noninteractive_clear() {
     let repo = TempRepo::new("cxrs-llm");
 
     assert!(repo.run(&["llm", "unset", "all"]).status.success());

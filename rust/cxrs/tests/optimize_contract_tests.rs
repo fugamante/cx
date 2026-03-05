@@ -64,7 +64,7 @@ fn optimize_json_actions_match_contract_fixture() {
 }
 
 #[test]
-fn optimize_actions_strict_severity_gate_is_deterministic() {
+fn optimize_actions_strict_gate_is_deterministic() {
     let repo = TempRepo::new("cxrs-it");
     let row = serde_json::json!({
         "execution_id":"ogate1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",

@@ -490,13 +490,13 @@ mod tests {
     }
 
     #[test]
-    fn backend_normalization_accepts_ollama_case_insensitive() {
+    fn backend_normalization_accepts_ollama_case() {
         assert_eq!(normalized_backend_name("ollama"), "ollama");
         assert_eq!(normalized_backend_name("OLLAMA"), "ollama");
     }
 
     #[test]
-    fn ollama_plain_output_is_wrapped_as_jsonl_agent_message() {
+    fn ollama_plain_output_wrapped_as_jsonl_agent() {
         let raw = "line1\nline2 with \"quotes\"";
         let jsonl = ollama_plain_to_jsonl(raw).expect("wrap jsonl");
         let parsed: Value = serde_json::from_str(&jsonl).expect("parse wrapped json");

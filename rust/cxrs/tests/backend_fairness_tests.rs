@@ -6,7 +6,7 @@ use std::fs;
 use std::time::Instant;
 
 #[test]
-fn mixed_run_all_balanced_pool_uses_both_backends_without_starvation() {
+fn run_all_balanced_pool_uses_both_backends() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -99,7 +99,7 @@ printf '%s\n' "ok"
 }
 
 #[test]
-fn mixed_run_all_falls_back_when_pool_backend_unavailable() {
+fn run_all_pool_backend_unavailable_falls_back() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -161,7 +161,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
 }
 
 #[test]
-fn mixed_run_all_least_loaded_stress_balances_backends_and_workers() {
+fn run_all_least_loaded_balances_backends_workers() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -281,7 +281,7 @@ printf '%s\n' "ok"
 }
 
 #[test]
-fn mixed_run_all_round_robin_assigns_backends_deterministically() {
+fn run_all_round_robin_assigns_backends() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "codex",
@@ -374,7 +374,7 @@ printf '%s\n' "ok"
 }
 
 #[test]
-fn mixed_run_all_errors_when_pool_has_no_available_backends() {
+fn run_all_pool_no_backends_errors() {
     let repo = TempRepo::new("cxrs-it");
     let add = repo.run(&[
         "task",

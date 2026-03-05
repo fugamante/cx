@@ -13,7 +13,7 @@ fn assert_actions_for_command(repo: &TempRepo, cmd: &[&str], rows: &[Value], ctx
 }
 
 #[test]
-fn logs_stats_and_telemetry_alias_report_population_and_drift() {
+fn logs_stats_alias_reports_population_drift() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
@@ -161,7 +161,7 @@ fn telemetry_json_matches_contract_fixture() {
 }
 
 #[test]
-fn logs_stats_strict_and_severity_flags_behave_as_expected() {
+fn logs_stats_strict_severity_behave_expected() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
@@ -369,7 +369,7 @@ fn diag_json_matches_contract_fixture() {
 }
 
 #[test]
-fn diag_json_strict_fails_on_high_queue_severity() {
+fn diag_json_strict_fails_on_queue_severity() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");

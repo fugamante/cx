@@ -33,7 +33,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":64,"cached_inp
 }
 
 #[test]
-fn timeout_injection_logs_timeout_metadata_and_required_fields() {
+fn timeout_injection_logs_timeout_required_fields() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
@@ -70,7 +70,7 @@ sleep 2
 }
 
 #[test]
-fn timeout_override_llm_precedence_is_logged_end_to_end() {
+fn timeout_llm_precedence_logged_end_to_end() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
@@ -102,7 +102,7 @@ sleep 2
 }
 
 #[test]
-fn timeout_override_git_precedence_is_logged_end_to_end() {
+fn timeout_git_precedence_logged_end_to_end() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "git",
@@ -131,7 +131,7 @@ exit 0
 }
 
 #[test]
-fn timeout_override_shell_precedence_applies_to_clipboard_backend() {
+fn timeout_shell_precedence_applies_to_clipboard() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("codex", &mock_codex_jsonl_agent_text("copy me"));
     repo.write_mock(
@@ -161,7 +161,7 @@ exit 0
 }
 
 #[test]
-fn schema_failure_injection_creates_quarantine_and_run_flags() {
+fn schema_injection_creates_quarantine_run_flags() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
@@ -202,7 +202,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
 }
 
 #[test]
-fn missing_schema_file_fails_structured_command_cleanly() {
+fn missing_schema_file_fails_structured_command() {
     let repo = TempRepo::new("cxrs-rel");
     let schema_file = repo
         .root
@@ -230,7 +230,7 @@ fn missing_schema_file_fails_structured_command_cleanly() {
 }
 
 #[test]
-fn corrupted_quarantine_record_fails_show_with_clear_error() {
+fn corrupted_quarantine_record_fails_show_clear() {
     let repo = TempRepo::new("cxrs-rel");
     let qdir = repo.root.join(".codex").join("quarantine");
     fs::create_dir_all(&qdir).expect("create quarantine dir");
@@ -252,7 +252,7 @@ fn corrupted_quarantine_record_fails_show_with_clear_error() {
 }
 
 #[test]
-fn unwritable_quarantine_path_surfaces_schema_failure_io_error() {
+fn unwritable_quarantine_path_surfaces_schema_error() {
     let repo = TempRepo::new("cxrs-rel");
     let qdir = repo.root.join(".codex").join("quarantine");
     fs::create_dir_all(&qdir).expect("create quarantine dir");
@@ -286,7 +286,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":32,"cached_input
 }
 
 #[test]
-fn unwritable_run_log_path_does_not_break_command_execution() {
+fn unwritable_run_log_path_keeps_command_running() {
     let repo = TempRepo::new("cxrs-rel");
     let logs_dir = repo.root.join(".codex").join("cxlogs");
     fs::create_dir_all(&logs_dir).expect("create logs dir");
@@ -306,7 +306,7 @@ fn unwritable_run_log_path_does_not_break_command_execution() {
 }
 
 #[test]
-fn replay_is_deterministic_and_schema_valid_over_repeated_runs() {
+fn replay_stays_deterministic_over_repeated_runs() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "codex",
@@ -369,7 +369,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":80,"cached_input
 }
 
 #[test]
-fn ollama_timeout_failure_logs_backend_and_timeout_fields() {
+fn ollama_timeout_failure_logs_backend_fields() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
@@ -409,7 +409,7 @@ exit 0
 }
 
 #[test]
-fn ollama_model_unset_set_transitions_are_persisted_and_enforced() {
+fn ollama_model_set_unset_transitions_are_persisted() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("ollama", "#!/usr/bin/env bash\ncat >/dev/null\necho ok\n");
 
@@ -462,7 +462,7 @@ fn ollama_model_unset_set_transitions_are_persisted_and_enforced() {
 }
 
 #[test]
-fn ollama_schema_malformed_output_creates_quarantine() {
+fn ollama_schema_malformed_output_quarantined() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
@@ -512,7 +512,7 @@ echo "this is not json"
 }
 
 #[test]
-fn ollama_schema_commands_remain_enforced_when_mode_is_lean() {
+fn ollama_schema_commands_enforced_in_lean_mode() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "ollama",
@@ -561,7 +561,7 @@ echo '{"commands":["git status --short","cargo test -q"]}'
 }
 
 #[test]
-fn capture_pipeline_is_native_and_logs_provider_fields() {
+fn capture_pipeline_native_logs_provider_fields() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock("codex", &mock_codex_jsonl_agent_text("ok"));
 
@@ -586,7 +586,7 @@ fn capture_pipeline_is_native_and_logs_provider_fields() {
 }
 
 #[test]
-fn fix_run_policy_block_is_logged_with_reason() {
+fn fix_run_policy_block_logged_with_reason() {
     let repo = TempRepo::new("cxrs-rel");
     let fix_json = r#"{"analysis":"dangerous path","commands":["rm -rf /tmp/cxrs-danger-test"]}"#;
     repo.write_mock("codex", &mock_codex_jsonl_agent_text(fix_json));

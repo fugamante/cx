@@ -215,7 +215,7 @@ fn scheduler_json_strict_reports_severity() {
 }
 
 #[test]
-fn scheduler_json_strict_flags_critical_halts_detected() {
+fn scheduler_json_strict_flags_critical_halts() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
         serde_json::json!({

@@ -34,7 +34,7 @@ fn command_parsing_and_file_io_edge_cases() {
 }
 
 #[test]
-fn http_curl_adapter_non_200_is_classified_as_http_status() {
+fn http_curl_non_200_classified_http_status() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -66,7 +66,7 @@ exit 22
 }
 
 #[test]
-fn http_curl_adapter_transport_failure_is_classified_as_unreachable() {
+fn http_curl_transport_failure_is_unreachable() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -98,7 +98,7 @@ exit 7
 }
 
 #[test]
-fn http_curl_adapter_unknown_json_envelope_falls_back_to_raw_text() {
+fn http_curl_unknown_envelope_falls_back_raw() {
     let repo = TempRepo::new("cxrs-it");
     repo.write_mock(
         "curl",
@@ -201,7 +201,7 @@ fn quota_json_reports_projection_and_top_commands() {
 }
 
 #[test]
-fn quota_probe_reports_configured_total_and_remaining() {
+fn quota_probe_reports_configured_total_remaining() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
@@ -300,7 +300,7 @@ fn quota_guard_check_reports_warning_and_options() {
 }
 
 #[test]
-fn quota_set_and_unset_updates_probe_source_and_totals() {
+fn quota_set_unset_updates_probe_totals() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
@@ -369,7 +369,7 @@ fn quota_catalog_refresh_and_show_work() {
 }
 
 #[test]
-fn quota_probe_uses_catalog_when_no_env_or_state_total_is_set() {
+fn quota_probe_uses_catalog_without_state_total() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
     fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
@@ -410,7 +410,7 @@ fn quota_probe_uses_catalog_when_no_env_or_state_total_is_set() {
 }
 
 #[test]
-fn quota_catalog_auto_toggle_and_refresh_if_stale_work() {
+fn quota_catalog_auto_toggle_refresh_stale() {
     let repo = TempRepo::new("cxrs-it");
     let auto_on = repo.run(&["quota", "catalog", "auto", "on", "--interval-hours", "2"]);
     assert!(auto_on.status.success(), "stderr={}", stderr_str(&auto_on));

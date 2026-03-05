@@ -37,6 +37,7 @@ Current scope:
 - strict `fix-run` remediation suggestions with dangerous-command blocking
 - LLM backend routing: `codex` (default) or `ollama` (local alternative)
 - quality gate currently clean (`file_violations=0`, `function_violations=0`)
+- naming guardrails enforce concise Rust symbols and test names in CI/local checks
 
 This crate is authoritative runtime behavior for `cx`.
 Bash is reduced to a thin bootstrap shim and no longer provides command fallback.

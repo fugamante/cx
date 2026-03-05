@@ -4,7 +4,7 @@ use common::*;
 use serde_json::Value;
 
 #[test]
-fn broker_benchmark_strict_fails_when_backend_samples_are_insufficient() {
+fn broker_bench_strict_fails_insufficient_samples() {
     let repo = TempRepo::new("cxrs-it");
     let row = serde_json::json!({
         "execution_id":"bs1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -58,7 +58,7 @@ fn broker_benchmark_strict_fails_when_backend_samples_are_insufficient() {
 }
 
 #[test]
-fn broker_benchmark_strict_critical_allows_warn_only_violations() {
+fn broker_bench_critical_allows_warn_only() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
         serde_json::json!({
@@ -99,7 +99,7 @@ fn broker_benchmark_strict_critical_allows_warn_only_violations() {
 }
 
 #[test]
-fn broker_benchmark_strict_warn_fails_on_warn_violations() {
+fn broker_bench_warn_fails_on_warn_violations() {
     let repo = TempRepo::new("cxrs-it");
     let rows = vec![
         serde_json::json!({

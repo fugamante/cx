@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+import argparse
+import pathlib
+import re
+import sys
+
+PAT_FN = re.compile(r"^\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PAT_SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate #[test] function naming in Rust integration tests."
+    )
+    parser.add_argument(
+        "--root",
+        default="rust/cxrs/tests",
+        help="Directory containing Rust integration tests",
+    )
+    parser.add_argument(
+        "--max-len",
+        type=int,
+        default=48,
+        help="Maximum test function name length (default: 48)",
+    )
+    parser.add_argument(
+        "--max-segments",
+        type=int,
+        default=7,
+        help="Maximum underscore-separated segments (default: 7)",
+    )
+    args = parser.parse_args()
+
+    root = pathlib.Path(args.root)
+    if not root.exists():
+        print(f"error: root not found: {root}", file=sys.stderr)
+        return 2
+    if args.max_len < 8:
+        print("error: --max-len must be >= 8", file=sys.stderr)
+        return 2
+    if args.max_segments < 2:
+        print("error: --max-segments must be >= 2", file=sys.stderr)
+        return 2
+
+    violations: list[str] = []
+    test_count = 0
+    for path in sorted(root.glob("*.rs")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(lines):
+            if line.strip() != "#[test]":
+                continue
+            if idx + 1 >= len(lines):
+                violations.append(f"{path}:{idx + 1}: missing function after #[test]")
+                continue
+            m = PAT_FN.match(lines[idx + 1])
+            if not m:
+                violations.append(
+                    f"{path}:{idx + 2}: expected test fn immediately after #[test]"
+                )
+                continue
+            test_count += 1
+            name = m.group(1)
+            if not PAT_SNAKE.match(name):
+                violations.append(
+                    f"{path}:{idx + 2}: non-snake-case test name: {name}"
+                )
+            if len(name) > args.max_len:
+                violations.append(
+                    f"{path}:{idx + 2}: len={len(name)}>{args.max_len}: {name}"
+                )
+            segments = name.count("_") + 1
+            if segments > args.max_segments:
+                violations.append(
+                    f"{path}:{idx + 2}: segments={segments}>{args.max_segments}: {name}"
+                )
+
+    if violations:
+        print(
+            f"failed: test naming guardrail violations ({len(violations)})",
+            file=sys.stderr,
+        )
+        for v in violations:
+            print(f"  - {v}", file=sys.stderr)
+        return 1
+
+    print(
+        f"ok: test naming guardrail passed (tests={test_count}, "
+        f"max_len={args.max_len}, max_segments={args.max_segments})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
