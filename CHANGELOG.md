@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Prompt efficiency observability:
+  - added `cx prompt-stats [N] [--json]` (`cxprompt_stats` compat alias) to track prompt filtering impact.
+  - reports raw vs filtered prompt chars, saved chars/percent, filter-applied counts, and per-tool breakdown.
 - Prompt-efficiency filter in Rust execution core:
   - all LLM-bound prompts now pass through a deterministic prompt preprocessing stage before provider execution.
   - added environment controls:

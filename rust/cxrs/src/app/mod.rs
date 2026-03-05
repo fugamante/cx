@@ -5,7 +5,8 @@ mod deps;
 
 use crate::agentcmds;
 use crate::analytics::{
-    cmd_quota, print_alert, print_metrics, print_profile, print_trace, print_worklog,
+    cmd_prompt_stats, cmd_quota, print_alert, print_metrics, print_profile, print_trace,
+    print_worklog,
 };
 use crate::bench_parity;
 use crate::broker::cmd_broker as broker_cmd;

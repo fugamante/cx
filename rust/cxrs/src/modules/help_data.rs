@@ -197,6 +197,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Token-burn view with monthly projection from recent logs",
     },
     CommandHelp {
+        name: "prompt-stats",
+        usage: "prompt-stats [N] [--json]",
+        description: "Prompt raw-vs-filtered efficiency stats from recent runs",
+    },
+    CommandHelp {
         name: "prompt",
         usage: "prompt <mode> <request>",
         description: "Generate Codex-ready prompt block",

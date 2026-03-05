@@ -16,6 +16,7 @@ pub struct CompatDeps {
     pub cmd_task: fn(&[String]) -> i32,
     pub print_metrics: fn(usize) -> i32,
     pub cmd_quota: fn(&[String]) -> i32,
+    pub cmd_prompt_stats: fn(&[String]) -> i32,
     pub print_profile: fn(usize) -> i32,
     pub print_trace: fn(usize) -> i32,
     pub print_alert: fn(usize) -> i32,

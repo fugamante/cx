@@ -2934,6 +2934,56 @@ fn quota_json_reports_projection_and_top_commands() {
 }
 
 #[test]
+fn prompt_stats_json_reports_filter_savings() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = vec![
+        serde_json::json!({
+            "execution_id":"ps1","timestamp":now,"command":"cxo","tool":"cxo",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":200,"schema_enforced":false,"schema_valid":true,
+            "prompt_len_raw":120,"prompt_len_filtered":90,"prompt_filter_applied":true
+        }),
+        serde_json::json!({
+            "execution_id":"ps2","timestamp":chrono::Utc::now().to_rfc3339(),"command":"cxcommitmsg","tool":"cxcommitmsg",
+            "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+            "duration_ms":210,"schema_enforced":true,"schema_valid":true,
+            "prompt_len_raw":80,"prompt_len_filtered":80,"prompt_filter_applied":false
+        }),
+    ];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run(&["prompt-stats", "50", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("prompt-stats json");
+    assert_eq!(payload.get("window").and_then(Value::as_u64), Some(50));
+    assert_eq!(
+        payload
+            .get("rows_with_prompt_lengths")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        payload
+            .get("prompt_filter_applied_runs")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload.get("saved_chars_total").and_then(Value::as_u64),
+        Some(30)
+    );
+    assert!(payload.get("by_tool").and_then(Value::as_array).is_some());
+}
+
+#[test]
 fn diag_json_strict_fails_on_retry_recovery_degradation() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
