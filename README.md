@@ -169,6 +169,13 @@ cd <repo-root>
 ./bin/cx-lean-session --strict
 ```
 
+Note:
+- `cx-lean-session` does not change broker policy implicitly.
+- Set broker policy explicitly when needed:
+```bash
+./bin/cx broker set --policy quota_saver
+```
+
 ## Backend Selection
 
 `cxrs` resolves backend/model using:
@@ -246,6 +253,7 @@ Telemetry health:
 ./bin/cx scheduler --json --window 50 | jq .
 ./bin/cx scheduler --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
 ./bin/cx optimize 200 --json | jq .
+./bin/cx quota probe 30 --json | jq .
 ```
 
 Retry-health JSON surfaces:

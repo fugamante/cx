@@ -201,6 +201,56 @@ fn quota_json_reports_projection_and_top_commands() {
 }
 
 #[test]
+fn quota_probe_reports_configured_total_and_remaining() {
+    let repo = TempRepo::new("cxrs-it");
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = vec![serde_json::json!({
+        "execution_id":"qp1","timestamp":now,"command":"cxo","tool":"cxo",
+        "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
+        "duration_ms":1000,"input_tokens":500,"cached_input_tokens":100,"effective_input_tokens":400,"output_tokens":80
+    })];
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+
+    let out = repo.run_with_env(
+        &["quota", "probe", "30", "--json"],
+        &[("CX_QUOTA_CODEX_TOTAL_TOKENS", "1000")],
+    );
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("quota probe json");
+    assert_eq!(
+        payload.get("backend").and_then(Value::as_str),
+        Some("codex")
+    );
+    assert_eq!(
+        payload.get("quota_source").and_then(Value::as_str),
+        Some("env:CX_QUOTA_CODEX_TOTAL_TOKENS")
+    );
+    assert_eq!(
+        payload.get("quota_total_tokens").and_then(Value::as_u64),
+        Some(1000)
+    );
+    assert_eq!(
+        payload
+            .get("quota_used_tokens_window")
+            .and_then(Value::as_u64),
+        Some(400)
+    );
+    assert_eq!(
+        payload
+            .get("quota_remaining_tokens")
+            .and_then(Value::as_u64),
+        Some(600)
+    );
+}
+
+#[test]
 fn prompt_stats_json_reports_filter_savings() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();

@@ -15,6 +15,21 @@ Notes:
 ## [Unreleased]
 
 ### Added
+- Quota probing support:
+  - `cx quota probe [days] [--json]` reports backend-aware quota visibility:
+    - `quota_source`
+    - `quota_total_tokens`
+    - `quota_used_tokens_window`
+    - `quota_remaining_tokens`
+    - `quota_remaining_pct`
+  - supports configured totals via:
+    - `CX_QUOTA_<BACKEND>_TOTAL_TOKENS`
+    - `CX_QUOTA_TOTAL_TOKENS`
+    - `.codex/state.json` at `preferences.quota.<backend>_total_tokens`
+  - `ollama` is reported as `service_kind=local_unmetered`.
+- Lean-session behavior hardening:
+  - `bin/cx-lean-session` no longer sets broker policy implicitly.
+  - session output now surfaces `quota probe` summary instead of forcing quota-saver policy.
 - Contract freeze markers and policy:
   - JSON automation surfaces now emit explicit `contract_version` fields:
     - `diag.v1`

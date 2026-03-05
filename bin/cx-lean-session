@@ -35,8 +35,7 @@ if [[ ! -x "$CX" ]]; then
   exit 1
 fi
 
-# Lean defaults for token efficiency.
-"$CX" broker set --policy quota_saver >/dev/null
+# Lean defaults without changing broker policy implicitly.
 "$CX" state set preferences.conventional_commits true >/dev/null
 "$CX" state set preferences.pr_summary_format standard >/dev/null
 "$CX" log-on >/dev/null || true
@@ -78,7 +77,7 @@ if [[ "$STRICT" -eq 1 ]]; then
   run_gate optimize "$CX" optimize "$OPT_WINDOW" --json --actions --strict --severity warning || fail=1
   echo "---"
   "$CX" prompt-stats "$WINDOW" --json | jq -r '"prompt_saved_pct=\((.saved_pct*100)|floor)%"'
-  "$CX" quota 30 --json | jq -r '"quota_projected_30d_eff_in=\(.projected_30d_effective_input_tokens // 0)"'
+  "$CX" quota probe 30 --json | jq -r '"quota_source=\(.quota_source // "unknown") remaining=\(.quota_remaining_tokens // "unknown") used_window=\(.quota_used_tokens_window // 0)"'
   exit "$fail"
 else
   run_gate diag "$CX" diag --json --actions --window "$WINDOW" || true
@@ -86,5 +85,5 @@ else
   run_gate optimize "$CX" optimize "$OPT_WINDOW" --json --actions || true
   echo "---"
   "$CX" prompt-stats "$WINDOW" --json | jq -r '"prompt_saved_pct=\((.saved_pct*100)|floor)%"'
-  "$CX" quota 30 --json | jq -r '"quota_projected_30d_eff_in=\(.projected_30d_effective_input_tokens // 0)"'
+  "$CX" quota probe 30 --json | jq -r '"quota_source=\(.quota_source // "unknown") remaining=\(.quota_remaining_tokens // "unknown") used_window=\(.quota_used_tokens_window // 0)"'
 fi

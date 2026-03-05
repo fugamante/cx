@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
+use crate::runtime::{llm_backend, llm_model};
+use crate::state::{read_state_value, value_at_path};
 
 fn parse_ts_epoch(v: &Value) -> Option<i64> {
     let ts = v
@@ -15,10 +17,15 @@ fn parse_ts_epoch(v: &Value) -> Option<i64> {
         .map(|dt| dt.timestamp())
 }
 
-fn parse_args(args: &[String]) -> Result<(usize, bool), String> {
+fn parse_args(args: &[String]) -> Result<(usize, bool, bool), String> {
     let mut days = 30usize;
     let mut as_json = false;
+    let mut probe = false;
     for a in args {
+        if a == "probe" || a == "--probe" {
+            probe = true;
+            continue;
+        }
         if a == "--json" {
             as_json = true;
             continue;
@@ -31,7 +38,72 @@ fn parse_args(args: &[String]) -> Result<(usize, bool), String> {
         }
         days = parsed;
     }
-    Ok((days, as_json))
+    Ok((days, as_json, probe))
+}
+
+fn configured_quota_total(backend: &str) -> (Option<u64>, String) {
+    let env_backend = format!("CX_QUOTA_{}_TOTAL_TOKENS", backend.to_uppercase());
+    if let Ok(v) = std::env::var(&env_backend)
+        && let Ok(parsed) = v.trim().parse::<u64>()
+    {
+        return (Some(parsed), format!("env:{env_backend}"));
+    }
+    if let Ok(v) = std::env::var("CX_QUOTA_TOTAL_TOKENS")
+        && let Ok(parsed) = v.trim().parse::<u64>()
+    {
+        return (Some(parsed), "env:CX_QUOTA_TOTAL_TOKENS".to_string());
+    }
+    if let Some(state) = read_state_value() {
+        let key = format!("preferences.quota.{}_total_tokens", backend);
+        if let Some(v) = value_at_path(&state, &key)
+            && let Some(parsed) = v.as_u64()
+        {
+            return (Some(parsed), format!("state:{key}"));
+        }
+    }
+    (None, "unknown".to_string())
+}
+
+fn quota_probe_payload(days: usize, log_file: &std::path::Path, rows: &[Value]) -> Value {
+    let backend = llm_backend();
+    let model = llm_model();
+    let used_effective: u64 = rows
+        .iter()
+        .map(|r| {
+            r.get("effective_input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| r.get("input_tokens").and_then(Value::as_u64).unwrap_or(0))
+        })
+        .sum();
+
+    let (total_opt, mut source) = configured_quota_total(&backend);
+    let (service_kind, total, remaining, remaining_pct) = if backend == "ollama" {
+        source = "service:local_unmetered".to_string();
+        ("local_unmetered", Value::Null, Value::Null, Value::Null)
+    } else if let Some(total_tokens) = total_opt {
+        let rem = total_tokens.saturating_sub(used_effective);
+        let pct = if total_tokens == 0 {
+            Value::Null
+        } else {
+            json!(rem as f64 / total_tokens as f64)
+        };
+        ("remote_metered", json!(total_tokens), json!(rem), pct)
+    } else {
+        ("remote_metered", Value::Null, Value::Null, Value::Null)
+    };
+
+    json!({
+        "window_days": days,
+        "log_file": log_file.display().to_string(),
+        "backend": backend,
+        "model": if model.is_empty() { Value::Null } else { json!(model) },
+        "service_kind": service_kind,
+        "quota_source": source,
+        "quota_total_tokens": total,
+        "quota_used_tokens_window": used_effective,
+        "quota_remaining_tokens": remaining,
+        "quota_remaining_pct": remaining_pct
+    })
 }
 
 fn read_window_rows(days: usize) -> Result<(std::path::PathBuf, Vec<Value>), String> {
@@ -124,11 +196,11 @@ fn daily_burn(rows: &[Value]) -> Vec<Value> {
 }
 
 pub fn cmd_quota(args: &[String]) -> i32 {
-    let (days, as_json) = match parse_args(args) {
+    let (days, as_json, probe) = match parse_args(args) {
         Ok(v) => v,
         Err(e) => {
             crate::cx_eprintln!("{e}");
-            crate::cx_eprintln!("Usage: quota [days] [--json]");
+            crate::cx_eprintln!("Usage: quota [probe] [days] [--json]");
             return 2;
         }
     };
@@ -174,7 +246,8 @@ pub fn cmd_quota(args: &[String]) -> i32 {
     let monthly_projection = per_day * 30;
     let top = top_commands(&rows);
     let recommendations = vec![
-        "Set broker policy to quota_saver for mixed backend routing.".to_string(),
+        "Set a provider quota total with CX_QUOTA_<BACKEND>_TOTAL_TOKENS or CX_QUOTA_TOTAL_TOKENS."
+            .to_string(),
         "Use --actions + --strict gates to avoid broad retries.".to_string(),
         "Prefer lean mode and tighter context budgets on token-heavy commands.".to_string(),
     ];
@@ -197,13 +270,84 @@ pub fn cmd_quota(args: &[String]) -> i32 {
     });
 
     if as_json {
-        match serde_json::to_string_pretty(&payload) {
+        let out = if probe {
+            quota_probe_payload(days, &log_file, &rows)
+        } else {
+            payload
+        };
+        match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
             Err(e) => {
                 crate::cx_eprintln!("cxrs quota: failed to render json: {e}");
                 return 1;
             }
         }
+        return 0;
+    }
+
+    if probe {
+        let probe_payload = quota_probe_payload(days, &log_file, &rows);
+        println!("== cx quota probe (last {days} days) ==");
+        println!(
+            "backend: {}",
+            probe_payload
+                .get("backend")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
+            "model: {}",
+            probe_payload
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("<unset>")
+        );
+        println!(
+            "service_kind: {}",
+            probe_payload
+                .get("service_kind")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
+            "quota_source: {}",
+            probe_payload
+                .get("quota_source")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!(
+            "quota_total_tokens: {}",
+            probe_payload
+                .get("quota_total_tokens")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+        println!(
+            "quota_used_tokens_window: {}",
+            probe_payload
+                .get("quota_used_tokens_window")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        );
+        println!(
+            "quota_remaining_tokens: {}",
+            probe_payload
+                .get("quota_remaining_tokens")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+        println!(
+            "quota_remaining_pct: {}",
+            probe_payload
+                .get("quota_remaining_pct")
+                .and_then(Value::as_f64)
+                .map(|v| format!("{}%", (v * 100.0).round() as i64))
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+        println!("log_file: {}", log_file.display());
         return 0;
     }
 
