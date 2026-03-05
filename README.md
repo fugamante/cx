@@ -191,6 +191,13 @@ Note:
 ./bin/cx quota catalog show --json | jq .
 ./bin/cx quota probe 30 --json | jq .
 ```
+- Optional automatic catalog refresh (opt-in) with stale-age policy:
+```bash
+./bin/cx quota catalog auto on --interval-hours 168
+./bin/cx quota catalog refresh --if-stale --max-age-hours 168
+./bin/cx quota catalog auto show
+./bin/cx quota catalog auto off
+```
 
 ## Backend Selection
 

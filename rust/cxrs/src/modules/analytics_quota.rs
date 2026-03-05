@@ -290,22 +290,157 @@ fn load_quota_catalog() -> Option<Value> {
     serde_json::from_str::<Value>(&text).ok()
 }
 
+#[derive(Debug, Clone)]
+struct CatalogAutoConfig {
+    enabled: bool,
+    interval_hours: u64,
+}
+
+fn catalog_auto_config_from_state() -> CatalogAutoConfig {
+    let mut cfg = CatalogAutoConfig {
+        enabled: false,
+        interval_hours: 168,
+    };
+    if let Some(state) = read_state_value() {
+        if let Some(v) =
+            value_at_path(&state, "preferences.quota_catalog.auto.enabled").and_then(Value::as_bool)
+        {
+            cfg.enabled = v;
+        }
+        if let Some(v) = value_at_path(&state, "preferences.quota_catalog.auto.interval_hours")
+            .and_then(Value::as_u64)
+        {
+            cfg.interval_hours = v.clamp(1, 24 * 365);
+        }
+    }
+    cfg
+}
+
+fn catalog_age_hours(catalog: &Value) -> Option<u64> {
+    let ts = catalog.get("updated_at")?.as_str()?;
+    let dt = chrono::DateTime::parse_from_rfc3339(ts).ok()?;
+    let now = Utc::now();
+    let age = now.signed_duration_since(dt.with_timezone(&Utc));
+    if age.num_hours() < 0 {
+        Some(0)
+    } else {
+        Some(age.num_hours() as u64)
+    }
+}
+
+fn quota_catalog_refresh_now() -> Result<Value, String> {
+    let Some(path) = quota_catalog_path() else {
+        return Err("quota catalog: unable to resolve catalog path".to_string());
+    };
+    let catalog = embedded_quota_catalog();
+    write_json_atomic(&path, &catalog)?;
+    Ok(catalog)
+}
+
+fn maybe_auto_refresh_quota_catalog() -> Option<Value> {
+    let cfg = catalog_auto_config_from_state();
+    if !cfg.enabled {
+        return load_quota_catalog();
+    }
+    if let Some(current) = load_quota_catalog()
+        && let Some(age_h) = catalog_age_hours(&current)
+        && age_h < cfg.interval_hours
+    {
+        return Some(current);
+    }
+    match quota_catalog_refresh_now() {
+        Ok(v) => Some(v),
+        Err(e) => {
+            crate::cx_eprintln!("quota catalog auto-refresh: {e}");
+            load_quota_catalog()
+        }
+    }
+}
+
 fn cmd_quota_catalog(args: &[String]) -> i32 {
     let sub = args.first().map(String::as_str).unwrap_or("show");
     let as_json = args.iter().any(|a| a == "--json");
     match sub {
         "refresh" => {
+            let mut if_stale = false;
+            let mut max_age_hours: u64 = 168;
+            let mut i = 1usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--json" => i += 1,
+                    "--if-stale" => {
+                        if_stale = true;
+                        i += 1;
+                    }
+                    "--max-age-hours" => {
+                        let Some(v) = args.get(i + 1) else {
+                            crate::cx_eprintln!(
+                                "quota catalog refresh: --max-age-hours requires a value"
+                            );
+                            return 2;
+                        };
+                        match v.trim().parse::<u64>() {
+                            Ok(parsed) if parsed > 0 => max_age_hours = parsed,
+                            _ => {
+                                crate::cx_eprintln!(
+                                    "quota catalog refresh: --max-age-hours must be >= 1"
+                                );
+                                return 2;
+                            }
+                        }
+                        i += 2;
+                    }
+                    other => {
+                        crate::cx_eprintln!("quota catalog refresh: unknown arg '{other}'");
+                        return 2;
+                    }
+                }
+            }
             let Some(path) = quota_catalog_path() else {
                 crate::cx_eprintln!("quota catalog: unable to resolve catalog path");
                 return 1;
             };
-            let catalog = embedded_quota_catalog();
-            if let Err(e) = write_json_atomic(&path, &catalog) {
-                crate::cx_eprintln!("quota catalog refresh: {e}");
-                return 1;
-            }
+            let mut refreshed = true;
+            let catalog = if if_stale {
+                if let Some(current) = load_quota_catalog() {
+                    if let Some(age_h) = catalog_age_hours(&current)
+                        && age_h < max_age_hours
+                    {
+                        refreshed = false;
+                        current
+                    } else {
+                        match quota_catalog_refresh_now() {
+                            Ok(v) => v,
+                            Err(e) => {
+                                crate::cx_eprintln!("quota catalog refresh: {e}");
+                                return 1;
+                            }
+                        }
+                    }
+                } else {
+                    match quota_catalog_refresh_now() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::cx_eprintln!("quota catalog refresh: {e}");
+                            return 1;
+                        }
+                    }
+                }
+            } else {
+                match quota_catalog_refresh_now() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        crate::cx_eprintln!("quota catalog refresh: {e}");
+                        return 1;
+                    }
+                }
+            };
             if as_json {
-                match serde_json::to_string_pretty(&catalog) {
+                let payload = json!({
+                    "refreshed": refreshed,
+                    "catalog": catalog
+                });
+                match serde_json::to_string_pretty(&payload) {
                     Ok(s) => println!("{s}"),
                     Err(e) => {
                         crate::cx_eprintln!("quota catalog refresh: failed to render json: {e}");
@@ -319,6 +454,7 @@ fn cmd_quota_catalog(args: &[String]) -> i32 {
                     .map(|a| a.len())
                     .unwrap_or(0);
                 println!("quota_catalog_refreshed: {}", path.display());
+                println!("refreshed: {}", if refreshed { "true" } else { "false" });
                 println!("entries: {entries}");
             }
             0
@@ -328,7 +464,7 @@ fn cmd_quota_catalog(args: &[String]) -> i32 {
                 crate::cx_eprintln!("quota catalog: unable to resolve catalog path");
                 return 1;
             };
-            let catalog = load_quota_catalog().unwrap_or_else(|| {
+            let catalog = maybe_auto_refresh_quota_catalog().unwrap_or_else(|| {
                 json!({
                     "version": 1,
                     "updated_at": Value::Null,
@@ -383,8 +519,85 @@ fn cmd_quota_catalog(args: &[String]) -> i32 {
             }
             0
         }
+        "auto" => {
+            let sub2 = args.get(1).map(String::as_str).unwrap_or("show");
+            match sub2 {
+                "show" => {
+                    let cfg = catalog_auto_config_from_state();
+                    println!("== cx quota catalog auto ==");
+                    println!("enabled: {}", if cfg.enabled { "true" } else { "false" });
+                    println!("interval_hours: {}", cfg.interval_hours);
+                    0
+                }
+                "on" => {
+                    let mut interval_hours = 168u64;
+                    let mut i = 2usize;
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "--interval-hours" => {
+                                let Some(v) = args.get(i + 1) else {
+                                    crate::cx_eprintln!(
+                                        "quota catalog auto on: --interval-hours requires a value"
+                                    );
+                                    return 2;
+                                };
+                                match v.trim().parse::<u64>() {
+                                    Ok(parsed) if parsed > 0 => interval_hours = parsed,
+                                    _ => {
+                                        crate::cx_eprintln!(
+                                            "quota catalog auto on: --interval-hours must be >= 1"
+                                        );
+                                        return 2;
+                                    }
+                                }
+                                i += 2;
+                            }
+                            "--json" => i += 1,
+                            other => {
+                                crate::cx_eprintln!("quota catalog auto on: unknown arg '{other}'");
+                                return 2;
+                            }
+                        }
+                    }
+                    if let Err(e) =
+                        set_state_path("preferences.quota_catalog.auto.enabled", Value::Bool(true))
+                    {
+                        crate::cx_eprintln!("quota catalog auto on: {e}");
+                        return 1;
+                    }
+                    if let Err(e) = set_state_path(
+                        "preferences.quota_catalog.auto.interval_hours",
+                        json!(interval_hours),
+                    ) {
+                        crate::cx_eprintln!("quota catalog auto on: {e}");
+                        return 1;
+                    }
+                    println!("quota_catalog_auto: enabled");
+                    println!("interval_hours: {}", interval_hours);
+                    0
+                }
+                "off" => {
+                    if let Err(e) =
+                        set_state_path("preferences.quota_catalog.auto.enabled", Value::Bool(false))
+                    {
+                        crate::cx_eprintln!("quota catalog auto off: {e}");
+                        return 1;
+                    }
+                    println!("quota_catalog_auto: disabled");
+                    0
+                }
+                _ => {
+                    crate::cx_eprintln!(
+                        "Usage: quota catalog auto <show|on [--interval-hours N]|off>"
+                    );
+                    2
+                }
+            }
+        }
         _ => {
-            crate::cx_eprintln!("Usage: quota catalog <show|refresh> [--json]");
+            crate::cx_eprintln!(
+                "Usage: quota catalog <show|refresh [--if-stale --max-age-hours N] [--json]|auto <show|on|off>>"
+            );
             2
         }
     }
@@ -855,7 +1068,7 @@ fn configured_quota_total(backend: &str) -> QuotaResolution {
         }
     }
 
-    if let Some(catalog) = load_quota_catalog()
+    if let Some(catalog) = maybe_auto_refresh_quota_catalog()
         && let Some(entries) = catalog.get("entries").and_then(Value::as_array)
     {
         let mut matched: Option<&Value> = None;
@@ -1060,7 +1273,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
         Err(e) => {
             crate::cx_eprintln!("{e}");
             crate::cx_eprintln!(
-                "Usage: quota [probe] [days] [--json] | quota catalog <show|refresh> [--json]"
+                "Usage: quota [probe] [days] [--json] | quota catalog <show|refresh [--if-stale --max-age-hours N] [--json]|auto <show|on|off>>"
             );
             return 2;
         }

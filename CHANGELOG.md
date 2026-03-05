@@ -18,6 +18,11 @@ Notes:
 - Provider quota catalog commands:
   - added `cx quota catalog refresh` to seed `.codex/quota_catalog.json` from curated official-source references.
   - added `cx quota catalog show [--json]` for tier/source inspection.
+  - added opt-in automatic refresh controls:
+    - `cx quota catalog auto on --interval-hours N`
+    - `cx quota catalog auto show`
+    - `cx quota catalog auto off`
+  - `cx quota catalog refresh --if-stale --max-age-hours N` supports manual scheduled refresh without unnecessary rewrites.
   - `quota probe` now includes:
     - `quota_tier`
     - `quota_limit_type`

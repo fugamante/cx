@@ -410,6 +410,44 @@ fn quota_probe_uses_catalog_when_no_env_or_state_total_is_set() {
 }
 
 #[test]
+fn quota_catalog_auto_toggle_and_refresh_if_stale_work() {
+    let repo = TempRepo::new("cxrs-it");
+    let auto_on = repo.run(&["quota", "catalog", "auto", "on", "--interval-hours", "2"]);
+    assert!(auto_on.status.success(), "stderr={}", stderr_str(&auto_on));
+
+    let show = repo.run(&["quota", "catalog", "auto", "show"]);
+    assert!(show.status.success(), "stderr={}", stderr_str(&show));
+    assert!(stdout_str(&show).contains("enabled: true"));
+    assert!(stdout_str(&show).contains("interval_hours: 2"));
+
+    let initial_refresh = repo.run(&["quota", "catalog", "refresh"]);
+    assert!(
+        initial_refresh.status.success(),
+        "stderr={}",
+        stderr_str(&initial_refresh)
+    );
+
+    let refresh = repo.run(&[
+        "quota",
+        "catalog",
+        "refresh",
+        "--if-stale",
+        "--max-age-hours",
+        "9999",
+    ]);
+    assert!(refresh.status.success(), "stderr={}", stderr_str(&refresh));
+    assert!(stdout_str(&refresh).contains("refreshed: false"));
+
+    let auto_off = repo.run(&["quota", "catalog", "auto", "off"]);
+    assert!(
+        auto_off.status.success(),
+        "stderr={}",
+        stderr_str(&auto_off)
+    );
+    assert!(stdout_str(&auto_off).contains("disabled"));
+}
+
+#[test]
 fn prompt_stats_json_reports_filter_savings() {
     let repo = TempRepo::new("cxrs-it");
     let log = repo.runs_log();
