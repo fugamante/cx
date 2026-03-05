@@ -1,4 +1,16 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
+
+pub mod fixture_http;
+pub mod json_contract;
+pub mod telemetry_helpers;
+
+pub use fixture_http::{FixtureHttpRequest, run_fixture_http_server_once};
+pub use json_contract::{
+    assert_actions_contract, assert_fixture_contract, assert_has_keys, fixture_keys,
+    load_fixture_json,
+};
+pub use telemetry_helpers::parse_labeled_u64;
 
 use serde_json::Value;
 use std::fs;

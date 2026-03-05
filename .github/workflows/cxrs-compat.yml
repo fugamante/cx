@@ -53,6 +53,16 @@ jobs:
           cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments
           cargo test --tests -- --test-threads=1
 
+      - name: Rust File Line Guardrail
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          ./rust/cxrs/scripts/check_rs_max_lines.sh 600 "$GITHUB_WORKSPACE"
+
+      - name: Integration Refactor Guardrails
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          ./rust/cxrs/scripts/check_integration_guardrails.sh "$GITHUB_WORKSPACE" 500
+
       - name: Reliability Suite
         run: |
           cd rust/cxrs

@@ -1,0 +1,5 @@
+rust/cxrs/src/modules/task_cmds.rs
+rust/cxrs/src/modules/diagnostics.rs
+rust/cxrs/src/modules/taskrun.rs
+rust/cxrs/src/modules/provider_adapter.rs
+rust/cxrs/tests/reliability_integration.rs
