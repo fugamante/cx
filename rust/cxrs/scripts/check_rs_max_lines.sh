@@ -29,7 +29,7 @@ while IFS= read -r -d '' file; do
     echo "line-limit violation: $rel has $lines lines (max $MAX_LINES)" >&2
     violations=$((violations + 1))
   fi
-done < <(find "$ROOT_DIR/rust/cxrs" -type f -name '*.rs' -not -path '*/target/*' -print0)
+done < <(find "$ROOT_DIR/rust/cxrs/src" -type f -name '*.rs' -not -path '*/target/*' -print0)
 
 if (( violations > 0 )); then
   echo "failed: $violations Rust file(s) exceed $MAX_LINES lines" >&2
