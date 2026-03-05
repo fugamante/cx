@@ -2,7 +2,6 @@ mod common;
 
 use common::*;
 use serde_json::Value;
-use std::fs;
 
 #[test]
 fn run_all_retries_timeout_then_succeeds_and_logs_attempts() {
@@ -141,9 +140,6 @@ fi
 #[test]
 fn diag_json_strict_fails_on_retry_recovery_degradation() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
-    let mut text = String::new();
     let rows = vec![
         serde_json::json!({
             "execution_id":"rr1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -176,11 +172,7 @@ fn diag_json_strict_fails_on_retry_recovery_degradation() {
             "retry_attempt":2,"timed_out":false
         }),
     ];
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&["diag", "--json", "--strict", "--window", "5"]);
     assert_eq!(
@@ -209,8 +201,6 @@ fn diag_json_strict_fails_on_retry_recovery_degradation() {
 #[test]
 fn optimize_json_includes_retry_health_metrics() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let rows = vec![
         serde_json::json!({
             "execution_id":"o1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -237,12 +227,7 @@ fn optimize_json_includes_retry_health_metrics() {
             "task_id":"task_002","retry_attempt":2,"timed_out":true
         }),
     ];
-    let mut text = String::new();
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&["optimize", "10", "--json"]);
     assert!(out.status.success(), "stderr={}", stderr_str(&out));
@@ -273,8 +258,6 @@ fn optimize_json_includes_retry_health_metrics() {
 #[test]
 fn optimize_recommendations_include_retry_actions_when_recovery_is_low() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let rows = vec![
         serde_json::json!({
             "execution_id":"or1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -301,12 +284,7 @@ fn optimize_recommendations_include_retry_actions_when_recovery_is_low() {
             "task_id":"task_102","retry_attempt":2,"timed_out":true
         }),
     ];
-    let mut text = String::new();
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&["optimize", "10", "--json"]);
     assert!(out.status.success(), "stderr={}", stderr_str(&out));

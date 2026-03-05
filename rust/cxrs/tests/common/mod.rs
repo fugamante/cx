@@ -205,6 +205,21 @@ pub fn read_json(path: &Path) -> Value {
     serde_json::from_str::<Value>(&text).expect("parse json")
 }
 
+pub fn write_runs_log_row(repo: &TempRepo, row: &Value) {
+    write_runs_log_rows(repo, std::slice::from_ref(row));
+}
+
+pub fn write_runs_log_rows(repo: &TempRepo, rows: &[Value]) {
+    let log = repo.runs_log();
+    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(&log, text).expect("write runs");
+}
+
 pub fn parse_jsonl(path: &Path) -> Vec<Value> {
     let mut text = None;
     for _ in 0..20 {

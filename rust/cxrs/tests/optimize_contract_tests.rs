@@ -2,22 +2,17 @@ mod common;
 
 use common::*;
 use serde_json::Value;
-use std::fs;
 
 #[test]
 fn optimize_json_matches_contract_fixture() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let row = serde_json::json!({
         "execution_id":"ofx1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
         "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
         "duration_ms":1000,"schema_enforced":false,"schema_valid":true,
         "retry_attempt":2,"timed_out":false
     });
-    let mut text = serde_json::to_string(&row).expect("serialize row");
-    text.push('\n');
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_row(&repo, &row);
 
     let out = repo.run(&["optimize", "10", "--json"]);
     assert!(out.status.success(), "stderr={}", stderr_str(&out));
@@ -46,8 +41,6 @@ fn optimize_json_matches_contract_fixture() {
 #[test]
 fn optimize_json_actions_match_contract_fixture() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let rows = vec![
         serde_json::json!({
             "execution_id":"oact1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -62,12 +55,7 @@ fn optimize_json_actions_match_contract_fixture() {
             "input_tokens":1000,"cached_input_tokens":5
         }),
     ];
-    let mut text = String::new();
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&["optimize", "10", "--json", "--actions"]);
     assert!(out.status.success(), "stderr={}", stderr_str(&out));
@@ -78,17 +66,13 @@ fn optimize_json_actions_match_contract_fixture() {
 #[test]
 fn optimize_actions_strict_severity_gate_is_deterministic() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let row = serde_json::json!({
         "execution_id":"ogate1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
         "backend_used":"codex","capture_provider":"native","execution_mode":"lean",
         "duration_ms":5000,"schema_enforced":false,"schema_valid":true,
         "input_tokens":1000,"cached_input_tokens":0
     });
-    let mut text = serde_json::to_string(&row).expect("serialize row");
-    text.push('\n');
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_row(&repo, &row);
 
     let warn = repo.run(&[
         "optimize",

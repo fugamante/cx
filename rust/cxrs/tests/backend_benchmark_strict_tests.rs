@@ -2,21 +2,16 @@ mod common;
 
 use common::*;
 use serde_json::Value;
-use std::fs;
 
 #[test]
 fn broker_benchmark_strict_fails_when_backend_samples_are_insufficient() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let row = serde_json::json!({
         "execution_id":"bs1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
         "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
         "duration_ms":1200,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
     });
-    let mut text = serde_json::to_string(&row).expect("serialize row");
-    text.push('\n');
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_row(&repo, &row);
 
     let out = repo.run(&[
         "broker",
@@ -65,8 +60,6 @@ fn broker_benchmark_strict_fails_when_backend_samples_are_insufficient() {
 #[test]
 fn broker_benchmark_strict_critical_allows_warn_only_violations() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let rows = vec![
         serde_json::json!({
             "execution_id":"bc1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -79,12 +72,7 @@ fn broker_benchmark_strict_critical_allows_warn_only_violations() {
             "duration_ms":1100,"schema_enforced":false,"schema_valid":true
         }),
     ];
-    let mut text = String::new();
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&[
         "broker",
@@ -113,8 +101,6 @@ fn broker_benchmark_strict_critical_allows_warn_only_violations() {
 #[test]
 fn broker_benchmark_strict_warn_fails_on_warn_violations() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
     let rows = vec![
         serde_json::json!({
             "execution_id":"bw1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
@@ -127,12 +113,7 @@ fn broker_benchmark_strict_warn_fails_on_warn_violations() {
             "duration_ms":950,"schema_enforced":false,"schema_valid":true
         }),
     ];
-    let mut text = String::new();
-    for row in rows {
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
-    }
-    fs::write(&log, text).expect("write runs");
+    write_runs_log_rows(&repo, &rows);
 
     let out = repo.run(&[
         "broker",

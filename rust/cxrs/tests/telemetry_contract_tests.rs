@@ -4,6 +4,14 @@ use common::*;
 use serde_json::Value;
 use std::fs;
 
+fn assert_actions_for_command(repo: &TempRepo, cmd: &[&str], rows: &[Value], ctx: &str) {
+    write_runs_log_rows(repo, rows);
+    let out = repo.run(cmd);
+    assert!(out.status.success(), "{ctx}: stderr={}", stderr_str(&out));
+    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("actions json");
+    assert_actions_contract(&payload);
+}
+
 #[test]
 fn logs_stats_and_telemetry_alias_report_population_and_drift() {
     let repo = TempRepo::new("cxrs-it");
@@ -425,45 +433,37 @@ fn diag_json_strict_passes_on_ok_severity() {
 #[test]
 fn diag_json_actions_match_contract_fixture() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
-    let mut text = String::new();
+    let mut rows = Vec::new();
     for i in 1..=4u64 {
-        let row = serde_json::json!({
+        rows.push(serde_json::json!({
             "execution_id":format!("diact{i}"),"timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
             "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
             "duration_ms":10 + i,"schema_enforced":false,"schema_valid":true,"queue_ms":2500 + i,"worker_id":"w1"
-        });
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
+        }));
     }
-    fs::write(&log, text).expect("write runs");
-
-    let out = repo.run(&["diag", "--json", "--actions", "--window", "4"]);
-    assert!(out.status.success(), "stderr={}", stderr_str(&out));
-    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("diag json");
-    assert_actions_contract(&payload);
+    assert_actions_for_command(
+        &repo,
+        &["diag", "--json", "--actions", "--window", "4"],
+        &rows,
+        "diag actions",
+    );
 }
 
 #[test]
 fn scheduler_json_actions_match_contract_fixture() {
     let repo = TempRepo::new("cxrs-it");
-    let log = repo.runs_log();
-    fs::create_dir_all(log.parent().expect("log parent")).expect("mkdir logs");
-    let mut text = String::new();
+    let mut rows = Vec::new();
     for i in 1..=4u64 {
-        let row = serde_json::json!({
+        rows.push(serde_json::json!({
             "execution_id":format!("schact{i}"),"timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
             "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
             "duration_ms":10 + i,"schema_enforced":false,"schema_valid":true,"queue_ms":2400 + i,"worker_id":"w1"
-        });
-        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
-        text.push('\n');
+        }));
     }
-    fs::write(&log, text).expect("write runs");
-
-    let out = repo.run(&["scheduler", "--json", "--actions", "--window", "4"]);
-    assert!(out.status.success(), "stderr={}", stderr_str(&out));
-    let payload: Value = serde_json::from_str(&stdout_str(&out)).expect("scheduler json");
-    assert_actions_contract(&payload);
+    assert_actions_for_command(
+        &repo,
+        &["scheduler", "--json", "--actions", "--window", "4"],
+        &rows,
+        "scheduler actions",
+    );
 }
