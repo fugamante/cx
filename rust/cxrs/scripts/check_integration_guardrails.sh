@@ -26,6 +26,16 @@ required_files=(
 
 violations=0
 
+has_line() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q -- "$pattern" "$file"
+  else
+    grep -Eq -- "$pattern" "$file"
+  fi
+}
+
 for file in "${required_files[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "guardrail violation: missing required test/helper file: ${file#$ROOT_DIR/}" >&2
@@ -40,11 +50,12 @@ while IFS= read -r -d '' file; do
     echo "guardrail violation: $rel has $lines lines (max $MAX_TEST_LINES)" >&2
     violations=$((violations + 1))
   fi
-  if ! rg -q '^mod common;$' "$file"; then
+  if ! has_line '^mod common;$' "$file"; then
     echo "guardrail violation: $rel must import 'mod common;'" >&2
     violations=$((violations + 1))
   fi
-  if rg -q '^\s*fn\s+.*\{\s*$' "$file" && ! rg -q '^\#\[test\]$' "$file"; then
+  if has_line '^[[:space:]]*fn[[:space:]]+.*\{[[:space:]]*$' "$file" \
+    && ! has_line '^\#\[test\]$' "$file"; then
     echo "guardrail warning: $rel has functions but no #[test] markers" >&2
   fi
 done < <(find "$TEST_DIR" -maxdepth 1 -type f -name '*_tests.rs' -print0)
