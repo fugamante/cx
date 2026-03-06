@@ -4,7 +4,6 @@ mod analytics_alert;
 mod analytics_profile_metrics;
 #[path = "analytics_prompt_stats.rs"]
 mod analytics_prompt_stats;
-#[path = "analytics_quota.rs"]
 mod analytics_quota;
 #[path = "analytics_shared.rs"]
 mod analytics_shared;
