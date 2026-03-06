@@ -29,11 +29,7 @@ violations=0
 has_line() {
   local pattern="$1"
   local file="$2"
-  if command -v rg >/dev/null 2>&1; then
-    rg -q -- "$pattern" "$file"
-  else
-    grep -Eq -- "$pattern" "$file"
-  fi
+  grep -Eq -- "$pattern" "$file"
 }
 
 for file in "${required_files[@]}"; do

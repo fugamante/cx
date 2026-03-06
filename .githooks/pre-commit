@@ -12,13 +12,25 @@ fi
 echo "pre-commit: running staged leak scan" >&2
 ./rust/cxrs/scripts/leak_scan.sh --staged
 
+has_manuals_changes() {
+  local names="$1"
+  printf '%s\n' "$names" | grep -Eq '^docs/manuals/'
+}
+
+has_non_build_manuals_changes() {
+  local names="$1"
+  printf '%s\n' "$names" | grep -Ev '^docs/manuals/99_build/' | grep -Eq '^docs/manuals/'
+}
+
+staged_names="$(git diff --cached --name-only)"
+
 # Only snapshot when manuals content is being committed.
-if ! git diff --cached --name-only | rg -q '^docs/manuals/' ; then
+if ! has_manuals_changes "$staged_names"; then
   exit 0
 fi
 
 # Ignore build artifacts if they are staged for some reason.
-if ! git diff --cached --name-only | rg -v '^docs/manuals/99_build/' | rg -q '^docs/manuals/' ; then
+if ! has_non_build_manuals_changes "$staged_names"; then
   exit 0
 fi
 

@@ -36,6 +36,20 @@ is_allowed_match() {
   return 1
 }
 
+find_matches() {
+  local pattern="$1"
+  local physical_path="$2"
+
+  CX_LEAK_PATTERN="$pattern" perl -ne '
+    our $re //= qr/$ENV{CX_LEAK_PATTERN}/;
+    if ($_ =~ $re) {
+      print $.;
+      print ":";
+      print $_;
+    }
+  ' "$physical_path"
+}
+
 scan_file_path() {
   local logical_file="$1"
   local physical_path="$2"
@@ -45,18 +59,17 @@ scan_file_path() {
     local check_name="${spec%%|*}"
     local pattern="${spec#*|}"
     local matches
-    matches="$(rg -n --pcre2 -e "$pattern" "$physical_path" || true)"
+    matches="$(find_matches "$pattern" "$physical_path" || true)"
     [[ -z "$matches" ]] && continue
 
     while IFS= read -r hit; do
       [[ -z "$hit" ]] && continue
+      local line_no="${hit%%:*}"
       local hit_line="${hit#*:}"
-      hit_line="${hit_line#*:}"
+      hit_line="${hit_line%$'\r'}"
       if is_allowed_match "$check_name" "$hit_line"; then
         continue
       fi
-      local line_no="${hit#*:}"
-      line_no="${line_no%%:*}"
       echo "${logical_file}:${line_no}:${hit_line}" >&2
       had_match=1
     done <<< "$matches"
