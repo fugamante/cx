@@ -398,6 +398,25 @@ Planned next migration focus:
 Design and schedule:
 - `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`
 
+## Validation
+
+Validation in `CX` means checking that structured outputs, logs, and runtime contracts remain consistent and machine-readable.
+
+Runtime validation:
+
+```bash
+./bin/cx doctor
+./bin/cx health
+./bin/cx logs validate --fix=false
+```
+
+What these cover:
+- `doctor` checks runtime prerequisites and repo-local wiring
+- `health` provides a lightweight runtime status check
+- `logs validate` scans `.codex/cxlogs/runs.jsonl` for JSON integrity and required telemetry fields
+
+Schema failures are quarantined under `.codex/quarantine/`, and invalid structured outputs are prevented from silently re-entering the pipeline.
+
 ## Maintainer Validation
 
 ```bash
