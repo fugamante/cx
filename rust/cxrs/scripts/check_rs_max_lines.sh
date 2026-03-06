@@ -10,20 +10,18 @@ if ! [[ "$MAX_LINES" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-declare -A ALLOW
-if [[ -f "$ALLOWLIST_FILE" ]]; then
-  while IFS= read -r line; do
-    [[ -z "$line" || "$line" =~ ^# ]] && continue
-    ALLOW["$line"]=1
-  done < "$ALLOWLIST_FILE"
-fi
+is_allowlisted() {
+  local rel="$1"
+  [[ -f "$ALLOWLIST_FILE" ]] || return 1
+  grep -Fqx -- "$rel" "$ALLOWLIST_FILE"
+}
 
 violations=0
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT_DIR/}"
   lines=$(wc -l < "$file" | tr -d ' ')
   if (( lines > MAX_LINES )); then
-    if [[ -n "${ALLOW[$rel]:-}" ]]; then
+    if is_allowlisted "$rel"; then
       continue
     fi
     echo "line-limit violation: $rel has $lines lines (max $MAX_LINES)" >&2
