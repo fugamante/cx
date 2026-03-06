@@ -39,9 +39,8 @@ ensure_seed_runlog() {
 JSONL
 }
 
-run_bash_cx() {
-  local cmd="$1"
-  bash -lc "source \"$REPO_ROOT/cx.sh\" >/dev/null 2>&1; $cmd"
+run_compat_cx() {
+  "$REPO_ROOT/bin/cx" "$@"
 }
 
 extract_profile_json() {
@@ -243,7 +242,7 @@ export CXALERT_MAX_EFF_IN="${CXALERT_MAX_EFF_IN:-5000}"
 ensure_seed_runlog
 
 echo "[compat] comparing metrics (N=$N)"
-run_bash_cx "cxmetrics $N" | norm_metrics > "$tmpdir/bash_metrics.json"
+run_compat_cx cxmetrics "$N" | norm_metrics > "$tmpdir/bash_metrics.json"
 cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- metrics "$N" | norm_metrics > "$tmpdir/rust_metrics.json"
 
 if ! diff -u "$tmpdir/bash_metrics.json" "$tmpdir/rust_metrics.json"; then
@@ -252,7 +251,7 @@ if ! diff -u "$tmpdir/bash_metrics.json" "$tmpdir/rust_metrics.json"; then
 fi
 
 echo "[compat] comparing profile (N=$N)"
-run_bash_cx "cxprofile $N" > "$tmpdir/bash_profile.txt"
+run_compat_cx cxprofile "$N" > "$tmpdir/bash_profile.txt"
 cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- profile "$N" \
   | sed '/^== cxrs profile/d;/^log_file:/d;/^$/d' > "$tmpdir/rust_profile.txt"
 
@@ -265,7 +264,7 @@ if ! diff -u "$tmpdir/bash_profile.json" "$tmpdir/rust_profile.json"; then
 fi
 
 echo "[compat] comparing trace (N=1)"
-run_bash_cx "cxtrace 1" > "$tmpdir/bash_trace.txt"
+run_compat_cx cxtrace 1 > "$tmpdir/bash_trace.txt"
 cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- trace 1 > "$tmpdir/rust_trace.txt"
 extract_trace_json "$tmpdir/bash_trace.txt" > "$tmpdir/bash_trace.json"
 extract_trace_json "$tmpdir/rust_trace.txt" > "$tmpdir/rust_trace.json"
@@ -275,7 +274,7 @@ if ! diff -u "$tmpdir/bash_trace.json" "$tmpdir/rust_trace.json"; then
 fi
 
 echo "[compat] comparing alert (N=$N)"
-run_bash_cx "cxalert $N" > "$tmpdir/bash_alert.txt"
+run_compat_cx cxalert "$N" > "$tmpdir/bash_alert.txt"
 cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- alert "$N" > "$tmpdir/rust_alert.txt"
 extract_alert_json "$tmpdir/bash_alert.txt" > "$tmpdir/bash_alert.json"
 extract_alert_json "$tmpdir/rust_alert.txt" > "$tmpdir/rust_alert.json"
@@ -285,7 +284,7 @@ if ! diff -u "$tmpdir/bash_alert.json" "$tmpdir/rust_alert.json"; then
 fi
 
 echo "[compat] comparing worklog (N=$N)"
-run_bash_cx "cxworklog $N" > "$tmpdir/bash_worklog.txt"
+run_compat_cx cxworklog "$N" > "$tmpdir/bash_worklog.txt"
 cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- worklog "$N" > "$tmpdir/rust_worklog.txt"
 extract_worklog_json "$tmpdir/bash_worklog.txt" > "$tmpdir/bash_worklog.json"
 extract_worklog_json "$tmpdir/rust_worklog.txt" > "$tmpdir/rust_worklog.json"

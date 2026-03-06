@@ -65,6 +65,17 @@ Primary toggles:
 - `SchemaJson` mode is intentionally guarded for structured-command handlers only
 - `bench`/`parity` support helpers are separated into `src/modules/bench_parity_support.rs` to keep command handlers focused and below function-size targets
 
+## User vs Maintainer Surface
+
+End users do not need the full test suite for normal product usage.
+
+- Normal runtime usage: `cx`, `cxrs`, `doctor`, `health`, schema commands, task commands
+- Lightweight runtime verification: `cx doctor`, `cx health`
+- Maintainer-only validation: `cargo test`, `compat-check`, `parity-check`, CI guardrails
+
+The shipped runtime does not run the full test suite during normal command execution.
+Tests and guardrails are for development, CI, and release confidence.
+
 ## Build
 
 ```bash
@@ -115,6 +126,13 @@ make install
 ~/.local/bin/cxrs version
 ```
 
+Quick runtime verification after install:
+
+```bash
+cd rust/cxrs
+make runtime-check
+```
+
 Development wrapper (uses release binary when present, otherwise `cargo run`):
 
 ```bash
@@ -151,6 +169,24 @@ GitHub Actions:
 Capture provider:
 - Native internal capture/reduction path only.
 - Optional tuning: `CX_NATIVE_REDUCE=1|0` and `CX_CAPTURE_PROFILE=fast|balanced|deep`.
+
+## Development vs Runtime Requirements
+
+Runtime users need only the runtime dependencies listed above plus either:
+- an installed `cxrs` binary, or
+- the repo checkout with `bin/cx`
+
+Maintainers additionally need:
+- Rust toolchain
+- Python 3
+- `make`
+- the full CI/test surface when changing code
+
+Runtime users do not need:
+- `cargo test`
+- compatibility/parity scripts
+- CI guardrail scripts
+- contributor-only validation fixtures under `tests/`
 
 ## Codex access and session modes
 

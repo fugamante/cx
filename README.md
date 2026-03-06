@@ -14,6 +14,17 @@ Project naming note:
 - Safety layer for command execution boundaries and policy visibility (`policy show`)
 - Backend model: Codex by default, Ollama optional/user-selectable
 
+## Runtime vs Development
+
+For normal users, `CX` is a runtime tool, not a test harness.
+
+- Normal usage does not run the full Rust test suite.
+- Shell startup does not run tests.
+- Runtime verification is through `./bin/cx doctor` and `./bin/cx health`.
+- The full suite (`cargo test`, compat checks, guardrails, CI contract checks) is maintainer-only.
+
+This separation is intentional: end users should get the runtime, while contributors and CI carry the validation load.
+
 ## Technical Exposé (Rust Refactor Snapshot)
 
 This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
@@ -143,12 +154,23 @@ cat VERSION
 
 Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible builds.
 
+Development-only note:
+- The `Development / CI` dependencies are for contributors and release validation.
+- End users do not need to run `cargo test` or guardrail scripts to use `CX`.
+
 ## Quick Start
 ```bash
 cd <repo-root>
 ./bin/cx version
 ./bin/cx core
 ./bin/cx cxo git status
+```
+
+Quick runtime verification:
+
+```bash
+./bin/cx doctor
+./bin/cx health
 ```
 
 ## Lean Daily Session
@@ -378,6 +400,25 @@ Design and schedule:
 
 ## Validation
 
+Validation in `CX` means checking that structured outputs, logs, and runtime contracts remain consistent and machine-readable.
+
+Runtime validation:
+
+```bash
+./bin/cx doctor
+./bin/cx health
+./bin/cx logs validate --fix=false
+```
+
+What these cover:
+- `doctor` checks runtime prerequisites and repo-local wiring
+- `health` provides a lightweight runtime status check
+- `logs validate` scans `.codex/cxlogs/runs.jsonl` for JSON integrity and required telemetry fields
+
+Schema failures are quarantined under `.codex/quarantine/`, and invalid structured outputs are prevented from silently re-entering the pipeline.
+
+## Maintainer Validation
+
 ```bash
 cd rust/cxrs
 cargo fmt
@@ -400,6 +441,8 @@ Local push guardrails:
 # pre-push scans tracked content, then enforces fmt + clippy + tests
 git push
 ```
+
+These checks are for development and CI. They are not part of ordinary end-user runtime execution.
 
 ## Notes
 

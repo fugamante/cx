@@ -12,17 +12,16 @@ fail() {
 has_line() {
   local pattern="$1"
   local text="$2"
-  if command -v rg >/dev/null 2>&1; then
-    printf '%s\n' "$text" | rg -q "$pattern"
-  else
-    printf '%s\n' "$text" | grep -Eq "$pattern"
-  fi
+  printf '%s\n' "$text" | grep -Eq "$pattern"
 }
 
-where_out="$(./bin/cx where cxversion _cx_git_root 2>/dev/null)" || fail "bin/cx where failed"
+where_out="$(./bin/cx where cxversion cxo _cx_git_root 2>/dev/null)" || fail "bin/cx where failed"
 has_line '^== cxwhere ==$' "$where_out" || fail "where missing heading"
 has_line '^bin_cx: ' "$where_out" || fail "where missing bin_cx"
 has_line '^repo_root: ' "$where_out" || fail "where missing repo_root"
+has_line '^- cxversion: route=rust ' "$where_out" || fail "where missing rust route for cxversion"
+has_line '^- cxo: route=rust ' "$where_out" || fail "where missing rust route for cxo"
+has_line '^- _cx_git_root: route=unknown' "$where_out" || fail "where missing unknown route for internal helper"
 
 
 diag_out="$(./bin/cx diag 2>/dev/null)" || fail "bin/cx diag failed"
