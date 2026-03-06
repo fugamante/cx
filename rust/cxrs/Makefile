@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build release install check fmt compat-check parity-check quality
+.PHONY: build release install check fmt compat-check parity-check quality runtime-check
 
 fmt:
 	cargo fmt
@@ -20,6 +20,10 @@ install: release
 	cp target/release/cxrs "$(BINDIR)/cxrs"
 	chmod +x "$(BINDIR)/cxrs"
 	@echo "installed: $(BINDIR)/cxrs"
+
+runtime-check:
+	cargo run -- version
+	cargo run -- doctor
 
 compat-check:
 	./scripts/compat_check.sh $(N)
