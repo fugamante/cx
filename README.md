@@ -25,6 +25,9 @@ For normal users, `CX` is a runtime tool, not a test harness.
 
 This separation is intentional: end users should get the runtime, while contributors and CI carry the validation load.
 
+Demo note:
+- This line is used only for live workflow validation in the local branch.
+
 ## Technical Exposé (Rust Refactor Snapshot)
 
 This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
