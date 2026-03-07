@@ -181,7 +181,7 @@ fn run_bash_case(row: &mut ParityRow, ctx: &ParityEvalCtx<'_>, case: &ParityCase
     let before_bash = file_len(ctx.temp_log_file);
     let bash_cmd = format!(
         "source '{}' >/dev/null 2>&1; {} {}",
-        ctx.repo.join("cx.sh").display(),
+        ctx.repo.join("lib").join("cx.sh").display(),
         case.cmd,
         case.args.join(" ")
     );

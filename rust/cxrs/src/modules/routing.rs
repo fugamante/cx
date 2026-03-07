@@ -111,7 +111,7 @@ const ROUTE_NAMES: &[&str] = &[
 ];
 
 pub fn bash_type_of_function(repo: &Path, name: &str) -> Option<String> {
-    let cx_sh = repo.join("cx.sh");
+    let cx_sh = repo.join("lib").join("cx.sh");
     let cmd = format!(
         "source '{}' >/dev/null 2>&1; type -a {} 2>/dev/null",
         cx_sh.display(),
@@ -255,7 +255,7 @@ pub fn print_where(cmds: &[String], app_version: &str) -> i32 {
 }
 
 pub fn bash_function_names(repo: &Path) -> Vec<String> {
-    let cx_sh = repo.join("cx.sh");
+    let cx_sh = repo.join("lib").join("cx.sh");
     let cmd = format!(
         "source '{}' >/dev/null 2>&1; declare -F | awk '{{print $3}}'",
         cx_sh.display()

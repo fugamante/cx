@@ -6,7 +6,8 @@ Scope: entire `CX` project
 ## 1) Policy (effective now)
 
 - New feature work is implemented in `rust/cxrs` first.
-- Bash (`cx.sh`, `lib/cx/*.sh`) is compatibility/bootstrap only.
+- Bash (`lib/cx.sh`) is compatibility/bootstrap only.
+- Root `cx.sh` is a deprecated compatibility anchor retained for transition.
 - Codex remains default backend; Ollama remains optional alternative.
 - No automatic checks on shell startup.
 - Preserve stdout pipeline safety; diagnostics to stderr.
