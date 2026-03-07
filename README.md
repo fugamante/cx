@@ -98,6 +98,7 @@ Structured commands are schema-enforced from `.codex/schemas/` and deterministic
 - `rust/cxrs/src/main.rs` - module entrypoint
 - `rust/cxrs/src/app/mod.rs` - command routing/orchestration
 - `rust/cxrs/src/modules/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
+- `cx.sh` - deprecated compatibility loader (sources `lib/cx.sh`)
 - `lib/cx.sh` - thin shell shim that delegates to `bin/cx`
 - `.codex/schemas/` - JSON schema registry
 - `.codex/cxlogs/` - run + schema failure logs (runtime)
