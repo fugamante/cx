@@ -106,6 +106,7 @@ struct StatsComputed {
     new_in_second: Vec<String>,
     missing_in_second: Vec<String>,
     severity: &'static str,
+    normalization: NormalizationStats,
     retry: RetryStats,
     critical: CriticalStats,
     http_mode_stats: Vec<HttpModeStat>,
@@ -141,6 +142,13 @@ struct HttpModeStat {
     timed_out: usize,
     policy_blocked: usize,
     healthy_runs: usize,
+}
+
+#[derive(Debug, Default, Clone)]
+struct NormalizationStats {
+    modern_rows: usize,
+    legacy_rows: usize,
+    migrated_legacy_rows: usize,
 }
 
 fn severity_label(strict_violations: usize, new_keys: usize, missing_keys: usize) -> &'static str {
@@ -180,6 +188,7 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         new_in_second.len(),
         missing_in_second.len(),
     );
+    let normalization = compute_normalization_stats(rows);
     let retry = compute_retry_stats(rows);
     let critical = compute_critical_stats(rows);
     let http_mode_stats = compute_http_mode_stats(rows);
@@ -189,9 +198,41 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         new_in_second,
         missing_in_second,
         severity,
+        normalization,
         retry,
         critical,
         http_mode_stats,
+    }
+}
+
+fn compute_normalization_stats(rows: &[Value]) -> NormalizationStats {
+    let mut modern_rows = 0usize;
+    let mut legacy_rows = 0usize;
+    let mut migrated_legacy_rows = 0usize;
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        let has_strict_fields = REQUIRED_STRICT_FIELDS
+            .iter()
+            .all(|field| obj.contains_key(*field));
+        if has_strict_fields {
+            modern_rows += 1;
+        } else {
+            legacy_rows += 1;
+        }
+        let mode = obj
+            .get("execution_mode")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if mode.starts_with("legacy") {
+            migrated_legacy_rows += 1;
+        }
+    }
+    NormalizationStats {
+        modern_rows,
+        legacy_rows,
+        migrated_legacy_rows,
     }
 }
 
@@ -378,6 +419,18 @@ fn print_stats_human(
     println!("required_fields: {}", REQUIRED_STRICT_FIELDS.len());
     println!("severity: {}", stats.severity);
     println!("strict_violations: {}", stats.strict_violations);
+    println!("normalization:");
+    println!("- modern_rows: {}", stats.normalization.modern_rows);
+    println!("- legacy_rows: {}", stats.normalization.legacy_rows);
+    println!(
+        "- migrated_legacy_rows: {}",
+        stats.normalization.migrated_legacy_rows
+    );
+    if stats.normalization.legacy_rows > 0 {
+        println!("- recommendation: run `cx logs migrate` to normalize legacy rows");
+    } else {
+        println!("- recommendation: none");
+    }
     if severity_only {
         return;
     }
@@ -494,6 +547,16 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
         "required_fields": REQUIRED_STRICT_FIELDS.len(),
         "severity": stats.severity,
         "strict_violations": stats.strict_violations,
+        "normalization": {
+            "modern_rows": stats.normalization.modern_rows,
+            "legacy_rows": stats.normalization.legacy_rows,
+            "migrated_legacy_rows": stats.normalization.migrated_legacy_rows,
+            "recommendation": if stats.normalization.legacy_rows > 0 {
+                "run `cx logs migrate`"
+            } else {
+                "none"
+            }
+        },
         "fields": fields,
         "contract_drift": {
             "new_keys_second_half": stats.new_in_second,

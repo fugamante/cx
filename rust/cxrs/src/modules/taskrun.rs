@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::capture::{BudgetConfig, clip_text_with_config};
+use crate::config::app_config;
 use crate::logs::file_len;
 use crate::paths::resolve_log_file;
 use crate::runlog::{RunLogInput, log_codex_run};
@@ -67,16 +69,63 @@ fn command_status_or_usage(run: fn(&[String]) -> i32, args: &[String]) -> i32 {
     if args.is_empty() { 2 } else { run(args) }
 }
 
+fn env_usize(name: &str, default: usize) -> usize {
+    env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(default)
+}
+
+fn clip_for_prompt(input: &str, max_chars: usize, max_lines: usize) -> String {
+    let cfg = BudgetConfig {
+        budget_chars: max_chars.max(1),
+        budget_lines: max_lines.max(1),
+        clip_mode: "smart".to_string(),
+        clip_footer: false,
+    };
+    let (clipped, _) = clip_text_with_config(input, &cfg);
+    clipped
+}
+
+fn compact_prompt_text(input: &str) -> String {
+    input
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 fn task_prompt(task: &TaskRecord) -> String {
-    if task.context_ref.trim().is_empty() {
+    let cfg = app_config();
+    let objective_chars = env_usize("CX_TASK_OBJECTIVE_MAX_CHARS", cfg.budget_chars.min(3000));
+    let objective_lines = env_usize("CX_TASK_OBJECTIVE_MAX_LINES", cfg.budget_lines.min(120));
+    let context_chars = env_usize(
+        "CX_TASK_CONTEXT_MAX_CHARS",
+        cfg.budget_chars.saturating_mul(2).min(6000),
+    );
+    let context_lines = env_usize("CX_TASK_CONTEXT_MAX_LINES", cfg.budget_lines.min(180));
+    let objective = compact_prompt_text(&clip_for_prompt(
+        task.objective.trim(),
+        objective_chars,
+        objective_lines,
+    ));
+    let context = compact_prompt_text(&clip_for_prompt(
+        task.context_ref.trim(),
+        context_chars,
+        context_lines,
+    ));
+    if context.is_empty() {
         return format!(
             "Task Objective:\n{}\n\nRespond with concise execution notes and next actions.",
-            task.objective
+            objective
         );
     }
     format!(
         "Task Objective:\n{}\n\nContext Ref:\n{}\n\nRespond with concise execution notes and next actions.",
-        task.objective, task.context_ref
+        objective, context
     )
 }
 
@@ -783,5 +832,37 @@ mod tests {
     fn winner_judge_breaks_tie_by_lowest_index() {
         let winner = select_winner("judge", &[out(2, 1), out(1, 1)]);
         assert_eq!(winner.index, 1);
+    }
+
+    #[test]
+    fn task_prompt_clips_context() {
+        let t = TaskRecord {
+            id: "task_001".to_string(),
+            parent_id: None,
+            role: "implementer".to_string(),
+            objective: "Do something useful".to_string(),
+            context_ref: (0..600)
+                .map(|i| format!("line-{i}"))
+                .collect::<Vec<String>>()
+                .join("\n"),
+            status: "pending".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            backend: "auto".to_string(),
+            model: None,
+            profile: "balanced".to_string(),
+            converge: "none".to_string(),
+            replicas: 1,
+            max_concurrency: None,
+            run_mode: "sequential".to_string(),
+            depends_on: Vec::new(),
+            resource_keys: Vec::new(),
+            max_retries: None,
+            timeout_secs: None,
+        };
+        let prompt = task_prompt(&t);
+        assert!(prompt.contains("Task Objective:"));
+        assert!(prompt.contains("Context Ref:"));
+        assert!(prompt.len() < t.context_ref.len() + 200);
     }
 }
