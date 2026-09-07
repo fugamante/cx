@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import importlib.util
 import io
 import json
+import os
+import stat
 import subprocess
 import sys
 import tarfile
@@ -211,6 +214,240 @@ class PackageSigningTests(unittest.TestCase):
         self.assertEqual(provenance["notarization"]["submission_id"], job)
         self.assertNotIn("team", provenance["signing"])
 
+    def _inventory(self, name: str = "staged") -> tuple[Path, dict[str, str]]:
+        staged = self.base / name
+        staged.mkdir()
+        for entry in ("a", "b"):
+            (staged / entry).write_text(entry, encoding="utf-8")
+        return staged, {
+            entry: sign_packages.sha256_file(staged / entry) for entry in ("a", "b")
+        }
+
+    def test_publish_inventory_refuses_existing_destination(self) -> None:
+        staged, expected = self._inventory()
+        output = self.base / "published"
+        output.mkdir()
+        collision = output / "operator-file"
+        collision.write_text("operator-owned\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(sign_packages.SignError, "refusing to overwrite"):
+            sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertEqual(collision.read_text(encoding="utf-8"), "operator-owned\n")
+        self.assertEqual({path.name for path in staged.iterdir()}, set(expected))
+
+    def test_publish_inventory_refuses_dangling_destination_symlink(self) -> None:
+        staged, expected = self._inventory("staged-symlink")
+        output = self.base / "published-symlink"
+        output.symlink_to(self.base / "missing-target")
+
+        with self.assertRaisesRegex(sign_packages.SignError, "refusing to overwrite"):
+            sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertTrue(output.is_symlink())
+        self.assertEqual({path.name for path in staged.iterdir()}, set(expected))
+
+    def test_publish_inventory_refuses_racing_destination(self) -> None:
+        staged, expected = self._inventory("staged-race")
+        output = self.base / "published-race"
+        real_commit = sign_packages._commit_inventory
+
+        def racing_commit(source, source_fd, destination):
+            destination.mkdir()
+            (destination / "operator-file").write_text(
+                "operator-owned\n", encoding="utf-8"
+            )
+            return real_commit(source, source_fd, destination)
+
+        with mock.patch.object(
+            sign_packages, "_commit_inventory", side_effect=racing_commit
+        ):
+            with self.assertRaisesRegex(sign_packages.SignError, "refusing to overwrite"):
+                sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertEqual(
+            (output / "operator-file").read_text(encoding="utf-8"), "operator-owned\n"
+        )
+        self.assertEqual({path.name for path in staged.iterdir()}, set(expected))
+
+    def test_publish_inventory_preserves_recovery_on_commit_failures(self) -> None:
+        failures = (
+            (errno.EIO, "fixture I/O failure"),
+            (errno.ENOSPC, "fixture space failure"),
+            (errno.ENOTSUP, "fixture unsupported failure"),
+            (errno.EACCES, "fixture permission failure"),
+        )
+        for error, detail in failures:
+            with self.subTest(error=error):
+                staged, expected = self._inventory(f"staged-{error}")
+                output = self.base / f"published-{error}"
+                with mock.patch.object(
+                    sign_packages,
+                    "_commit_inventory",
+                    side_effect=OSError(error, detail),
+                ):
+                    with self.assertRaisesRegex(sign_packages.SignError, detail):
+                        sign_packages._publish_inventory(staged, output, expected)
+
+                self.assertFalse(output.exists())
+                self.assertEqual({path.name for path in staged.iterdir()}, set(expected))
+                self.assertEqual(staged.stat().st_mode & 0o777, 0o500)
+
+    def test_publish_inventory_permission_failure_is_precommit(self) -> None:
+        staged, expected = self._inventory("staged-mode-failure")
+        output = self.base / "published-mode-failure"
+        real_fchmod = sign_packages.os.fchmod
+
+        def failing_fchmod(fd, mode):
+            if mode == 0o400:
+                raise OSError(errno.EIO, "fixture mode failure")
+            real_fchmod(fd, mode)
+
+        with mock.patch.object(sign_packages.os, "fchmod", side_effect=failing_fchmod):
+            with self.assertRaisesRegex(sign_packages.SignError, "fixture mode failure"):
+                sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertFalse(output.exists())
+        self.assertEqual({path.name for path in staged.iterdir()}, set(expected))
+
+    def test_publish_inventory_blocks_replacement_at_final_transition(self) -> None:
+        staged, expected = self._inventory("staged-replace")
+        output = self.base / "published-replace"
+        real_commit = sign_packages._commit_inventory
+        replacement_blocked = False
+
+        def replacing_commit(source, source_fd, destination):
+            nonlocal replacement_blocked
+            try:
+                (Path(source) / "a").write_text("replacement", encoding="utf-8")
+            except PermissionError:
+                replacement_blocked = True
+            return real_commit(source, source_fd, destination)
+
+        with mock.patch.object(
+            sign_packages, "_commit_inventory", side_effect=replacing_commit
+        ):
+            sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertTrue(replacement_blocked)
+        self.assertEqual(staged.exists(), sys.platform == "darwin")
+        self.assertEqual((output / "a").read_text(encoding="utf-8"), "a")
+
+    def test_publish_inventory_seals_before_child_transitions(self) -> None:
+        staged, expected = self._inventory("staged-child-race")
+        output = self.base / "published-child-race"
+        real_fchmod = sign_packages.os.fchmod
+        attempted = False
+
+        def racing_fchmod(fd, mode):
+            nonlocal attempted
+            real_fchmod(fd, mode)
+            if mode == 0o400 and not attempted:
+                attempted = True
+                with self.assertRaises(PermissionError):
+                    (staged / "b").replace(staged / "replacement")
+
+        with mock.patch.object(sign_packages.os, "fchmod", side_effect=racing_fchmod):
+            sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertTrue(attempted)
+        self.assertEqual({path.name for path in output.iterdir()}, set(expected))
+
+    def test_publish_inventory_rejects_replacement_before_sealing(self) -> None:
+        staged, expected = self._inventory("staged-early-replace")
+        (staged / "a").write_text("replacement", encoding="utf-8")
+
+        with self.assertRaisesRegex(sign_packages.SignError, "changed after finalization: a"):
+            sign_packages._publish_inventory(staged, self.base / "unused", expected)
+
+        self.assertFalse((self.base / "unused").exists())
+        self.assertEqual((staged / "a").read_text(encoding="utf-8"), "replacement")
+
+    def test_publish_inventory_rejects_unexpected_and_nonregular_entries(self) -> None:
+        staged, expected = self._inventory("staged-invalid")
+        (staged / "extra").write_text("extra", encoding="utf-8")
+        with self.assertRaisesRegex(sign_packages.SignError, "expected names"):
+            sign_packages._publish_inventory(staged, self.base / "unused", expected)
+
+        staged.chmod(0o700)
+        (staged / "extra").unlink()
+        (staged / "a").unlink()
+        (staged / "a").symlink_to("missing")
+        with self.assertRaisesRegex(sign_packages.SignError, "not a regular file: a"):
+            sign_packages._publish_inventory(staged, self.base / "unused", expected)
+
+    def test_publish_inventory_moves_complete_sealed_inventory(self) -> None:
+        staged, expected = self._inventory("staged-complete")
+        output = self.base / "published-complete"
+
+        retained = sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertEqual(retained, sys.platform == "darwin")
+        self.assertEqual(staged.exists(), retained)
+        self.assertEqual({path.name for path in output.iterdir()}, set(expected))
+        self.assertEqual(output.stat().st_mode & 0o777, 0o500)
+        self.assertTrue(all(path.stat().st_mode & 0o777 == 0o400 for path in output.iterdir()))
+
+    def test_darwin_publication_uses_bound_source_not_replacement_path(self) -> None:
+        staged, expected = self._inventory("staged-bound")
+        output = self.base / "published-bound"
+        original = self.base / "original-bound"
+
+        def clone_bound(source_fd, parent_fd, destination_name):
+            staged.chmod(0o700)
+            staged.rename(original)
+            staged.mkdir()
+            (staged / "operator-file").write_text("survives\n", encoding="utf-8")
+            destination = self.base / destination_name
+            destination.mkdir(mode=0o700)
+            for name in sorted(os.listdir(source_fd)):
+                file_fd = os.open(name, os.O_RDONLY, dir_fd=source_fd)
+                try:
+                    data = os.read(file_fd, 1024)
+                finally:
+                    os.close(file_fd)
+                target = destination / name
+                target.write_bytes(data)
+                target.chmod(0o400)
+            destination.chmod(0o500)
+
+        with (
+            mock.patch.object(sign_packages.sys, "platform", "darwin"),
+            mock.patch.object(sign_packages, "_clone_exclusive", side_effect=clone_bound),
+        ):
+            retained = sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertTrue(retained)
+        self.assertEqual((output / "a").read_text(encoding="utf-8"), "a")
+        self.assertEqual((staged / "operator-file").read_text(encoding="utf-8"), "survives\n")
+        self.assertEqual({path.name for path in original.iterdir()}, set(expected))
+
+    def test_read_descriptor_close_error_cannot_hide_commit(self) -> None:
+        staged, expected = self._inventory("staged-close")
+        output = self.base / "published-close"
+        real_close = os.close
+
+        def close_with_directory_error(fd):
+            is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+            real_close(fd)
+            if is_directory:
+                raise OSError(errno.EIO, "fixture close failure")
+
+        with mock.patch.object(sign_packages.os, "close", side_effect=close_with_directory_error):
+            retained = sign_packages._publish_inventory(staged, output, expected)
+
+        self.assertEqual(retained, sys.platform == "darwin")
+        self.assertTrue(output.is_dir())
+        self.assertEqual({path.name for path in output.iterdir()}, set(expected))
+
+    def test_publish_inventory_unsupported_platform_fails_closed(self) -> None:
+        staged = self.base / "staged"
+        output = self.base / "published"
+        staged.mkdir()
+        with mock.patch.object(sign_packages.sys, "platform", "unsupported"):
+            with self.assertRaisesRegex(OSError, "exclusive rename is unsupported"):
+                sign_packages._move_exclusive(staged, output)
+
     def test_preflight_requires_both_targets_and_explicit_identifier(self) -> None:
         arm = sign_packages.load_package(
             self.build("aarch64-apple-darwin", self.base / "arm")
@@ -240,6 +477,66 @@ class PackageSigningTests(unittest.TestCase):
         with mock.patch.object(sign_packages, "_tool_ready", return_value=True):
             with self.assertRaisesRegex(sign_packages.SignError, "confirm-profile-team"):
                 sign_packages.execute(args)
+
+    def _run_args(self, output: Path) -> argparse.Namespace:
+        return argparse.Namespace(
+            command="run",
+            archives=[
+                self.build("aarch64-apple-darwin", self.base / "arm-run"),
+                self.build("x86_64-apple-darwin", self.base / "intel-run"),
+            ],
+            identifier="io.example.xshelf",
+            identity="a" * 40,
+            keychain_profile="fixture-profile",
+            confirm_profile_team=True,
+            wait_timeout="30m",
+            output_dir=output,
+        )
+
+    def test_execute_preserves_original_prepublication_failure(self) -> None:
+        output = self.base / "failed-output"
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(sign_packages, "_tool_ready", return_value=True),
+            mock.patch.object(sign_packages, "run"),
+            mock.patch.object(
+                sign_packages, "_binary", side_effect=sign_packages.SignError("fixture failure")
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            with self.assertRaisesRegex(sign_packages.SignError, "fixture failure"):
+                sign_packages.execute(self._run_args(output))
+
+        self.assertFalse(output.exists())
+        self.assertIn("restricted recovery evidence was preserved", stderr.getvalue())
+
+    def test_execute_distinguishes_postpublication_cleanup_failure(self) -> None:
+        output = self.base / "published-output"
+        stderr = io.StringIO()
+        signature = sign_packages.Signature("c" * 40, "io.example.xshelf", "fixture-team")
+
+        with (
+            mock.patch.object(sign_packages, "_tool_ready", return_value=True),
+            mock.patch.object(sign_packages, "run"),
+            mock.patch.object(sign_packages, "_binary", return_value=b"signed executable"),
+            mock.patch.object(sign_packages, "sign_binary", return_value=signature),
+            mock.patch.object(sign_packages, "submit", return_value="fixture-submission"),
+            mock.patch.object(
+                sign_packages.shutil,
+                "rmtree",
+                side_effect=OSError(errno.EIO, "fixture cleanup failure"),
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            with self.assertRaisesRegex(OSError, "fixture cleanup failure"):
+                sign_packages.execute(self._run_args(output))
+
+        self.assertTrue(output.is_dir())
+        self.assertEqual(len(list(output.iterdir())), 7)
+        self.assertIn(f"inventory published at {output.resolve()}", stderr.getvalue())
+        self.assertIn("temporary cleanup is incomplete", stderr.getvalue())
+        if sys.platform == "darwin":
+            self.assertIn("sealed source inventory retained", stderr.getvalue())
 
     def test_codesign_evidence_requires_runtime_and_timestamp(self) -> None:
         details = "\n".join(
