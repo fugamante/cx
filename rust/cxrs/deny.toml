@@ -5,10 +5,15 @@ yanked = "deny"
 [licenses]
 allow = [
   "MIT",
+  "MIT-0",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
   "Unicode-3.0",
   "Unlicense",
+  "Zlib",
 ]
 confidence-threshold = 0.8
 

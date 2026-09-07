@@ -1,7 +1,5 @@
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::PathBuf;
 
 use crate::contract_versions::{
     ACTIONS_JSON_CONTRACT_VERSION, BROKER_BENCHMARK_JSON_CONTRACT_VERSION,
@@ -254,28 +252,21 @@ fn bundle_value(app_version: &str, profile: &str, specs: &[ContractSpec]) -> Val
     bundle
 }
 
-fn fixture_path(profile: &str) -> Option<PathBuf> {
+fn fixture_text(profile: &str) -> Option<&'static str> {
     match profile {
-        "eval-lab" => {
-            let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            path.push("tests");
-            path.push("fixtures");
-            path.push("eval_lab_bundle.json");
-            Some(path)
-        }
+        "eval-lab" => Some(include_str!("../../tests/fixtures/eval_lab_bundle.json")),
         _ => None,
     }
 }
 
 fn load_fixture_manifest(profile: &str) -> Result<Value, String> {
-    let Some(path) = fixture_path(profile) else {
+    let Some(content) = fixture_text(profile) else {
         return Err(format!(
             "no fixture-backed contract bundle for profile '{profile}'"
         ));
     };
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    serde_json::from_str(&content).map_err(|e| format!("failed to parse {}: {e}", path.display()))
+    serde_json::from_str(content)
+        .map_err(|e| format!("failed to parse embedded contract fixture: {e}"))
 }
 
 fn diff_string_arrays(left: &[String], right: &[String]) -> Vec<String> {

@@ -613,6 +613,11 @@ fn diag_json_matches_contract_fixture() {
                 "adapter_rollout_policy_keys",
                 "diag.adapter_rollout_policy",
             ),
+            (
+                "operator_context",
+                "operator_context_keys",
+                "diag.operator_context",
+            ),
             ("routing_trace", "routing_trace_keys", "diag.routing_trace"),
             ("scheduler", "scheduler_keys", "diag.scheduler"),
             (

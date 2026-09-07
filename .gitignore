@@ -3,6 +3,7 @@
 !.cx/schemas/*.json
 PROJECT_CONTEXT.md
 *.swp
+__pycache__/
 .DS_Store
 docs/CX_MANUAL*
 docs/CX_DESIGN_CONTRACT.md

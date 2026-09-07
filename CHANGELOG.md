@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Release Index
 
+- `v2026.08.29` (2026-08-29): Fail-closed Developer ID signing, Apple notarization, and Homebrew publication controls.
+- `v2026.08.25` (2026-08-25): Native macOS CLI packaging, deterministic archive provenance, and isolated Homebrew lifecycle validation.
+- `v2026.08.20` (2026-08-20): Phase XI capture-reduction reliability and linked-worktree Docker validation parity.
+- `v2026.08.12` (2026-08-12): process cleanup and provider health reliability, cached integration portability, release-status validation, and JSON Schema dependency maintenance.
+- `v2026.07.27` (2026-07-27): run-log relocation control, local-model registry integrity, and contract corpus reconciliation.
+- `v2026.06.29` (2026-06-29): XSHELF rename rollout, local-model substrate, token-compression wiring, HTTP adapter hardening, Docker compatibility bootstrap, and capture telemetry readiness.
 - `v2026.03.05` (2026-03-05): Phase V closure release with contract freeze markers and compatibility policy.
 - `v2026.02.21` (2026-02-20): schema extraction hardening, strict routing, bootstrap reliability baseline.
 - `v2026.02.21-20260225T151634Z` (2026-02-25): manuals/docs snapshot and migration milestone.
@@ -13,6 +19,206 @@ Notes:
 - This file tracks rolling changes under `Unreleased` until the next tagged release.
 
 ## [Unreleased]
+
+### Fixed
+- Release signing now binds the exact seven-file signed-artifact inventory by
+  SHA-256 and publishes it as one sealed directory via an exclusive atomic
+  transition. Linux uses an exclusive rename; macOS uses a descriptor-bound
+  directory clone so sealed inventories also publish on older native Intel
+  hosts without trusting or deleting the staged pathname. The final inventory
+  path must be absent; late collisions and I/O failures preserve the complete
+  restricted staging inventory without child-path cleanup or partial output.
+
+## [v2026.08.29] - 2026-08-29
+
+### Added
+- A fail-closed macOS release-signing pipeline that validates immutable input
+  archives, signs only the packaged Mach-O executables with a pinned Developer
+  ID Application certificate, submits exact ZIP payloads to Apple, and records
+  sanitized notarization evidence before emitting signed archives.
+- Focused signing tests and operator documentation covering archive safety,
+  identity pinning, receipt preservation, Apple-log validation, and the
+  standalone-CLI limitation that notarization tickets cannot be stapled.
+- A version-derived native Intel workflow path so release evidence remains
+  aligned with the current machine-readable version.
+
+### Changed
+- Published two Developer ID signed and Apple-notarized native macOS archives,
+  their combined `SHA256SUMS`, and sanitized notarization evidence from exact
+  source `b8ea981b5ea0e6a64bfd92b87611f954d3c6288e`.
+- Published the architecture-aware Homebrew source formula in
+  `fugamante/homebrew-tap`; no bottle is included.
+
+### Fixed
+- Release validation now requires explicit publication markers for the newest
+  reachable release tag even when that tag's immutable source-validation
+  markers are present, preventing pre-publication source evidence from being
+  accepted as published-status documentation.
+
+## [v2026.08.25] - 2026-08-25
+
+### Added
+- Packaging readiness:
+  - added deterministic, architecture-specific macOS CLI archive tooling with
+    checksums, package manifests, unsigned/unnotarized provenance, lifecycle
+    tests, and an unpublished Homebrew formula template.
+  - added a release-version synchronization gate between the calendar `VERSION`
+    authority and Cargo's normalized SemVer package metadata.
+  - added a manual-only GitHub Actions lane that validates the exact package
+    source on a native `macos-15-intel` runner, including deterministic
+    archive identity and an isolated Homebrew lifecycle.
+- Codex integration:
+  - added a fail-open `SessionStart` hook adapter, fixture coverage, and an
+    operator runbook that makes the explicit XSHELF capture lane discoverable
+    without wrapping commands, invoking providers, or writing startup state.
+
+### Changed
+- Published `v2026.08.25` against its existing immutable annotated source tag
+  with two unsigned, unnotarized native macOS archives and `SHA256SUMS`. No
+  Homebrew formula or bottle was published:
+  - ARM64 archive: `9865e5440a5b6554cea952b630f8f3c26c6eabd64fdf39cb2e53c850306c873f`
+  - Intel archive: `e908105a9767d60cb057e0a9469cd2c49b2b750c7082435a468980d29ca9fd2e`
+  - `SHA256SUMS`: `3e56cb544b87d7e59a0d098941c1e4c4e3ab59f61c718aee34122b9c33b9beaf`
+- Standalone XSHELF binaries now use the embedded release version instead of a
+  caller repository's `VERSION` or Git revision, resolve `xshelf` / `xs` / `cx`
+  from the invoked executable name, discover packaged default schemas without
+  writing user state, and embed the eval-lab contract fixture so validation no
+  longer depends on the build checkout.
+- Codex integration:
+  - documented and fixture-locked the `SessionStart` hook's advisory-only,
+    read-only, fail-open scope contract and its evidence gate for future
+    changes, without changing hook behavior.
+- Pre-tag validation now requires durable release-source markers for the
+  current `VERSION`, preventing annotated tags whose immutable source cannot
+  pass published-status validation without claiming publication early.
+- Native Intel evidence now uses the repository-supported 90-day artifact
+  retention horizon, and release-readiness documentation binds authoritative
+  evidence to the exact artifact `source_revision` without committing a stale
+  predecessor checksum.
+- Version history now records the published unsigned release separately from
+  historical tags while retaining the release metadata required by the
+  pre-tag gate.
+
+### Fixed
+- Packaging validation now uses the active Python interpreter in its
+  compiler-shadow regression instead of assuming an ARM Homebrew path, so the
+  same test runs on native Intel CI hosts.
+- Run-log compatibility:
+  - made `logs validate --strict --legacy-ok` honor the documented historical
+    allowance for additive nullable `system_status` capture provenance while
+    keeping plain strict validation fail-closed for current rows.
+- Schema validation reliability:
+  - scoped cached compiled validators to their schema source and contents so
+    compatible registries that reuse a schema filename cannot validate against
+    stale rules from another repository.
+
+## [v2026.08.20] - 2026-08-20
+
+### Changed
+- Updated transitive `h2` from `0.4.15` to `0.4.16` to address
+  `RUSTSEC-2026-0258` without changing XSHELF runtime contracts.
+- Docker compatibility images now keep the cached Cargo registry writable by
+  non-root validation so newly locked dependency patches can be fetched.
+- Release validation now accepts an explicit prepared-candidate decision while
+  still requiring roadmap and readiness markers for the newest reachable
+  published tag, so pre-tag checks do not force a false publication claim.
+- Docker compatibility runs from linked Git worktrees now use a temporary,
+  read-only metadata snapshot containing current HEAD history and tags, so
+  strict release checks work without mounting unrelated worktree metadata.
+  The container also trusts only the bind-mounted `/work` path for Git
+  ownership checks, preserving non-root validation on Docker Desktop.
+- Phase XI fixture filenames now follow the enforced three-segment repository
+  naming policy, restoring clean-checkout Rust guardrail parity without
+  changing reducer inputs, expected spans, or runtime behavior.
+- Phase XI capture reduction now classifies the real `cargo test` command shape
+  as `test_output`, so the existing failure-recall and safe-fallback fixtures
+  exercise the command operators actually run instead of a synthetic `test`
+  executable.
+- The `test_output` reducer now falls back to source text when a nonempty test
+  stream has no recognized markers and reserves bounded tail capacity so late
+  failure and final-result evidence survives more than 400 earlier matches.
+  Adversarial fixtures also lock unrelated Cargo commands to generic capture.
+
+## [v2026.08.12] - 2026-08-12
+
+### Added
+- Release metadata:
+  - advanced rolling `VERSION` metadata to `2026.08.12` for the active
+    reliability hardening line without claiming a tagged release.
+  - synchronized the committed file-name grandfathering allowlist with three
+    existing long-form project artifacts so clean-worktree pre-push validation
+    matches the established repository naming policy.
+  - added a deterministic published-status documentation guard based on the
+    newest reachable final-release Git tag, so rolling `VERSION` changes do not
+    force roadmap/readiness claims before a release is actually tagged.
+  - clarified tagless and depth-limited checkout diagnostics for the
+    published-status guard and added a full synthetic release lifecycle fixture.
+- Timeout cleanup:
+  - timed commands now run in isolated process groups and complete TERM-to-KILL
+    escalation against descendants, including when the direct parent exits first.
+  - process-group signals disambiguate negative group IDs so descendant cleanup
+    behaves consistently on macOS and Linux.
+- Health checks:
+  - `health` and compatibility `cxhealth` now stop when the selected
+    provider's `--version` probe exits nonzero instead of continuing to live
+    probes and potentially reporting all systems operational.
+- Host compatibility:
+  - integration tests now resolve repository fixtures from their runtime
+    working directory before the compiled manifest path, so cached binaries
+    built in disposable worktrees remain reusable after those paths disappear.
+  - isolated the external log-override regression test from pre-push Git
+    environment state by setting its supported repository-root override
+    explicitly, keeping release validation deterministic across worktrees.
+  - run-log provenance now honors the existing `CX_REPO_ROOT` override instead
+    of bypassing it during repository-root resolution, and canonicalizes the
+    configured path consistently with Git-discovered roots.
+  - release-check fixture repositories now ignore Git repository paths exported
+    by hooks, preventing pre-push validation from mutating the parent checkout.
+  - Docker compatibility images now normalize cached Cargo registry readability
+    so non-root validation is independent of dependency archive file modes.
+- Dependency maintenance:
+  - updated `jsonschema` from `0.49.2` to `0.49.4` without changing XSHELF's
+    schema, quarantine, replay, or public JSON contracts.
+
+## [v2026.07.27] - 2026-07-27
+
+### Added
+- Release metadata:
+  - refreshed `VERSION` to `2026.07.27` so the local and CI release-cadence
+    gates reflect the current active branch state.
+  - added `scripts/release_pretag_check.sh` as the canonical pre-tag wrapper for
+    release metadata freshness plus current-version changelog/history coherence.
+  - added `release_check.py --require-current-release-notes` so pre-tag
+    validation fails when `CHANGELOG.md` and `VERSION_HISTORY.md` have not been
+    cut for the current `VERSION` while preserving rolling `Unreleased` notes
+    during normal development.
+- Run-log validation:
+  - `logs validate --strict` now treats modern `capture` rows without integer
+    `system_status` as invalid so capture exit-status telemetry regressions are
+    caught during validation.
+- Route introspection:
+  - `routes` now derives its default listing from the native and compatibility
+    command-name registry so valid routes do not drift out of introspection.
+- Quarantine integrity:
+  - `quarantine show` and `replay` now reject quarantine records whose embedded
+    id or stored prompt/raw hashes do not match the requested record and payload.
+- Log validation:
+  - `logs validate --strict` now verifies that modern schema-failure run rows
+    reference readable, integrity-valid quarantine records.
+- Cross-repo capture:
+  - added `CX_LOG_FILE` as an explicit run-log destination override so
+    absolute-path `xshelf capture`, `budget`, and `trace` can share telemetry
+    outside the caller repo without changing the default repo-local log path.
+- Local model registry:
+  - hardened `llm models add --replace` so a colliding custom model ID cannot
+    overwrite a different backend or alias record.
+  - reject duplicate model IDs and duplicate backend-scoped aliases when
+    reading the registry, preventing ambiguous selection or partial mutation.
+  - reject malformed explicit registry structure, unsupported contract
+    versions, and invalid backend/trust/size domains before selection or
+    mutation while preserving legacy registries without a version marker.
+
+## [v2026.06.29] - 2026-06-29
 
 ### Added
 - Pre-push checks clear inherited repository-local Git variables before running
@@ -56,8 +262,12 @@ Notes:
   - reformatted the root README validation section into goal-based checks, Docker compatibility notes, and release-confidence guidance.
   - expanded `contracts export --profile full` coverage for the declared compatibility surfaces (`broker benchmark`, `policy show`, `task run-plan`, `llm verify`, and `llm resident`) and added contract producer/fixture files to the command-surface docs gate.
   - tightened the release-cadence boundary check so `VERSION` older than the limit by even a few seconds now fails instead of slipping through until the next full day rollover.
+  - refreshed `VERSION` to `2026.06.29` for the capture telemetry release-readiness validation pass.
+  - refreshed transitive `anyhow` lockfile version to `1.0.103` to clear RustSec advisory `RUSTSEC-2026-0190` in the CI audit gate.
   - widened the command-surface changelog gate so `bin/xshelf`, `bin/xs`, and their install/uninstall wrappers are treated like `bin/cx` for release-note enforcement.
   - hardened the command-surface docs gate so command entrypoint changes now require synchronized updates to `CHANGELOG.md`, `README.md`, and `docs/project/XSHELF_RENAME_MIGRATION.md`.
+  - added `xshelf capture <cmd...>` as a capture-only lane for noisy read-only evidence, with budget/trace telemetry and zero provider token usage.
+  - added additive nullable `system_status` run-log telemetry so capture-only and captured-command lanes record the wrapped command exit status without making old logs invalid.
 - Phase VIII local model substrate:
   - added repo-scoped local model registry at `.cx/local_models.json`.
   - added `xshelf llm models list|add|inspect|remove` with deterministic JSON/text output shapes.
@@ -121,6 +331,10 @@ Notes:
   - install flow now publishes `xshelf.1`, `xs.1`, and `cx.1` man-page entries.
   - added `docs/project/XSHELF_RENAME_MIGRATION.md` to lock the staged compatibility migration policy.
   - top-level help/task-help/usage error text now follows the invoked command name (`xshelf`, `xs`, or `cx`).
+  - added additive operator context to `version`, `core --json`, `diag --json`,
+    and `doctor` so local sessions surface XSHELF identity, canonical command
+    spelling, compatibility aliases, and read-only first-check guidance before
+    broader inspection.
 - HTTP adapter hardening:
   - optional host allowlist gate via `CX_HTTP_ALLOWED_HOSTS` (CSV).
   - optional TLS pinning hook via `CX_HTTP_TLS_PINNEDPUBKEY` (curl `--pinnedpubkey`).

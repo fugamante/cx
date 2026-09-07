@@ -1,0 +1,10 @@
+
+test capture::tests::late_failure ... FAILED
+thread 'capture::tests::late_failure' panicked at src/capture.rs:42:9:
+assertion `left == right` failed
+  left: "late actual"
+ right: "late expected"
+failures:
+    capture::tests::late_failure
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured
+error: test failed, to rerun pass `--lib`

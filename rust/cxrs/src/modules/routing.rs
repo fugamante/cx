@@ -3,114 +3,13 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::command_names::{is_compat_name, is_native_name};
+use crate::command_names::{
+    compat_command_names, is_compat_name, is_native_name, native_command_names,
+};
 use crate::execmeta::toolchain_version_string;
 use crate::paths::{repo_root_hint, resolve_log_file, resolve_state_file};
 use crate::process::run_command_output_with_timeout;
 use crate::runtime::{llm_backend, llm_model};
-
-const ROUTE_NAMES: &[&str] = &[
-    "help",
-    "version",
-    "contracts",
-    "where",
-    "routes",
-    "logs",
-    "telemetry",
-    "ci",
-    "task",
-    "diag",
-    "scheduler",
-    "parity",
-    "doctor",
-    "state",
-    "llm",
-    "policy",
-    "bench",
-    "metrics",
-    "quota",
-    "prompt-stats",
-    "prompt",
-    "roles",
-    "fanout",
-    "promptlint",
-    "cx",
-    "cxj",
-    "cxo",
-    "cxol",
-    "cxcopy",
-    "fix",
-    "budget",
-    "log-tail",
-    "health",
-    "capture-status",
-    "log-on",
-    "log-off",
-    "alert-show",
-    "alert-on",
-    "alert-off",
-    "chunk",
-    "cx-compat",
-    "profile",
-    "alert",
-    "optimize",
-    "worklog",
-    "trace",
-    "next",
-    "fix-run",
-    "diffsum",
-    "diffsum-staged",
-    "commitjson",
-    "commitmsg",
-    "replay",
-    "quarantine",
-    "supports",
-    "cxversion",
-    "cxcontracts",
-    "cxdoctor",
-    "cxwhere",
-    "cxdiag",
-    "cxscheduler",
-    "cxparity",
-    "cxlogs",
-    "cxtelemetry",
-    "cxmetrics",
-    "cxquota",
-    "cxprompt_stats",
-    "cxprofile",
-    "cxtrace",
-    "cxalert",
-    "cxoptimize",
-    "cxworklog",
-    "cxpolicy",
-    "cxstate",
-    "cxllm",
-    "cxbench",
-    "cxprompt",
-    "cxroles",
-    "cxfanout",
-    "cxpromptlint",
-    "cxnext",
-    "cxfix",
-    "cxdiffsum",
-    "cxdiffsum_staged",
-    "cxcommitjson",
-    "cxcommitmsg",
-    "cxbudget",
-    "cxlog_tail",
-    "cxhealth",
-    "capture-status",
-    "cxlog_on",
-    "cxlog_off",
-    "cxalert_show",
-    "cxalert_on",
-    "cxalert_off",
-    "cxchunk",
-    "cxfix_run",
-    "cxreplay",
-    "cxquarantine",
-    "cxtask",
-];
 
 pub fn bash_type_of_function(repo: &Path, name: &str) -> Option<String> {
     let cx_sh = repo.join("lib").join("cx.sh");
@@ -140,7 +39,12 @@ pub fn route_handler_for(name: &str) -> Option<String> {
 }
 
 pub fn rust_route_names() -> Vec<String> {
-    let mut out: Vec<String> = ROUTE_NAMES.iter().map(|s| (*s).to_string()).collect();
+    let mut out: Vec<String> = native_command_names()
+        .iter()
+        .chain(compat_command_names().iter())
+        .filter(|name| !name.starts_with('-'))
+        .map(|s| (*s).to_string())
+        .collect();
     out.sort();
     out.dedup();
     out

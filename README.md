@@ -25,6 +25,11 @@ repository configuration.
 ./bin/xshelf diag --json --window 20
 ```
 
+`version`, `core --json`, and `diag --json` include an additive
+`operator_context` surface that identifies `XSHELF`, the canonical `xshelf`
+command, compatibility aliases, and the read-only first-check path for local
+operator sessions.
+
 The task check prints a stable JSON contract. Values depend on the local task
 queue, but the shape should look like this:
 
@@ -43,7 +48,8 @@ queue, but the shape should look like this:
 | --- | --- |
 | Safe first inspection | `version`, `doctor`, `health`, `diag --json` |
 | Stable runtime state | `core --json`, `mode --json`, `broker show --json` |
-| Bounded command execution | `cxo ...` |
+| Bounded command capture | `capture ...` |
+| Agentic command interpretation | `cxo ...` |
 | Task orchestration | `task add`, `task run`, `task run-all`, `task sandbox`, `task events` |
 | Contract hygiene | schema validation, quarantine, replay, contract bundles |
 | Backend selection | primary, Ollama, llama.cpp, MLX, HTTP adapter profiles |
@@ -52,7 +58,8 @@ queue, but the shape should look like this:
 Pipeline contract:
 
 ```text
-capture -> reduce -> budget -> run backend -> validate -> quarantine -> telemetry
+capture -> reduce -> budget -> telemetry
+cxo -> capture -> reduce -> budget -> run backend -> validate -> quarantine -> telemetry
 ```
 
 Diagnostics go to stderr. Machine-readable stdout stays parseable.
@@ -73,7 +80,7 @@ Optional backend tools:
 | llama.cpp | `llama-cli` |
 | MLX on macOS | `mlx-lm` in a Python environment |
 
-Install shell functions and man pages:
+For source-checkout development, install shell functions and man pages:
 
 ```bash
 ./bin/xshelf-install
@@ -84,8 +91,36 @@ man xs
 man cx
 ```
 
-Matching uninstall wrappers are available as `./bin/xshelf-uninstall`,
-`./bin/xs-uninstall`, and `./bin/cx-uninstall`.
+Shell-profile uninstall wrappers are available as `./bin/xshelf-uninstall`,
+`./bin/xs-uninstall`, and `./bin/cx-uninstall`; source-installed man pages are
+managed separately.
+
+Developer ID signed and Apple-notarized macOS binary assets for
+[`v2026.08.29`](https://github.com/fugamante/XSHELF/releases/tag/v2026.08.29)
+are published for native Apple Silicon and Intel hosts. The archives provide a
+native `xshelf` executable,
+`xs` / `cx` aliases, packaged default schemas, and man pages without editing
+shell profiles or installing `cxops`:
+
+```bash
+./scripts/build_packages.sh --target aarch64-apple-darwin
+python3 test/package_release_test.py
+```
+
+Install the same signed release through the public source formula:
+
+```bash
+brew tap fugamante/tap
+brew install xshelf
+```
+
+No Homebrew bottle is published. Standalone Mach-O executables cannot carry a
+stapled ticket, so Gatekeeper uses Apple's online notarization ticket when an
+assessment is required.
+
+See [Packaging](docs/PACKAGING.md) for the exact assets, checksums, signing and
+notarization evidence, dual-architecture build, relocation, clean-home, and
+isolated Homebrew lifecycle.
 
 ## Quick Start
 
@@ -98,10 +133,34 @@ After the first inspection commands, check backend and runtime readiness:
 ```
 
 After readiness checks pass, run a read-only repository command through the
-bounded execution path:
+bounded capture path:
 
 ```bash
-./bin/xshelf cxo git status
+./bin/xshelf capture git status
+./bin/xshelf budget
+./bin/xshelf trace
+```
+
+Use `./bin/xshelf cxo ...` only when you want natural-language interpretation
+from the configured provider. It is agentic; `capture` is the default lane for
+read-only evidence capture.
+
+For another local repository that does not have a repo-local `./bin/xshelf`,
+you can call this checkout explicitly:
+
+```bash
+/path/to/xshelf/bin/xshelf capture <read-only-command>
+```
+
+By default that records telemetry in the caller repository at
+`.cx/cxlogs/runs.jsonl`. To keep the caller repo untouched, set an explicit run
+log path and use the same value for follow-up budget/trace checks:
+
+```bash
+export CX_LOG_FILE=/tmp/xshelf-runs.jsonl
+/path/to/xshelf/bin/xshelf capture <read-only-command>
+/path/to/xshelf/bin/xshelf budget
+/path/to/xshelf/bin/xshelf trace
 ```
 
 Command aliases:
@@ -162,10 +221,18 @@ Inspect telemetry and contract health:
 Task-event progress can be streamed to `.codex/cxlogs/task_events.jsonl`.
 Telemetry and log stats also expose additive rollout summaries for capture
 prompt telemetry when `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` is enabled.
+Run logs may include nullable `system_status` for lanes that wrap a repository
+command, including `capture`, so nonzero child exits remain visible without
+provider token usage.
 
 For the full command catalog, use the operator manuals:
 - [docs/manuals/00_README.md](docs/manuals/00_README.md)
 - [docs/manuals/02_web/index.html](docs/manuals/02_web/index.html)
+
+For a runtime-derived route catalog, use `./bin/xshelf routes` or
+`./bin/xshelf routes --json`. The listing is generated from the same native and
+compatibility command-name registry used by dispatch, so `xshelf`, `xs`, and
+`cx` route aliases stay aligned.
 
 ## Backend Selection
 
@@ -256,6 +323,7 @@ Choose the smallest check that matches the risk:
 | Linux preflight | `./scripts/compat_docker.sh --smoke` | getting a cheap container-hosted signal |
 | Linux CI mirror | `./scripts/compat_docker.sh --ci` | approximating the core GitHub Linux guardrail locally |
 | Release signoff | `./scripts/compat_local.sh --full` | validating the strongest host-native release-readiness path |
+| Pre-tag metadata | `./scripts/release_pretag_check.sh` | confirming `VERSION`, `CHANGELOG.md`, and `VERSION_HISTORY.md` are coherent before tagging |
 
 Operator checks:
 
@@ -272,6 +340,7 @@ Typical maintainer sequence:
 ./scripts/compat_docker.sh --smoke
 ./scripts/compat_docker.sh --ci
 ./scripts/compat_local.sh --full
+./scripts/release_pretag_check.sh
 
 cd rust/cxrs
 cargo fmt --check
@@ -287,6 +356,9 @@ Docker compatibility prerequisites:
 - The first run usually spends most of its time building the image and filling
   the Cargo target cache under `.cx/compat/`; warm-cache reruns should be much
   faster unless `--rebuild` is used.
+- Linked Git worktrees are supported through an ephemeral, read-only snapshot
+  of current HEAD history and tags; the parent checkout's common Git directory
+  and unrelated worktree administration are not mounted into the container.
 
 If the image or bind-mounted cache is stale:
 - Force a fresh image build with `./scripts/compat_docker.sh --rebuild ...`.

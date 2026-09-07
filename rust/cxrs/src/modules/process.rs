@@ -3,11 +3,14 @@ use std::io::Write;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wait_timeout::ChildExt;
 
 use crate::config::DEFAULT_CMD_TIMEOUT_SECS;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TimeoutInfo {
@@ -81,14 +84,50 @@ fn timeout_error(label: &str) -> ProcessError {
     })
 }
 
-fn terminate_pid(pid: u32) {
-    let pid_s = pid.to_string();
-    let _ = Command::new("kill").args(["-TERM", &pid_s]).status();
+fn isolate_process_group(cmd: &mut Command) {
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
 }
 
-fn kill_pid(pid: u32) {
-    let pid_s = pid.to_string();
-    let _ = Command::new("kill").args(["-KILL", &pid_s]).status();
+fn signal_process(pid: u32, signal: &str) {
+    #[cfg(unix)]
+    let target = format!("-{pid}");
+    #[cfg(not(unix))]
+    let target = pid.to_string();
+    let _ = Command::new("kill")
+        .args([signal, "--", &target])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn process_group_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    let target = format!("-{pid}");
+    #[cfg(not(unix))]
+    let target = pid.to_string();
+    Command::new("kill")
+        .args(["-0", "--", &target])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn terminate_process_group(pid: u32, mut reap: impl FnMut()) {
+    signal_process(pid, "-TERM");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    // The direct child may exit first while a TERM-resistant descendant keeps
+    // the process group alive, so cleanup must track the group itself.
+    while process_group_alive(pid) && Instant::now() < deadline {
+        reap();
+        thread::sleep(Duration::from_millis(25));
+    }
+    if process_group_alive(pid) {
+        signal_process(pid, "-KILL");
+    }
 }
 
 fn wait_child_status(child: &mut Child, label: &str) -> Result<ExitStatus, ProcessError> {
@@ -98,7 +137,9 @@ fn wait_child_status(child: &mut Child, label: &str) -> Result<ExitStatus, Proce
     {
         Some(status) => Ok(status),
         None => {
-            let _ = child.kill();
+            terminate_process_group(child.id(), || {
+                let _ = child.try_wait();
+            });
             let _ = child.wait();
             Err(timeout_error(label))
         }
@@ -109,6 +150,7 @@ pub fn run_command_status_with_timeout_meta(
     mut cmd: Command,
     label: &str,
 ) -> Result<ExitStatus, ProcessError> {
+    isolate_process_group(&mut cmd);
     let mut child = cmd
         .spawn()
         .map_err(|e| ProcessError::Message(format!("{label} spawn failed: {e}")))?;
@@ -123,6 +165,7 @@ pub fn run_command_output_with_timeout_meta(
     mut cmd: Command,
     label: &str,
 ) -> Result<Output, ProcessError> {
+    isolate_process_group(&mut cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let child = cmd
         .spawn()
@@ -137,10 +180,8 @@ pub fn run_command_output_with_timeout_meta(
             res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}")))
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            terminate_pid(pid);
-            if rx.recv_timeout(Duration::from_secs(2)).is_err() {
-                kill_pid(pid);
-            }
+            terminate_process_group(pid, || {});
+            let _ = rx.recv_timeout(Duration::from_secs(2));
             Err(timeout_error(label))
         }
         Err(_) => Err(ProcessError::Message(format!(
@@ -158,6 +199,7 @@ pub fn run_command_with_stdin_output_with_timeout_meta(
     stdin_text: &str,
     label: &str,
 ) -> Result<Output, ProcessError> {
+    isolate_process_group(&mut cmd);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -180,10 +222,8 @@ pub fn run_command_with_stdin_output_with_timeout_meta(
             res.map_err(|e| ProcessError::Message(format!("{label} read output failed: {e}")))
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            terminate_pid(pid);
-            if rx.recv_timeout(Duration::from_secs(2)).is_err() {
-                kill_pid(pid);
-            }
+            terminate_process_group(pid, || {});
+            let _ = rx.recv_timeout(Duration::from_secs(2));
             Err(timeout_error(label))
         }
         Err(_) => Err(ProcessError::Message(format!(

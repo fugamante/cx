@@ -16,6 +16,23 @@ OUT_FILE=""
 REBUILD=0
 PASS_TTY=0
 declare -a EXTRA_ARGS=()
+declare -a GIT_MOUNT_ARGS=()
+GIT_SNAPSHOT_DIR=""
+GIT_POINTER_FILE=""
+TSV_FILE=""
+
+cleanup() {
+  if [[ -n "$TSV_FILE" ]]; then
+    rm -f -- "$TSV_FILE"
+  fi
+  if [[ -n "$GIT_SNAPSHOT_DIR" && -d "$GIT_SNAPSHOT_DIR" ]]; then
+    rm -rf -- "$GIT_SNAPSHOT_DIR"
+  fi
+  if [[ -n "$GIT_POINTER_FILE" ]]; then
+    rm -f -- "$GIT_POINTER_FILE"
+  fi
+}
+trap cleanup EXIT
 
 usage() {
   cat >&2 <<'USAGE'
@@ -92,6 +109,19 @@ command -v docker >/dev/null 2>&1 || {
   exit 2
 }
 
+if [[ -f "$ROOT_DIR/.git" ]]; then
+  GIT_SNAPSHOT_DIR="$(mktemp -d)"
+  GIT_POINTER_FILE="$(mktemp)"
+  "$ROOT_DIR/scripts/compat_git_snapshot.sh" "$ROOT_DIR" "$GIT_SNAPSHOT_DIR"
+  printf 'gitdir: /xshelf-git\n' >"$GIT_POINTER_FILE"
+  GIT_MOUNT_ARGS=(
+    --mount
+    "type=bind,source=$GIT_SNAPSHOT_DIR,target=/xshelf-git,readonly"
+    --mount
+    "type=bind,source=$GIT_POINTER_FILE,target=/work/.git,readonly"
+  )
+fi
+
 if [[ "$REBUILD" -eq 1 ]]; then
   echo "compat-docker: building $IMAGE_TAG" >&2
   docker build -t "$IMAGE_TAG" "$ROOT_DIR" >&2
@@ -117,8 +147,12 @@ docker_exec() {
     --workdir /work \
     -e HOME=/tmp/cx-home \
     -e CARGO_TARGET_DIR=/work/.cx/compat/docker-target \
+    -e GIT_CONFIG_COUNT=1 \
+    -e GIT_CONFIG_KEY_0=safe.directory \
+    -e GIT_CONFIG_VALUE_0=/work \
     -e PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -v "$ROOT_DIR":/work \
+    "${GIT_MOUNT_ARGS[@]}" \
     "${EXTRA_ARGS[@]}" \
     "$IMAGE_TAG" \
     bash -c 'mkdir -p "$HOME" /work/.cx/compat/docker-target && "$@"' bash "$@"
@@ -242,7 +276,6 @@ if [[ "$MODE" == "smoke" || "$MODE" == "ci" ]]; then
     OUT_FILE="${OUT_FILE:-.cx/compat/docker_ci_latest.json}"
   fi
   TSV_FILE="$(mktemp)"
-  trap 'rm -f "$TSV_FILE"' EXIT
   OVERALL_RC=0
 
   run_report_step() {
@@ -268,7 +301,7 @@ if [[ "$MODE" == "smoke" || "$MODE" == "ci" ]]; then
       "cd /work/rust/cxrs && python3 -m unittest tools.test_release_check"
     run_report_step \
       "release_metadata_check" \
-      "cd /work/rust/cxrs && python3 tools/release_check.py --repo-root /work --max-version-age-days 14"
+      "cd /work/rust/cxrs && python3 tools/release_check.py --repo-root /work --max-version-age-days 14 --require-published-status-docs"
     run_report_step \
       "runtime_smoke" \
       "cargo --version >/dev/null && ./bin/cx version >/tmp/cxversion.txt && ./bin/xshelf version >/tmp/xshelf_version.txt && ./bin/cx schema list --json | jq -e '.file_count >= 4' >/dev/null && ./bin/cx core --json | jq -e '.contract_version == \"core.v1\"' >/dev/null"
@@ -284,13 +317,13 @@ if [[ "$MODE" == "smoke" || "$MODE" == "ci" ]]; then
       "cd /work/rust/cxrs && cargo fmt --check"
     run_report_step \
       "rust_check" \
-      "cd /work/rust/cxrs && cargo check"
+      "cd /work/rust/cxrs && cargo check --locked"
     run_report_step \
       "rust_clippy" \
-      "cd /work/rust/cxrs && cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments"
+      "cd /work/rust/cxrs && cargo clippy --locked --all-targets -- -D warnings -D clippy::too_many_arguments"
     run_report_step \
       "rust_tests" \
-      "cd /work/rust/cxrs && cargo test --tests -- --test-threads=1"
+      "cd /work/rust/cxrs && cargo test --locked --tests -- --test-threads=1"
     run_report_step \
       "rust_file_line_guardrail" \
       "cd /work && ./rust/cxrs/scripts/check_rs_max_lines.sh 600 /work"
@@ -308,7 +341,7 @@ if [[ "$MODE" == "smoke" || "$MODE" == "ci" ]]; then
       "cd /work/rust/cxrs && python3 -m unittest tools.test_release_check"
     run_report_step \
       "release_metadata_check" \
-      "cd /work/rust/cxrs && python3 tools/release_check.py --repo-root /work --max-version-age-days 14"
+      "cd /work/rust/cxrs && python3 tools/release_check.py --repo-root /work --max-version-age-days 14 --require-published-status-docs"
     run_report_step \
       "compat_check" \
       "cd /work/rust/cxrs && ./scripts/compat_check.sh 50"

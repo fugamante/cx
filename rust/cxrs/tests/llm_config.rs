@@ -1,7 +1,7 @@
 mod common;
 
 use common::{TempRepo, read_json, run_fixture_http_server_once, stderr_str, stdout_str};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fs;
 
 #[test]
@@ -520,6 +520,249 @@ fn models_replace() {
     assert_eq!(
         inspected.get("resolved_model").and_then(Value::as_str),
         Some("mlx-community/Tiny-v2")
+    );
+}
+
+#[test]
+fn registry_id_collision() {
+    let repo = TempRepo::new("cxrs-llm");
+
+    let add = repo.run(&[
+        "llm",
+        "models",
+        "add",
+        "tiny",
+        "--backend",
+        "mlx",
+        "--model",
+        "mlx-community/Tiny",
+        "--id",
+        "shared-id",
+    ]);
+    assert!(add.status.success(), "stderr={}", stderr_str(&add));
+
+    let collision = repo.run(&[
+        "llm",
+        "models",
+        "add",
+        "other",
+        "--backend",
+        "llamacpp",
+        "--model",
+        "/models/other.gguf",
+        "--id",
+        "shared-id",
+        "--replace",
+    ]);
+    assert!(
+        !collision.status.success(),
+        "stdout={}",
+        stdout_str(&collision)
+    );
+    assert!(
+        stderr_str(&collision)
+            .contains("local model id 'shared-id' already belongs to another backend or alias"),
+        "{}",
+        stderr_str(&collision)
+    );
+
+    let inspect = repo.run(&["llm", "models", "inspect", "shared-id", "--json"]);
+    assert!(
+        inspect.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&inspect),
+        stderr_str(&inspect)
+    );
+    let inspected = serde_json::from_str::<Value>(&stdout_str(&inspect)).expect("inspect JSON");
+    assert_eq!(
+        inspected.get("backend").and_then(Value::as_str),
+        Some("mlx")
+    );
+    assert_eq!(inspected.get("alias").and_then(Value::as_str), Some("tiny"));
+}
+
+#[test]
+fn registry_duplicate_ids() {
+    let repo = TempRepo::new("cxrs-llm");
+    let model = |id: &str, alias: &str, backend: &str| {
+        json!({
+            "id": id,
+            "alias": alias,
+            "backend": backend,
+            "resolved_model": format!("{backend}/{alias}")
+        })
+    };
+
+    fs::write(
+        repo.local_models_file(),
+        serde_json::to_vec_pretty(&json!({
+            "contract_version": "local_models.v1",
+            "models": [
+                model("shared-id", "tiny", "mlx"),
+                model("shared-id", "other", "llamacpp")
+            ]
+        }))
+        .expect("serialize duplicate id registry"),
+    )
+    .expect("write duplicate id registry");
+    let duplicate_id = repo.run(&["llm", "models", "list"]);
+    assert!(!duplicate_id.status.success());
+    assert!(
+        stderr_str(&duplicate_id)
+            .contains("local model registry contains duplicate id 'shared-id'"),
+        "{}",
+        stderr_str(&duplicate_id)
+    );
+
+    fs::write(
+        repo.local_models_file(),
+        serde_json::to_vec_pretty(&json!({
+            "contract_version": "local_models.v1",
+            "models": [
+                model("mlx:tiny-a", "tiny", "mlx"),
+                model("mlx:tiny-b", "tiny", "mlx")
+            ]
+        }))
+        .expect("serialize duplicate alias registry"),
+    )
+    .expect("write duplicate alias registry");
+    let duplicate_alias = repo.run(&["llm", "models", "inspect", "tiny"]);
+    assert!(!duplicate_alias.status.success());
+    assert!(
+        stderr_str(&duplicate_alias)
+            .contains("local model registry contains duplicate backend alias 'mlx:tiny'"),
+        "{}",
+        stderr_str(&duplicate_alias)
+    );
+}
+
+#[test]
+fn registry_contract_validation() {
+    let repo = TempRepo::new("cxrs-llm");
+    let valid_model = || {
+        json!({
+            "id": "mlx:tiny",
+            "alias": "tiny",
+            "backend": "mlx",
+            "resolved_model": "mlx-community/Tiny"
+        })
+    };
+    let cases = [
+        (json!([]), "local model registry root must be an object"),
+        (
+            json!({
+                "contract_version": "local_models.v2",
+                "models": []
+            }),
+            "local model registry contract_version must be 'local_models.v1'",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": {}
+            }),
+            "local model registry 'models' must be an array",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": [{
+                    "id": "bad:tiny",
+                    "alias": "tiny",
+                    "backend": "bad",
+                    "resolved_model": "bad/Tiny"
+                }]
+            }),
+            "local model record has invalid backend 'bad'",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": [{
+                    "id": "mlx:tiny",
+                    "alias": "tiny",
+                    "backend": "MLX",
+                    "resolved_model": "mlx-community/Tiny"
+                }]
+            }),
+            "local model record backend 'MLX' must use canonical value 'mlx'",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": [{
+                    "trust_remote_code": true,
+                    "id": "mlx:tiny",
+                    "alias": "tiny",
+                    "backend": "mlx",
+                    "resolved_model": "mlx-community/Tiny"
+                }]
+            }),
+            "local model record has invalid trust_remote_code value",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": [{
+                    "trust_remote_code": "sometimes",
+                    "id": "mlx:tiny",
+                    "alias": "tiny",
+                    "backend": "mlx",
+                    "resolved_model": "mlx-community/Tiny"
+                }]
+            }),
+            "local model record has invalid trust_remote_code 'sometimes'",
+        ),
+        (
+            json!({
+                "contract_version": "local_models.v1",
+                "models": [{
+                    "size_bytes": "large",
+                    "id": "mlx:tiny",
+                    "alias": "tiny",
+                    "backend": "mlx",
+                    "resolved_model": "mlx-community/Tiny"
+                }]
+            }),
+            "local model record has invalid 'size_bytes'",
+        ),
+    ];
+
+    for (registry, expected) in cases {
+        fs::write(
+            repo.local_models_file(),
+            serde_json::to_vec_pretty(&registry).expect("serialize invalid registry"),
+        )
+        .expect("write invalid registry");
+        let out = repo.run(&["llm", "models", "list"]);
+        assert!(!out.status.success(), "stdout={}", stdout_str(&out));
+        assert!(
+            stderr_str(&out).contains(expected),
+            "expected={expected} stderr={}",
+            stderr_str(&out)
+        );
+    }
+
+    fs::write(
+        repo.local_models_file(),
+        serde_json::to_vec_pretty(&json!({
+            "models": [valid_model()]
+        }))
+        .expect("serialize legacy registry"),
+    )
+    .expect("write legacy registry");
+    let legacy = repo.run(&["llm", "models", "list", "--json"]);
+    assert!(
+        legacy.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&legacy),
+        stderr_str(&legacy)
+    );
+    let payload =
+        serde_json::from_str::<Value>(&stdout_str(&legacy)).expect("legacy registry JSON");
+    assert_eq!(
+        payload.get("contract_version").and_then(Value::as_str),
+        Some("local_models.v1")
     );
 }
 

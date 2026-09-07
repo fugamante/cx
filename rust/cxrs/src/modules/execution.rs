@@ -61,6 +61,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                 schema_prompt: None,
                 schema_raw: None,
                 schema_attempt: None,
+                system_status,
                 err: &e,
                 started: &started,
             });
@@ -84,6 +85,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         schema_prompt: None,
                         schema_raw: None,
                         schema_attempt: None,
+                        system_status,
                         err: &e,
                         started: &started,
                     });
@@ -106,6 +108,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         schema_prompt: None,
                         schema_raw: None,
                         schema_attempt: None,
+                        system_status,
                         err: &e,
                         started: &started,
                     });
@@ -130,6 +133,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                         schema_prompt: None,
                         schema_raw: None,
                         schema_attempt: None,
+                        system_status,
                         err: &e,
                         started: &started,
                     });
@@ -190,6 +194,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                             schema_prompt: Some(prompt_envelope.full_prompt.as_str()),
                             schema_raw: Some(schema_pretty.as_str()),
                             schema_attempt: Some(1),
+                            system_status,
                             err: &e,
                             started: &started,
                         });
@@ -237,6 +242,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                                         schema_prompt: Some(prompt_envelope.full_prompt.as_str()),
                                         schema_raw: Some(schema_pretty.as_str()),
                                         schema_attempt: Some(2),
+                                        system_status,
                                         err: &e,
                                         started: &started,
                                     });
@@ -300,6 +306,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                             schema_attempt: schema_attempt_for_log,
                             timed_out: None,
                             timeout_secs: None,
+                            system_status,
                             command_label: None,
                             duration_ms: started.elapsed().as_millis() as u64,
                             usage: Some(&usage),
@@ -339,6 +346,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
             schema_attempt: schema_attempt_for_log,
             timed_out: None,
             timeout_secs: None,
+            system_status,
             command_label: None,
             duration_ms: started.elapsed().as_millis() as u64,
             usage: Some(&usage),

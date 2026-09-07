@@ -27,10 +27,18 @@ pub fn repo_root_hint() -> Option<PathBuf> {
     if let Ok(v) = env::var("CX_REPO_ROOT") {
         let p = PathBuf::from(v);
         if p.exists() {
-            return Some(p);
+            return std::fs::canonicalize(&p).ok().or(Some(p));
         }
     }
     repo_root()
+}
+
+pub fn source_root() -> Option<PathBuf> {
+    let value = env_path("CX_REPO_ROOT")?;
+    if !value.exists() {
+        return None;
+    }
+    std::fs::canonicalize(&value).ok().or(Some(value))
 }
 
 fn repo_root_uncached() -> Option<PathBuf> {
@@ -55,7 +63,16 @@ pub fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME").map(PathBuf::from)
 }
 
+fn env_path(name: &str) -> Option<PathBuf> {
+    env::var_os(name)
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
 pub fn resolve_log_file() -> Option<PathBuf> {
+    if let Some(path) = env_path("CX_LOG_FILE") {
+        return Some(path);
+    }
     if let Some(root) = repo_root() {
         return Some(root.join(".cx").join("cxlogs").join("runs.jsonl"));
     }
@@ -116,9 +133,33 @@ pub fn resolve_tasks_file() -> Result<PathBuf, String> {
 
 pub fn resolve_schema_dir() -> Option<PathBuf> {
     if let Some(root) = repo_root() {
-        return Some(root.join(".cx").join("schemas"));
+        let schemas = root.join(".cx").join("schemas");
+        if schemas.is_dir() {
+            return Some(schemas);
+        }
+    }
+    if let Some(home) = home_dir() {
+        let schemas = home.join(".cx").join("schemas");
+        if schemas.is_dir() {
+            return Some(schemas);
+        }
+    }
+    if let Some(data) = package_data_dir() {
+        let schemas = data.join("schemas");
+        if schemas.is_dir() {
+            return Some(schemas);
+        }
     }
     home_dir().map(|h| h.join(".cx").join("schemas"))
+}
+
+fn package_data_dir() -> Option<PathBuf> {
+    if let Some(path) = env_path("CX_DATA_DIR") {
+        return Some(path);
+    }
+    let exe = env::current_exe().ok()?;
+    let prefix = exe.parent()?.parent()?;
+    Some(prefix.join("share").join("xshelf"))
 }
 
 pub fn ensure_parent_dir(path: &Path) -> Result<(), String> {

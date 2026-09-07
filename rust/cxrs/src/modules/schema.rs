@@ -1,4 +1,4 @@
-use jsonschema::JSONSchema;
+use jsonschema::validator_for;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -127,32 +127,62 @@ pub fn build_schema_prompt_envelope(
 
 pub fn validate_schema_instance(schema: &LoadedSchema, raw: &str) -> Result<Value, String> {
     let instance: Value = serde_json::from_str(raw).map_err(|e| format!("invalid JSON: {e}"))?;
+    // Schema names repeat across compatible registries; cache only validators
+    // compiled from the same source so one repository cannot borrow another's rules.
+    let cache_key = format!(
+        "{}:{}",
+        schema.path.display(),
+        sha256_hex(&schema.value.to_string())
+    );
     let compiled = {
         let mut lock = SCHEMA_COMPILED_CACHE
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .map_err(|_| "schema cache poisoned".to_string())?;
-        if let Some(existing) = lock.get(&schema.name) {
+        if let Some(existing) = lock.get(&cache_key) {
             existing.clone()
         } else {
-            let compiled = JSONSchema::compile(&schema.value)
+            let compiled = validator_for(&schema.value)
                 .map_err(|e| format!("failed to compile schema {}: {e}", schema.path.display()))?;
             let compiled = Arc::new(compiled);
-            lock.insert(schema.name.clone(), compiled.clone());
+            lock.insert(cache_key, compiled.clone());
             compiled
         }
     };
-    if let Err(errors) = compiled.validate(&instance) {
-        let mut reasons: Vec<String> = Vec::new();
-        for err in errors.take(3) {
-            reasons.push(err.to_string());
-        }
-        let reason = if reasons.is_empty() {
-            "schema_validation_failed".to_string()
-        } else {
-            format!("schema_validation_failed: {}", reasons.join(" | "))
-        };
+    let reasons: Vec<String> = compiled
+        .iter_errors(&instance)
+        .take(3)
+        .map(|err| err.to_string())
+        .collect();
+    if !reasons.is_empty() {
+        let reason = format!("schema_validation_failed: {}", reasons.join(" | "));
         return Err(reason);
     }
     Ok(instance)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn schema(path: &str, required: &str) -> LoadedSchema {
+        LoadedSchema {
+            name: "next.schema.json".to_string(),
+            path: PathBuf::from(path),
+            value: json!({"type": "object", "required": [required]}),
+            id: None,
+        }
+    }
+
+    #[test]
+    fn schema_cache_isolated() {
+        let nonce = std::process::id();
+        let first = schema(&format!("/tmp/cxrs-schema-{nonce}-first.json"), "first");
+        let second = schema(&format!("/tmp/cxrs-schema-{nonce}-second.json"), "second");
+
+        assert!(validate_schema_instance(&first, r#"{"first":true}"#).is_ok());
+        assert!(validate_schema_instance(&second, r#"{"first":true}"#).is_err());
+    }
 }

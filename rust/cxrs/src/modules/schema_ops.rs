@@ -1,4 +1,4 @@
-use jsonschema::JSONSchema;
+use jsonschema::validator_for;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -87,7 +87,7 @@ fn validate_schema_file(path: &Path, errors: &mut Vec<String>) {
         .and_then(|s| serde_json::from_str::<Value>(&s).ok());
     match parsed {
         Some(v) => {
-            if let Err(e) = JSONSchema::compile(&v) {
+            if let Err(e) = validator_for(&v) {
                 errors.push(format!(
                     "schema failed to compile ({}): {e}",
                     path.display()

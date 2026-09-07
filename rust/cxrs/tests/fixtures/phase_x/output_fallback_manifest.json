@@ -1,0 +1,13 @@
+{
+  "fixture_id": "cargo_test_unrecognized_truncated_stream",
+  "command": ["cargo", "test"],
+  "input_path": "rust/cxrs/tests/fixtures/phase_x/cargo_unknown_fallback.txt",
+  "expected_reducer_kind": "test_output",
+  "expected_fallback": "source_text",
+  "required_spans": [
+    "custom harness protocol v7",
+    "case alpha completed with domain status amber",
+    "opaque trailer 00ff"
+  ],
+  "notes": "The unfamiliar and abruptly terminated harness stream contains none of the reducer markers; nonempty source evidence must survive verbatim normalization."
+}

@@ -234,6 +234,11 @@ fn dispatch_agent_prefixed_shortcuts(
             &format!("{app_name} cxcopy <command> [args...]"),
             deps.cmd_cxcopy,
         ),
+        "cxcapture" | "capture" => run_prefixed_cmd(
+            args,
+            &format!("{app_name} capture <command> [args...]"),
+            deps.cmd_capture,
+        ),
         _ => return None,
     };
     Some(out)

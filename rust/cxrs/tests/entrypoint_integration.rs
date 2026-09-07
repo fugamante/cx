@@ -5,19 +5,29 @@ use std::process::Command;
 
 use serde_json::Value;
 
-fn repo_root() -> PathBuf {
-    let mut cur = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+fn find_repo_root(mut cur: PathBuf) -> Option<PathBuf> {
     for _ in 0..6 {
         if cur.join(".cx").join("schemas").is_dir() && cur.join("bin").join("cx").is_file() {
-            return cur;
+            return Some(cur);
         }
         if !cur.pop() {
             break;
         }
     }
+    None
+}
+
+fn repo_root() -> PathBuf {
+    let runtime_dir = std::env::current_dir().expect("resolve test working directory");
+    // Cached test binaries may outlive a disposable build worktree.
+    for start in [runtime_dir, PathBuf::from(env!("CARGO_MANIFEST_DIR"))] {
+        if let Some(root) = find_repo_root(start) {
+            return root;
+        }
+    }
     panic!(
-        "unable to resolve repo root from {}",
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).display()
+        "unable to resolve repo root from runtime or compiled manifest path ({})",
+        env!("CARGO_MANIFEST_DIR")
     );
 }
 
@@ -38,6 +48,10 @@ fn bin_cx_version_reports_runtime() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("execution_path:"), "{stdout}");
+    assert!(
+        stdout.contains("operator_context.project: XSHELF (formerly CX)"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -318,6 +332,17 @@ fn version_tq_json() {
         Some(false)
     );
     assert_eq!(payload.get("name").and_then(Value::as_str), Some("cxrs"));
+    let context = payload
+        .get("operator_context")
+        .expect("version operator_context");
+    assert_eq!(
+        context.get("project_name").and_then(Value::as_str),
+        Some("XSHELF")
+    );
+    assert_eq!(
+        context.get("canonical_command").and_then(Value::as_str),
+        Some("xshelf")
+    );
 }
 
 #[test]

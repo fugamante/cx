@@ -1,0 +1,18 @@
+{
+  "fixture_id": "cargo_test_late_failure_after_noisy_harness",
+  "command": ["cargo", "test"],
+  "prefix_lines": 405,
+  "expected_max_lines": 400,
+  "required_spans": [
+    "test capture::tests::late_failure ... FAILED",
+    "thread 'capture::tests::late_failure' panicked",
+    "assertion `left == right` failed",
+    "left: \"late actual\"",
+    "right: \"late expected\"",
+    "failures:",
+    "capture::tests::late_failure",
+    "test result: FAILED. 0 passed; 1 failed",
+    "error: test failed"
+  ],
+  "notes": "The deterministic generated prefix models more than 400 recognized harness progress lines; the source suffix carries distinct terminal failure evidence."
+}

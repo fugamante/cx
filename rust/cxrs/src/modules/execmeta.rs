@@ -2,7 +2,7 @@ use chrono::Utc;
 use std::fs;
 use std::process::Command;
 
-use crate::paths::repo_root_hint;
+use crate::paths::source_root;
 use crate::process::run_command_output_with_timeout;
 
 pub fn prompt_preview(s: &str, max: usize) -> String {
@@ -11,7 +11,9 @@ pub fn prompt_preview(s: &str, max: usize) -> String {
 
 pub fn toolchain_version_string(app_version: &str) -> String {
     let mut base = app_version.to_string();
-    if let Some(root) = repo_root_hint() {
+    // Only development wrappers declare a source checkout. A standalone
+    // package must never derive its own version from the caller's repository.
+    if let Some(root) = source_root() {
         let version_file = root.join("VERSION");
         if let Ok(text) = fs::read_to_string(&version_file) {
             let trimmed = text.trim();

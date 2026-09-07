@@ -15,6 +15,7 @@ pub(crate) struct LogExecutionErrorInput<'a> {
     pub schema_prompt: Option<&'a str>,
     pub schema_raw: Option<&'a str>,
     pub schema_attempt: Option<u64>,
+    pub system_status: Option<i32>,
     pub err: &'a LlmRunError,
     pub started: &'a Instant,
 }
@@ -31,6 +32,7 @@ pub(crate) fn log_execution_error(input: LogExecutionErrorInput<'_>) {
         schema_prompt,
         schema_raw,
         schema_attempt,
+        system_status,
         err,
         started,
     } = input;
@@ -50,6 +52,7 @@ pub(crate) fn log_execution_error(input: LogExecutionErrorInput<'_>) {
         schema_attempt,
         timed_out: Some(timed_out),
         timeout_secs,
+        system_status,
         command_label,
         duration_ms: started.elapsed().as_millis() as u64,
         usage: Some(usage),

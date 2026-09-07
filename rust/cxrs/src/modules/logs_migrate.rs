@@ -34,6 +34,12 @@ fn get_opt_u64(obj: &serde_json::Map<String, Value>, key: &str) -> Option<u64> {
     obj.get(key).and_then(Value::as_u64)
 }
 
+fn get_opt_i32(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i32> {
+    obj.get(key)
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+}
+
 fn get_opt_bool(obj: &serde_json::Map<String, Value>, key: &str) -> Option<bool> {
     obj.get(key).and_then(Value::as_bool)
 }
@@ -158,6 +164,7 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.schema_attempt = get_opt_u64(obj, "schema_attempt");
     row.timed_out = get_opt_bool(obj, "timed_out");
     row.timeout_secs = get_opt_u64(obj, "timeout_secs");
+    row.system_status = get_opt_i32(obj, "system_status");
     row.command_label = get_opt_str(obj, "command_label");
     row.prompt_preview = get_opt_str(obj, "prompt_preview");
     row.policy_blocked = get_opt_bool(obj, "policy_blocked");

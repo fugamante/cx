@@ -65,6 +65,8 @@ mod logview;
 mod mode_cmd;
 #[path = "modules/native_cmd.rs"]
 mod native_cmd;
+#[path = "modules/operator_context.rs"]
+mod operator_context;
 #[path = "modules/optimize.rs"]
 mod optimize;
 #[path = "modules/optimize_print.rs"]

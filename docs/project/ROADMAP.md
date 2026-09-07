@@ -20,14 +20,41 @@
 - Landed additive Phase XI operator visibility on `telemetry --json` / `logs stats --json` through `capture_prompt_telemetry` for explicit `shadow_narrow` prompt-profile runs.
 - Landed additive `optimize --json` capture-prompt rollout guidance using the same run-log fields for configured/applied/fallback visibility and follow-up actions.
 - Landed additive `diag --json` capture-prompt rollout guidance with latest explicit-profile fallback context and follow-up action support.
+- Landed real `cargo test` command classification for the fixture-backed Phase
+  XI `test_output` reducer while keeping typed prompt assembly opt-in only.
+- Hardened the existing `test_output` lane with source fallback for unfamiliar
+  nonempty streams, bounded late-result retention, selector omission coverage,
+  and shadow-profile recovery evidence; no reducer family was widened.
+- Restored filename-guardrail parity for the Phase XI adversarial fixture set
+  without widening the grandfathered naming allowlist.
 - Landed additional HTTP adapter reliability coverage for timeout and policy-block permutations.
+- Landed cross-platform process-group timeout cleanup with TERM-to-KILL
+  escalation so timed commands cannot leave resistant descendants running.
+- Landed fail-closed `health` / `cxhealth` provider version probes so a
+  nonzero backend exit cannot be reported as operational.
 - Landed mixed-mode orchestration invariants on `task run-all` and `task_execution`, including summary-level accounting and timing checks.
 - Maintain release hygiene (contract policy + changelog + tagged releases).
+- Published `v2026.08.20` after final integrated-head validation of the Phase XI
+  reducer, linked-worktree Docker reliability, and dependency advisory patch.
+- `v2026.08.20` release source is validated; its annotated tag preserves the
+  exact release-head implementation and validation inputs.
+- `v2026.08.25` is published; its two native macOS archives and combined
+  checksum manifest remain unsigned and unnotarized.
+- `v2026.08.25` release source is validated; native Intel packaging evidence
+  passed on the exact implementation candidate without claiming signing or
+  notarization.
+- `v2026.08.29` release source is validated; Developer ID signing, Apple
+  notarization, public-byte verification, and Homebrew tap lifecycle evidence
+  passed from exact source `b8ea981b5ea0e6a64bfd92b87611f954d3c6288e`.
+- `v2026.08.29` is published; its two signed/notarized native archives,
+  checksum manifest, sanitized Apple evidence, and public Homebrew source
+  formula are available. No Homebrew bottle is published.
 
 ## Next (1-2 months)
 
-- Decide whether the current unreleased bundle should become the next tagged
-  release after the documented release-readiness validation stack is green.
+- `v2026.08.29` is published; future release cuts should use
+  `./scripts/release_pretag_check.sh` so changelog/history coherence is
+  validated before tagging.
 - Maintain the landed `XSHELF` rename as a compatibility migration, not a
   breaking command/env/state rename.
 - Keep dual-surface command docs/install defaults aligned so `xshelf` is
@@ -84,8 +111,8 @@
 
 - Release-candidate validation is documented in
   `docs/project/RELEASE_READINESS.md`.
-- The next release should not wait on published Docker images, provider sidecar
-  Compose recipes, Homebrew metadata, broader default capture prompt replacement,
+- Future releases should not wait on published Docker images, provider sidecar
+  Compose recipes, Homebrew publication, broader default capture prompt replacement,
   or new backend adapter families unless one of those items becomes explicit
   release scope.
 - Keep release notes, contract compatibility policy, and command-surface docs in
@@ -94,7 +121,6 @@
 ## Later (2+ months)
 
 - Pluggable backend adapters beyond primary/Ollama.
-- Incremental CLI packaging/distribution improvements (Homebrew-ready metadata).
 - Optional distributed execution backends (multi-process/remote workers) while preserving current log/schema contracts.
 - Backend capability experiments for local inference optimization must stay isolated from core XSHELF until they prove value and preserve adapter boundaries.
 - Current backend experiment note: `docs/turboquant/TURBOQUANT_SPIKE.md`
@@ -132,6 +158,9 @@
     - `.cx/local_models.json` registry
     - `xshelf llm models list|add|inspect|remove`
     - deterministic JSON/text outputs with focused integration coverage
+    - registry reads reject duplicate IDs, duplicate backend-scoped aliases,
+      malformed explicit structure, unsupported versions, and invalid typed
+      domains; replacement cannot overwrite a different identity
   - Slice 2 landed:
     - `llm use <ollama|llamacpp|mlx> <alias-or-id>` resolves registry tokens to `resolved_model`
     - `llm show` surfaces alias and resolved model fields when applicable

@@ -219,6 +219,7 @@ fn dispatch_agent_commands(cmd: &str, args: &[String], deps: &NativeDeps) -> Opt
         "cxo" => run_agent_cmd(args, 3, "cxo <command> [args...]", deps.cmd_cxo),
         "cxol" => run_agent_cmd(args, 3, "cxol <command> [args...]", deps.cmd_cxol),
         "cxcopy" => run_agent_cmd(args, 3, "cxcopy <command> [args...]", deps.cmd_cxcopy),
+        "capture" => run_agent_cmd(args, 3, "capture <command> [args...]", deps.cmd_capture),
         "fix" => run_agent_cmd(args, 3, "fix <command> [args...]", deps.cmd_fix),
         "cx-compat" => (deps.cmd_cx_compat)(&args[2..]),
         "next" => run_agent_cmd(args, 3, "next <command> [args...]", deps.cmd_next),

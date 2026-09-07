@@ -3,8 +3,10 @@
 backend_benchmark_report_tests
 backend_benchmark_strict_tests
 broker_benchmark_json_contract
+check_command_surface_docs
 check_fn_name_length
 check_rs_max_lines
+check_rust_toolchain_sync
 cli_edge_case_tests
 CX_MANUAL_FIELD_GUIDE
 LANDING_PAGE_RESEARCH_BOARD
@@ -16,6 +18,7 @@ PHASE_VI_PARALLEL_SUBSTRATE
 PHASE_VII_BUDGET_AWARE_ORCHESTRATION
 PHASE_VIII_LOCAL_MODEL_SUBSTRATE
 PHASE_X_TOKEN_COMPRESSION_LAYER
+PHASE_XI_TOKEN_COMPRESSION_RUNTIME_WIRING
 POST_PHASE_VI_OVERVIEW
 TURBOQUANT_GROUPED_SCALAR_SNAPSHOT
 test_output_reducer_manifest

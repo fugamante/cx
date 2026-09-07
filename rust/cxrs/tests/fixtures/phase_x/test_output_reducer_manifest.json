@@ -1,6 +1,6 @@
 {
   "fixture_id": "cargo_test_failure_assertion_context",
-  "command": ["test"],
+  "command": ["cargo", "test"],
   "exit_status": 101,
   "profile": "balanced",
   "input_path": "rust/cxrs/tests/fixtures/phase_x/cargo_test_failure.txt",
@@ -27,5 +27,5 @@
   "expected_lossiness_level": "semantic_extract",
   "max_uncertainty": "low",
   "min_reduction_ratio": 0.2,
-  "notes": "Fixture proves failing-test, assertion-context, summary, and repeated-warning recall before broad reducer rollout."
+  "notes": "Fixture proves real cargo test command classification plus failing-test, assertion-context, summary, and repeated-warning recall before broad reducer rollout."
 }

@@ -5,6 +5,7 @@ Start here:
 - [manuals/00_README.md](manuals/00_README.md) - operator manuals and rebuild notes
 
 Operate XSHELF:
+- [CODEX_HOOK.md](CODEX_HOOK.md) - fail-open Codex SessionStart integration
 - [manuals/01_pdf/CX_MANUAL_MASTER.pdf](manuals/01_pdf/CX_MANUAL_MASTER.pdf) - generated master manual PDF
 - [manuals/02_web/CX_MANUAL_MASTER.html](manuals/02_web/CX_MANUAL_MASTER.html) - tracked HTML reader mirror
 - [providers/HTTP_PROVIDER_TLS.md](providers/HTTP_PROVIDER_TLS.md) - HTTP provider TLS guidance

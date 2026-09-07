@@ -1,7 +1,10 @@
 use std::process::Command;
+use std::time::Instant;
 
 use crate::error::{EXIT_OK, format_error, print_runtime_error};
 use crate::process::run_command_with_stdin_output_with_timeout;
+use crate::runlog::{RunLogInput, log_primary_run};
+use crate::types::UsageStats;
 use crate::types::{CaptureStats, ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
 
 type TaskRunner = fn(TaskSpec) -> Result<ExecutionResult, String>;
@@ -154,6 +157,52 @@ pub fn cmd_cxcopy(command: &[String], run_task: TaskRunner) -> i32 {
         "cxcopy",
         &format!("all clipboard backends failed: {}", failures.join("; ")),
     )
+}
+
+pub fn cmd_capture(command: &[String], run_capture: CaptureRunner) -> i32 {
+    let started = Instant::now();
+    let (captured, status, capture_stats) = match run_capture(command) {
+        Ok(v) => v,
+        Err(e) => {
+            return print_runtime_error("capture", &e);
+        }
+    };
+    print!("{captured}");
+    if !captured.ends_with('\n') {
+        println!();
+    }
+
+    let usage = UsageStats {
+        input_tokens: Some(0),
+        cached_input_tokens: Some(0),
+        output_tokens: Some(0),
+    };
+    let command_label = shell_words::join(command.iter().map(String::as_str));
+    if let Err(e) = log_primary_run(RunLogInput {
+        tool: "capture",
+        prompt: &captured,
+        prompt_raw: Some(&captured),
+        prompt_filtered: Some(&captured),
+        schema_prompt: None,
+        schema_raw: None,
+        schema_attempt: None,
+        timed_out: None,
+        timeout_secs: None,
+        system_status: Some(status),
+        command_label: Some(&command_label),
+        duration_ms: started.elapsed().as_millis() as u64,
+        usage: Some(&usage),
+        capture: Some(&capture_stats),
+        schema_ok: true,
+        schema_reason: None,
+        schema_name: None,
+        quarantine_id: None,
+        policy_blocked: None,
+        policy_reason: None,
+    }) {
+        crate::cx_eprintln!("capture: failed to write run log: {e}");
+    }
+    status
 }
 
 pub fn cmd_fix(command: &[String], run_capture: CaptureRunner, run_task: TaskRunner) -> i32 {

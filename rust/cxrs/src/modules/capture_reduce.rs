@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,7 +120,7 @@ fn select_reducer(cmd: &[String], profile: ReduceProfile) -> ReducerKind {
         ("git", "log", _) | ("log", _, _) => ReducerKind::GitLog,
         ("grep", _, _) => ReducerKind::Grep,
         ("tree", _, _) | ("ls", _, _) => ReducerKind::TreeLs,
-        ("test", _, _) => ReducerKind::TestOutput,
+        ("test", _, _) | ("cargo", "test", _) => ReducerKind::TestOutput,
         (_, _, ReduceProfile::Deep) => ReducerKind::DeepFallback,
         _ => ReducerKind::GenericPassthrough,
     }
@@ -280,7 +280,10 @@ fn reduce_grep_like(input: &str) -> String {
 }
 
 fn reduce_test_output(input: &str) -> String {
+    const HEAD_LIMIT: usize = 380;
+    const TAIL_LIMIT: usize = 20;
     let mut out: Vec<String> = Vec::new();
+    let mut tail: VecDeque<String> = VecDeque::new();
     let mut seen_warnings: HashSet<String> = HashSet::new();
     let mut context_lines = 0usize;
 
@@ -305,19 +308,31 @@ fn reduce_test_output(input: &str) -> String {
             if lower.contains("warning") && !seen_warnings.insert(line.to_string()) {
                 continue;
             }
-            out.push(line.to_string());
+            if out.len() < HEAD_LIMIT {
+                out.push(line.to_string());
+            } else if !lower.contains("warning") && !tail.iter().any(|saved| saved == line) {
+                if tail.len() == TAIL_LIMIT {
+                    tail.pop_front();
+                }
+                tail.push_back(line.to_string());
+            }
             if actual_panic || actual_assertion {
                 context_lines = context_lines.max(3);
             }
         } else if context_lines > 0 {
-            out.push(line.to_string());
+            if out.len() < HEAD_LIMIT {
+                out.push(line.to_string());
+            } else if !tail.iter().any(|saved| saved == line) {
+                if tail.len() == TAIL_LIMIT {
+                    tail.pop_front();
+                }
+                tail.push_back(line.to_string());
+            }
             context_lines -= 1;
         }
-
-        if out.len() >= 400 {
-            break;
-        }
     }
+
+    out.extend(tail);
 
     out.join("\n")
 }
@@ -339,11 +354,18 @@ pub fn native_reduce_output(cmd: &[String], input: &str) -> String {
 pub fn native_reduce_output_with_metadata(cmd: &[String], input: &str) -> ReductionResult {
     let profile = reduce_profile_from_env();
     let kind = select_reducer(cmd, profile);
-    let reduced = reduce_by_kind(kind, input);
+    let mut reduced = reduce_by_kind(kind, input);
+    if kind == ReducerKind::TestOutput && !input.is_empty() && reduced.is_empty() {
+        reduced = input.to_string();
+    }
     let text = normalize_generic(&reduced);
     let metadata = reduction_metadata(kind, profile, input, &text);
     ReductionResult { text, metadata }
 }
+
+#[cfg(test)]
+#[path = "capture_reduce_extra.rs"]
+mod extra_tests;
 
 #[cfg(test)]
 mod tests {
@@ -356,14 +378,6 @@ mod tests {
         assert!(out.contains("On branch main"));
         assert!(out.contains("modified: src/main.rs"));
         assert!(!out.contains("random noise"));
-    }
-
-    #[test]
-    fn reduce_test_output_surfaces_failures() {
-        let input = "line 1\nFAIL test_x\nwarning: foo\nline 2\n";
-        let out = native_reduce_output(&["test".into()], input);
-        assert!(out.contains("FAIL test_x"));
-        assert!(out.contains("warning: foo"));
     }
 
     #[test]
@@ -410,23 +424,6 @@ index 111..222 100644
         assert_eq!(result.metadata.reducer_kind, "git_status");
         assert_eq!(result.metadata.raw_chars, input.chars().count());
         assert_eq!(result.metadata.reduced_chars, result.text.chars().count());
-    }
-
-    #[test]
-    fn passthrough_metadata_is_lossless() {
-        let input = "plain output\nkept as-is\n";
-        let metadata = reduction_metadata(
-            ReducerKind::GenericPassthrough,
-            ReduceProfile::Balanced,
-            input,
-            input,
-        );
-        assert_eq!(metadata.reducer_kind, "generic_passthrough");
-        assert_eq!(metadata.profile, "balanced");
-        assert_eq!(metadata.lossiness_level, "lossless");
-        assert_eq!(metadata.omitted_lines, 0);
-        assert_eq!(metadata.omitted_chars, 0);
-        assert!(metadata.critical_sections_kept.is_empty());
     }
 
     #[test]

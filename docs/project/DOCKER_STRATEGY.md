@@ -57,6 +57,8 @@ Current floor:
 - `scripts/compat_docker.sh --ci`
 - Linux-hosted guardrails/tests/shell regression steps that mirror the core
   `cxrs-compat` checks without depending on GitHub event payload context
+- linked worktrees use an ephemeral read-only HEAD/tag metadata snapshot
+  instead of mounting the parent checkout's common Git directory
 - JSON report metadata under `ci_parity` records the local-vs-CI deltas that
   Docker does not claim to reproduce
 

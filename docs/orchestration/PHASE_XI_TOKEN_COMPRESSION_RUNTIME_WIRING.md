@@ -84,7 +84,7 @@ These measurements remain test-only and non-public. They do not write telemetry,
 
 Slice 3 is complete. An explicit `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` profile now allows typed assembly to replace the prompt text only for the reducer classes already covered by Phase XI fixtures:
 
-- `test` output through the `test_output` reducer
+- `cargo test` output through the `test_output` reducer
 - `git diff` style output through the `git_diff` reducer
 
 The profile remains opt-in and fallback-safe:
@@ -117,6 +117,17 @@ Follow-on rule:
 - default prompt replacement remains deferred until opt-in evidence is broader than the current narrow command corpus
 
 Post-phase additive visibility landed through telemetry rather than default wiring changes:
+
+- the test-output fixture now uses the real `cargo test` command shape, proving
+  reducer selection and existing recall/fallback gates together rather than
+  relying on a synthetic `test` executable
+- the `test_output` boundary now preserves source text when a nonempty stream
+  has no recognized markers, and its 400-line bound reserves deterministic tail
+  capacity for distinct late failure, assertion, and final-summary evidence
+- adversarial coverage keeps `cargo check`, `cargo build`, `cargo clippy`, bare
+  `cargo`, empty commands, and `cargo-test` executables on generic capture;
+  shadow-profile coverage confirms unfamiliar `cargo test` streams remain
+  recoverable without changing the opt-in eligibility set
 
 - `telemetry --json` / `logs stats --json` now expose additive `capture_prompt_telemetry`
 - run logs now carry nullable prompt-profile fields for explicit `shadow_narrow` runs:

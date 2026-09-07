@@ -147,6 +147,11 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
         description: "Compatibility helper that copies cxo output to clipboard",
     },
     CommandHelp {
+        name: "capture",
+        usage: "capture <cmd...>",
+        description: "Run command, print budgeted captured output, and log capture stats without LLM",
+    },
+    CommandHelp {
         name: "fix",
         usage: "fix <cmd...>",
         description: "Explain failures and suggest next steps (text)",

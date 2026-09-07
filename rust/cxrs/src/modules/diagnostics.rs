@@ -17,6 +17,7 @@ use crate::execmeta::{toolchain_version_string, utc_now_iso};
 use crate::json_mode::resolve_json_mode;
 use crate::logs::file_len;
 use crate::logs::load_values;
+use crate::operator_context::{operator_lines, operator_value};
 use crate::paths::{repo_root_hint, resolve_log_file};
 use crate::provider_adapter::{
     adapter_policy_value, runtime_caps_json, selected_runtime_caps, selected_tq_caps,
@@ -1559,6 +1560,7 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
             "clip_mode": cfg.clip_mode,
             "clip_footer": cfg.clip_footer,
             "log_file": log_file,
+            "operator_context": operator_value(),
             "last_run_id": last_run_id(),
             "schema_registry_dir": schema_dir.display().to_string(),
             "schema_registry_files": schema_count(&schema_dir),
@@ -1602,6 +1604,9 @@ pub fn cmd_diag(app_version: &str, args: &[String]) -> i32 {
     }
 
     print_diag_header(app_version, cfg);
+    for line in operator_lines() {
+        println!("{line}");
+    }
     println!("capture_provider_config: {provider}");
     println!(
         "capture_provider_resolved: {}",

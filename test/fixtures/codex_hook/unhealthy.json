@@ -1,0 +1,6 @@
+{
+  "session_id": "fixture-unhealthy",
+  "cwd": "__CWD__",
+  "hook_event_name": "SessionStart",
+  "source": "compact"
+}

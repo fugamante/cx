@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use serde_json::Value;
 use std::fs;
+use std::process::{Command, Output};
 
 #[test]
 fn command_parsing_and_file_io_edge_cases() {
@@ -31,6 +32,312 @@ fn command_parsing_and_file_io_edge_cases() {
     let unknown_flag = repo.run(&["task", "run", "task_001", "--what"]);
     assert_eq!(unknown_flag.status.code(), Some(2));
     assert!(stderr_str(&unknown_flag).contains("unknown flag"));
+}
+
+#[test]
+fn capture_zero_tokens() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "noisy",
+        r#"#!/usr/bin/env bash
+printf 'alpha\nbeta\ngamma\ndelta\n'
+"#,
+    );
+
+    let out = repo.run_with_env(
+        &["capture", "noisy"],
+        &[
+            ("CX_CONTEXT_BUDGET_CHARS", "16"),
+            ("CX_CONTEXT_BUDGET_LINES", "2"),
+            ("CX_CONTEXT_CLIP_MODE", "tail"),
+        ],
+    );
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("gamma"), "stdout={stdout}");
+    assert!(stdout.contains("delta"), "stdout={stdout}");
+    assert!(
+        stdout.contains("[XSHELF] output clipped: original=23/4, kept=11/2, mode=tail"),
+        "stdout={stdout}"
+    );
+
+    let last = parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("capture run log row");
+    assert_eq!(last.get("tool").and_then(Value::as_str), Some("capture"));
+    assert_eq!(
+        last.get("system_output_len_raw").and_then(Value::as_u64),
+        Some(23)
+    );
+    assert_eq!(
+        last.get("system_output_len_clipped")
+            .and_then(Value::as_u64),
+        Some(11)
+    );
+    assert_eq!(last.get("input_tokens").and_then(Value::as_u64), Some(0));
+    assert_eq!(
+        last.get("effective_input_tokens").and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(last.get("output_tokens").and_then(Value::as_u64), Some(0));
+    assert_eq!(last.get("system_status").and_then(Value::as_i64), Some(0));
+}
+
+#[test]
+fn capture_status_logged() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "failcap",
+        r#"#!/usr/bin/env bash
+printf 'captured failure\n'
+exit 7
+"#,
+    );
+
+    let out = repo.run(&["capture", "failcap"]);
+    assert_eq!(out.status.code(), Some(7), "stderr={}", stderr_str(&out));
+    assert!(
+        stdout_str(&out).contains("captured failure"),
+        "stdout={}",
+        stdout_str(&out)
+    );
+
+    let last = parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("capture run log row");
+    assert_eq!(last.get("tool").and_then(Value::as_str), Some("capture"));
+    assert_eq!(last.get("system_status").and_then(Value::as_i64), Some(7));
+    assert_eq!(last.get("input_tokens").and_then(Value::as_u64), Some(0));
+    assert_eq!(last.get("output_tokens").and_then(Value::as_u64), Some(0));
+}
+
+#[test]
+fn capture_status_validated() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "capok",
+        r#"#!/usr/bin/env bash
+printf 'capture ok\n'
+"#,
+    );
+
+    let out = repo.run(&["capture", "capok"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+
+    let mut rows = parse_jsonl(&repo.runs_log());
+    let row = rows
+        .last_mut()
+        .and_then(Value::as_object_mut)
+        .expect("capture run log object");
+    row.remove("system_status");
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(repo.runs_log(), text).expect("rewrite runs");
+
+    let validate = repo.run(&["logs", "validate", "--strict"]);
+    assert_eq!(
+        validate.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        stdout_str(&validate),
+        stderr_str(&validate)
+    );
+    assert!(
+        stdout_str(&validate)
+            .contains("capture row missing command-provenance field 'system_status'"),
+        "stdout={}",
+        stdout_str(&validate)
+    );
+}
+
+#[test]
+fn capture_status_legacy() {
+    let repo = TempRepo::new("cxrs-it");
+    repo.write_mock(
+        "capok",
+        r#"#!/usr/bin/env bash
+printf 'capture ok\n'
+"#,
+    );
+
+    let out = repo.run(&["capture", "capok"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+
+    let mut rows = parse_jsonl(&repo.runs_log());
+    let row = rows
+        .last_mut()
+        .and_then(Value::as_object_mut)
+        .expect("capture run log object");
+    row.remove("system_status");
+    let mut text = String::new();
+    for row in rows {
+        text.push_str(&serde_json::to_string(&row).expect("serialize row"));
+        text.push('\n');
+    }
+    fs::write(repo.runs_log(), text).expect("rewrite runs");
+
+    let validate = repo.run(&["logs", "validate", "--strict", "--legacy-ok"]);
+    assert!(
+        validate.status.success(),
+        "stdout={}",
+        stdout_str(&validate)
+    );
+    assert!(stdout_str(&validate).contains("status: ok"));
+}
+
+#[test]
+fn capture_log_override() {
+    let caller = tempfile::tempdir().expect("caller tempdir");
+    let external = tempfile::tempdir().expect("external tempdir");
+    let log_file = external.path().join("runs").join("capture.jsonl");
+
+    let git = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(caller.path())
+        .output()
+        .expect("git init");
+    assert!(
+        git.status.success(),
+        "git init failed: stderr={}",
+        String::from_utf8_lossy(&git.stderr)
+    );
+
+    fn run_at(cwd: &std::path::Path, log_file: &std::path::Path, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_cxrs"))
+            .args(args)
+            .current_dir(cwd)
+            .env("CX_LOG_FILE", log_file)
+            .env("CX_REPO_ROOT", cwd)
+            .env("CX_CONTEXT_BUDGET_CHARS", "32")
+            .env("CX_CONTEXT_BUDGET_LINES", "2")
+            .env("CX_CONTEXT_CLIP_MODE", "tail")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .expect("run cxrs")
+    }
+
+    let capture = run_at(
+        caller.path(),
+        &log_file,
+        &[
+            "capture",
+            "sh",
+            "-c",
+            "printf 'alpha\\nbeta\\ngamma\\ndelta\\n'",
+        ],
+    );
+    assert!(
+        capture.status.success(),
+        "stdout={} stderr={}",
+        stdout_str(&capture),
+        stderr_str(&capture)
+    );
+    assert!(
+        log_file.is_file(),
+        "missing override log {}",
+        log_file.display()
+    );
+    assert!(
+        !caller.path().join(".cx").exists(),
+        "capture with CX_LOG_FILE should not create caller .cx"
+    );
+
+    let last = parse_jsonl(&log_file)
+        .into_iter()
+        .last()
+        .expect("override capture row");
+    let caller_root = fs::canonicalize(caller.path()).expect("canonical caller path");
+    assert_eq!(last.get("tool").and_then(Value::as_str), Some("capture"));
+    assert_eq!(last.get("input_tokens").and_then(Value::as_u64), Some(0));
+    assert_eq!(
+        last.get("effective_input_tokens").and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(last.get("output_tokens").and_then(Value::as_u64), Some(0));
+    assert_eq!(
+        last.get("repo_root").and_then(Value::as_str),
+        Some(caller_root.to_string_lossy().as_ref())
+    );
+
+    let budget = run_at(caller.path(), &log_file, &["budget"]);
+    assert!(budget.status.success(), "stderr={}", stderr_str(&budget));
+    assert!(
+        stdout_str(&budget).contains(&format!("log_file: {}", log_file.display())),
+        "budget stdout={}",
+        stdout_str(&budget)
+    );
+    assert!(
+        stdout_str(&budget).contains("system_output_len_raw: 23"),
+        "budget stdout={}",
+        stdout_str(&budget)
+    );
+
+    let trace = run_at(caller.path(), &log_file, &["trace"]);
+    assert!(trace.status.success(), "stderr={}", stderr_str(&trace));
+    assert!(
+        stdout_str(&trace).contains("tool: capture"),
+        "trace stdout={}",
+        stdout_str(&trace)
+    );
+    assert!(
+        stdout_str(&trace).contains("input_tokens: 0"),
+        "trace stdout={}",
+        stdout_str(&trace)
+    );
+    assert!(
+        stdout_str(&trace).contains(&format!("log_file: {}", log_file.display())),
+        "trace stdout={}",
+        stdout_str(&trace)
+    );
+    assert!(
+        !caller.path().join(".cx").exists(),
+        "budget/trace with CX_LOG_FILE should not create caller .cx"
+    );
+}
+
+#[test]
+fn routes_capture_listed() {
+    let repo = TempRepo::new("cxrs-it");
+
+    let out = repo.run(&["routes"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("capture: rust (capture)"), "{stdout}");
+    assert!(
+        stdout.contains("cxcapture: rust (cx-compat cxcapture)"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn routes_registry_complete() {
+    let repo = TempRepo::new("cxrs-it");
+
+    let out = repo.run(&["routes", "--json"]);
+    assert!(out.status.success(), "stderr={}", stderr_str(&out));
+    let rows: Vec<Value> = serde_json::from_str(stdout_str(&out).trim()).expect("routes JSON");
+    let names: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter_map(|row| row.get("name").and_then(Value::as_str))
+        .collect();
+
+    for expected in ["schema", "cxcore", "cxmode", "cxbroker", "launch"] {
+        assert!(
+            names.contains(expected),
+            "missing route {expected}: {names:?}"
+        );
+    }
+    assert!(
+        !names.contains("--help"),
+        "option aliases should not appear as command routes"
+    );
 }
 
 #[test]

@@ -41,6 +41,7 @@ pub struct NativeDeps {
     pub cmd_cxo: fn(&[String]) -> i32,
     pub cmd_cxol: fn(&[String]) -> i32,
     pub cmd_cxcopy: fn(&[String]) -> i32,
+    pub cmd_capture: fn(&[String]) -> i32,
     pub cmd_fix: fn(&[String]) -> i32,
     pub cmd_budget: fn() -> i32,
     pub cmd_log_tail: fn(usize) -> i32,

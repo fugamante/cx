@@ -6,6 +6,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      package_revision:
+        description: Full source commit to package; defaults to the dispatched workflow commit
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +51,14 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           python3 ./scripts/check_rust_toolchain_sync.py --repo-root "$GITHUB_WORKSPACE"
+          python3 ./scripts/check_version_sync.py --repo-root "$GITHUB_WORKSPACE"
+
+      - name: Packaging Lifecycle Guardrail
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 ./test/package_release_test.py
+          python3 ./test/package_signing_test.py
+          python3 ./test/reproduce_packages_test.py
 
       - name: Command Surface Changelog Gate
         run: |
@@ -81,14 +94,14 @@ jobs:
             echo "== cargo fmt --check =="
             cargo fmt --check
             echo
-            echo "== cargo check =="
-            cargo check
+            echo "== cargo check --locked =="
+            cargo check --locked
             echo
-            echo "== cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments =="
-            cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments
+            echo "== cargo clippy --locked --all-targets -- -D warnings -D clippy::too_many_arguments =="
+            cargo clippy --locked --all-targets -- -D warnings -D clippy::too_many_arguments
             echo
-            echo "== cargo test --tests -- --test-threads=1 =="
-            cargo test --tests -- --test-threads=1
+            echo "== cargo test --locked --tests -- --test-threads=1 =="
+            cargo test --locked --tests -- --test-threads=1
           } 2>&1 | tee "$log"
           exit "${PIPESTATUS[0]}"
 
@@ -121,7 +134,7 @@ jobs:
           {"execution_id":"e1","timestamp":"2026-01-01T00:00:00Z","command":"cx","backend_used":"primary","capture_provider":"native","execution_mode":"lean","duration_ms":10,"schema_enforced":false,"schema_valid":true}
           {"execution_id":"e2","timestamp":"2026-01-01T00:00:01Z","command":"next","backend_used":"primary","capture_provider":"native","execution_mode":"deterministic","duration_ms":20,"schema_enforced":true,"schema_valid":true,"task_id":"task_1"}
           JSONL
-          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- logs stats 2 --json)"
+          out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- logs stats 2 --json)"
           echo "$out" | jq -e '.window_runs == 2' >/dev/null
           echo "$out" | jq -e '.fields | type == "array"' >/dev/null
           echo "$out" | jq -e '.contract_drift.new_keys_second_half | type == "array"' >/dev/null
@@ -138,7 +151,7 @@ jobs:
           cat > "$repo/.cx/cxlogs/runs.jsonl" <<'JSONL'
           {"execution_id":"s1","timestamp":"2026-01-01T00:00:00Z","command":"cx","backend_used":"primary","adapter_type":"primary-cli","provider_transport":"process","provider_status":null,"http_request_profile":null,"http_provider_format":null,"http_parser_mode":null,"capture_provider":"native","execution_mode":"lean","duration_ms":10,"schema_enforced":false,"schema_valid":true,"quarantine_id":null,"task_id":null,"system_output_len_raw":null,"system_output_len_processed":null,"system_output_len_clipped":null,"system_output_lines_raw":null,"system_output_lines_processed":null,"system_output_lines_clipped":null,"input_tokens":null,"cached_input_tokens":null,"effective_input_tokens":null,"output_tokens":null,"policy_blocked":null,"policy_reason":null,"timed_out":null,"timeout_secs":null,"command_label":null,"retry_attempt":null,"retry_max":null,"retry_reason":null,"retry_backoff_ms":null}
           JSONL
-          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- logs validate --strict)"
+          out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- logs validate --strict)"
           echo "$out" | grep -q "status: ok"
 
       - name: Phase IV Scheduler Gate
@@ -154,14 +167,14 @@ jobs:
           {"execution_id":"s3","timestamp":"2026-01-01T00:00:02Z","command":"cxo","tool":"cxo","backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean","duration_ms":16,"schema_enforced":false,"schema_valid":true,"queue_ms":3400,"worker_id":"w1"}
           JSONL
           set +e
-          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- diag --json --strict --window 3)"
+          out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- diag --json --strict --window 3)"
           rc=$?
           set -e
           test "$rc" -eq 1
           echo "$out" | jq -e '.severity != "ok"' >/dev/null
           echo "$out" | jq -e '.scheduler.queue_rows == 3' >/dev/null
           echo "$out" | jq -e '.retry.rows_with_retry_metadata == 0' >/dev/null
-          sched="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- scheduler --json --window 3)"
+          sched="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- scheduler --json --window 3)"
           echo "$sched" | jq -e '.scheduler_window_requested == 3' >/dev/null
           echo "$sched" | jq -e '.retry.rows_with_retry_metadata == 0' >/dev/null
 
@@ -176,7 +189,7 @@ jobs:
           {"execution_id":"o1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"primary","capture_provider":"native","execution_mode":"lean","duration_ms":1000,"schema_enforced":false,"schema_valid":true,"task_id":"task_001","retry_attempt":1,"timed_out":true}
           {"execution_id":"o2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"primary","capture_provider":"native","execution_mode":"lean","duration_ms":800,"schema_enforced":false,"schema_valid":true,"task_id":"task_001","retry_attempt":2,"timed_out":false}
           JSONL
-          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- optimize 10 --json)"
+          out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- optimize 10 --json)"
           echo "$out" | jq -e '.scoreboard.retry_health.rows_after_retry == 1' >/dev/null
           echo "$out" | jq -e '.scoreboard.retry_health.rows_after_retry_success == 1' >/dev/null
           echo "$out" | jq -e '.scoreboard.retry_health.attempt_histogram | type == "array"' >/dev/null
@@ -192,7 +205,7 @@ jobs:
           {"execution_id":"b1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean","duration_ms":1000,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20}
           {"execution_id":"b2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean","duration_ms":1500,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":90,"output_tokens":18}
           JSONL
-          out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend primary --backend ollama --window 10 --strict --min-runs 1 --json)"
+          out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend primary --backend ollama --window 10 --strict --min-runs 1 --json)"
           echo "$out" | jq -e '.window == 10' >/dev/null
           echo "$out" | jq -e '.summary | type == "array"' >/dev/null
           echo "$out" | jq -e '.summary | length == 2' >/dev/null
@@ -207,7 +220,7 @@ jobs:
           {"execution_id":"bw2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo","backend_used":"ollama","backend_selected":"ollama","capture_provider":"native","execution_mode":"lean","duration_ms":950,"schema_enforced":false,"schema_valid":true}
           JSONL
           set +e
-          warn_out="$(cd "$repo" && cargo run --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend primary --backend ollama --window 10 --strict --min-runs 2 --severity warn --json)"
+          warn_out="$(cd "$repo" && cargo run --locked --quiet --manifest-path "$GITHUB_WORKSPACE/rust/cxrs/Cargo.toml" -- broker benchmark --backend primary --backend ollama --window 10 --strict --min-runs 2 --severity warn --json)"
           warn_rc=$?
           set -e
           test "$warn_rc" -eq 1
@@ -231,6 +244,7 @@ jobs:
           python3 tools/release_check.py \
             --repo-root "$GITHUB_WORKSPACE" \
             --max-version-age-days 14 \
+            --require-published-status-docs \
             --cadence-exception-label release-exception \
             --event-name "${{ github.event_name }}" \
             --event-path "${{ github.event_path }}"
@@ -344,3 +358,217 @@ jobs:
           path: ${{ env.CXRS_ARTIFACT_DIR }}
           retention-days: 14
           if-no-files-found: ignore
+
+  intel-package:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout exact dispatched revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up pinned Rust with Intel target
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-apple-darwin
+
+      - name: Validate native Intel package lifecycle
+        env:
+          XSHELF_PACKAGE_REVISION: ${{ inputs.package_revision }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/intel-artifacts"
+          mkdir -p "$evidence"
+          exec > >(tee "$evidence/intel-package.log") 2>&1
+
+          package_revision="${XSHELF_PACKAGE_REVISION:-$GITHUB_SHA}"
+          [[ "$package_revision" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$package_revision^{commit}"
+          test "$(uname -m)" = x86_64
+          translated="$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)"
+          test "$translated" = 0
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          {
+            echo "runner_arch=$(uname -m)"
+            echo "translated=$translated"
+            echo "controller_revision=$(git rev-parse HEAD)"
+            echo "source_revision=$package_revision"
+            echo "runner_image=${ImageOS:-unknown}"
+            echo "runner_version=${ImageVersion:-unknown}"
+          } > "$evidence/host.txt"
+
+          ./scripts/check_action_pins.sh "$GITHUB_WORKSPACE"
+          python3 ./scripts/check_rust_toolchain_sync.py --repo-root "$GITHUB_WORKSPACE"
+          python3 ./scripts/check_version_sync.py --repo-root "$GITHUB_WORKSPACE"
+          python3 ./test/package_release_test.py
+          python3 ./test/package_signing_test.py
+          python3 ./test/reproduce_packages_test.py
+          rustup run 1.95.0 cargo test --locked \
+            --manifest-path rust/cxrs/Cargo.toml \
+            --test package_runtime -- --test-threads=1
+
+          packages="$evidence/packages"
+          python3 ./scripts/reproduce_packages.py \
+            --source-repo "$GITHUB_WORKSPACE" \
+            --revision "$package_revision" \
+            --target x86_64-apple-darwin \
+            --approved-prefix "$RUNNER_TEMP" \
+            --canonical-root "$RUNNER_TEMP/xshelf-canonical-native" \
+            --output-dir "$packages"
+          version="$(tr -d '[:space:]' < VERSION)"
+          archive="$packages/xshelf-${version}-x86_64-apple-darwin.tar.gz"
+          observed="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          python3 ./scripts/package_release.py verify "$archive"
+          cp "$archive" "$archive.sha256" "$packages/SHA256SUMS" \
+            "$packages/reproduction.json" "$evidence/"
+          echo "$observed  $(basename "$archive")" > "$evidence/native-SHA256SUMS"
+
+          extracted="$RUNNER_TEMP/extracted"
+          mkdir -p "$extracted"
+          tar -xzf "$archive" -C "$extracted"
+          package_root="$extracted/xshelf-${version}-x86_64-apple-darwin"
+          file "$package_root/bin/xshelf" | grep -q x86_64
+          test "$(readlink "$package_root/bin/xs")" = xshelf
+          test "$(readlink "$package_root/bin/cx")" = xshelf
+          cp "$package_root/manifest.json" "$package_root/provenance.json" "$evidence/"
+          python3 - "$package_root/provenance.json" "$package_revision" <<'PY'
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert value["architecture"] == "x86_64-apple-darwin"
+          assert value["source_revision"] == sys.argv[2]
+          assert value["source_dirty"] is False
+          assert value["signed"] is False
+          assert value["notarized"] is False
+          PY
+
+          runtime_home="$RUNNER_TEMP/runtime-home"
+          caller="$RUNNER_TEMP/caller"
+          mkdir -p "$runtime_home" "$caller/.git"
+          (
+            cd "$caller"
+            env -i HOME="$runtime_home" PATH=/usr/bin:/bin \
+              "$package_root/bin/xshelf" version --json > "$evidence/version.json"
+            env -i HOME="$runtime_home" PATH=/usr/bin:/bin \
+              "$package_root/bin/xs" contracts export --profile full --json \
+              > "$evidence/contracts.json"
+            env -i HOME="$runtime_home" PATH=/usr/bin:/bin \
+              "$package_root/bin/cx" core --json > "$evidence/core.json"
+          )
+          python3 - "$evidence/version.json" "$evidence/contracts.json" \
+            "$evidence/core.json" <<'PY'
+          import json, pathlib, sys
+          for path in sys.argv[1:]:
+              json.loads(pathlib.Path(path).read_text())
+          PY
+          test ! -e "$caller/.cx"
+          test -z "$(find "$runtime_home" -mindepth 1 -print -quit)"
+
+          brew_repo="$(brew --repository)"
+          brew_config="$brew_repo/.git/config"
+          global_before="$(shasum -a 256 "$brew_config" | awk '{print $1}')"
+          fixture="$RUNNER_TEMP/homebrew-fixture"
+          git clone --quiet --no-local "$brew_repo" "$fixture/prefix"
+          isolated_config="$fixture/prefix/.git/config"
+          isolated_before="$(shasum -a 256 "$isolated_config" | awk '{print $1}')"
+          mkdir -p "$fixture/user-state/.cx" "$fixture/user-state/.codex" \
+            "$fixture/cache" "$fixture/logs" "$fixture/tmp" "$fixture/xdg"
+          echo keep-cx > "$fixture/user-state/.cx/state-marker"
+          echo keep-codex > "$fixture/user-state/.codex/state-marker"
+          python3 ./scripts/render_formula_fixture.py \
+            --output "$fixture/xshelf.rb" \
+            --version "$version" \
+            --intel-archive "$archive"
+
+          brew_cmd=(/bin/bash "$fixture/prefix/bin/brew")
+          brew_env=(env \
+            HOME="$fixture/user-state" \
+            HOMEBREW_CACHE="$fixture/cache" \
+            HOMEBREW_LOGS="$fixture/logs" \
+            HOMEBREW_TEMP="$fixture/tmp" \
+            XDG_CACHE_HOME="$fixture/xdg" \
+            HOMEBREW_DEVELOPER=1 \
+            HOMEBREW_NO_ANALYTICS=1 \
+            HOMEBREW_NO_AUTO_UPDATE=1 \
+            HOMEBREW_NO_INSTALL_CLEANUP=1 \
+            HOMEBREW_NO_AUTOREMOVE=1)
+          "${brew_env[@]}" "${brew_cmd[@]}" config | tee "$evidence/brew-config.txt"
+          "${brew_env[@]}" "${brew_cmd[@]}" install --formula "$fixture/xshelf.rb"
+          "${brew_env[@]}" "${brew_cmd[@]}" test xshelf
+
+          installed="$fixture/prefix/bin/xshelf"
+          file "$installed" | grep -q x86_64
+          test -L "$fixture/prefix/bin/xs"
+          test -L "$fixture/prefix/bin/cx"
+          test -e "$fixture/prefix/share/man/man1/xshelf.1"
+          test -e "$fixture/prefix/share/man/man1/xs.1"
+          test -e "$fixture/prefix/share/man/man1/cx.1"
+          env -i HOME="$fixture/user-state" PATH="$fixture/prefix/bin:/usr/bin:/bin" \
+            "$installed" version --json > "$evidence/brew-version.json"
+          if env -i HOME="$fixture/user-state" PATH="$fixture/prefix/bin:/usr/bin:/bin" \
+            /bin/bash -c 'command -v rustc || command -v cargo'; then
+            exit 1
+          fi
+
+          keg="$("${brew_env[@]}" "${brew_cmd[@]}" --prefix xshelf)"
+          mkdir -p "$fixture/relocated"
+          ditto "$keg" "$fixture/relocated/xshelf"
+          env -i HOME="$fixture/user-state" PATH="$fixture/relocated/xshelf/bin:/usr/bin:/bin" \
+            "$fixture/relocated/xshelf/bin/xshelf" version --json \
+            > "$evidence/relocated-version.json"
+          test "$(cat "$fixture/user-state/.cx/state-marker")" = keep-cx
+          test "$(cat "$fixture/user-state/.codex/state-marker")" = keep-codex
+
+          python3 - "$fixture/xshelf.rb" "$version" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+          needle = f'  version "{sys.argv[2]}"\n'
+          assert text.count(needle) == 1
+          path.write_text(text.replace(needle, needle + "  revision 1\n"))
+          PY
+          "${brew_env[@]}" "${brew_cmd[@]}" upgrade --formula "$fixture/xshelf.rb"
+          "${brew_env[@]}" "${brew_cmd[@]}" test xshelf
+          "${brew_env[@]}" "${brew_cmd[@]}" list --versions xshelf \
+            | tee "$evidence/brew-version-list.txt"
+          test "$(cat "$fixture/user-state/.cx/state-marker")" = keep-cx
+          test "$(cat "$fixture/user-state/.codex/state-marker")" = keep-codex
+
+          "${brew_env[@]}" "${brew_cmd[@]}" uninstall --force xshelf
+          test ! -e "$fixture/prefix/bin/xshelf"
+          test ! -e "$fixture/prefix/Cellar/xshelf"
+          test "$(cat "$fixture/user-state/.cx/state-marker")" = keep-cx
+          test "$(cat "$fixture/user-state/.codex/state-marker")" = keep-codex
+
+          global_after="$(shasum -a 256 "$brew_config" | awk '{print $1}')"
+          isolated_after="$(shasum -a 256 "$isolated_config" | awk '{print $1}')"
+          test "$global_after" = "$global_before"
+          test "$isolated_after" = "$isolated_before"
+          {
+            echo "global_config_unchanged=true"
+            echo "isolated_config_unchanged=true"
+            echo "user_state_preserved=true"
+            echo "install_test_upgrade_uninstall=true"
+          } > "$evidence/lifecycle.txt"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Upload Intel validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: xshelf-intel-package-${{ github.run_id }}
+          path: ${{ runner.temp }}/intel-artifacts
+          retention-days: 90
+          if-no-files-found: error

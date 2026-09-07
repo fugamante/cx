@@ -5,6 +5,7 @@ use serde_json::json;
 use crate::capture::budget_config_from_env;
 use crate::config::app_config;
 use crate::execmeta::toolchain_version_string;
+use crate::operator_context::{operator_lines, operator_value};
 use crate::paths::{resolve_log_file, resolve_quarantine_dir, resolve_state_file};
 use crate::provider_adapter::{
     current_provider_capabilities, http_auth_head, http_auth_mode, http_auth_src, http_profile,
@@ -222,6 +223,7 @@ fn core_payload(app_version: &str) -> serde_json::Value {
         "schema_enforcement": true,
         "logging_enabled": logging_enabled(),
         "log_file": log_file,
+        "operator_context": operator_value(),
     })
 }
 
@@ -342,6 +344,7 @@ fn version_payload(app_name: &str, app_version: &str) -> serde_json::Value {
             "conventional_commits": state_pref("preferences.conventional_commits"),
             "pr_summary_format": state_pref("preferences.pr_summary_format"),
         },
+        "operator_context": operator_value(),
     })
 }
 
@@ -377,6 +380,9 @@ pub fn print_version(app_name: &str, app_version: &str, args: &[String]) {
     let active_model = if model.is_empty() { "<unset>" } else { &model };
 
     print_version_header(app_name, app_version, &cwd, &execution_path, &source);
+    for line in operator_lines() {
+        println!("{line}");
+    }
     print_version_paths(&log_file, &state_file, &quarantine_dir);
     print_version_runtime(
         &cfg.cx_mode,
@@ -492,6 +498,9 @@ pub fn cmd_core(app_version: &str, args: &[String]) -> i32 {
 
     println!("== cxcore ==");
     println!("version: {}", toolchain_version_string(app_version));
+    for line in operator_lines() {
+        println!("{line}");
+    }
     println!("execution_path: {execution_path}");
     println!("bash_fallback_used: {bash_fallback}");
     println!("backend: {backend}");

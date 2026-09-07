@@ -23,6 +23,12 @@ Flow:
 2. Promote to `main` only after parity + smoke checks pass.
 3. Keep branch READMEs branch-specific.
 4. Prefer concise names that stay within `3` segments total.
+5. Treat longer test names as a committed guardrail exception only when the
+   behavior being tested needs a readable scenario label; production Rust names
+   still follow the `3` segment rule unless a local allowlist requires
+   otherwise.
+6. Use comments to explain invariants, compatibility constraints, and
+   non-obvious tradeoffs rather than expanding function names into prose.
 
 Examples:
 - good: `orchestration/contracts`, `runtime/task-guidance`
@@ -89,13 +95,20 @@ Requirements:
   - interactive TTY: prompt once and persist,
   - non-interactive: fail clearly with remediation.
 
-## 8) Packaging track (future-ready)
+## 8) Packaging track (candidate-ready)
 
 Prepare `cxrs` for Homebrew formula use from `main`:
 - keep command/help output stable,
 - avoid runtime side effects during install,
 - keep dependencies explicit in docs,
 - tag release points from `main`.
+
+The local candidate foundation now provides deterministic thin macOS archives,
+native aliases, packaged schemas and man pages, checksum/provenance metadata,
+an unpublished formula template, and an ARM64 temporary-prefix Homebrew
+lifecycle lane. Publication, clean-source dual-architecture evidence, native
+Intel execution, signing, and notarization remain separate release gates; see
+`docs/PACKAGING.md`.
 
 ## 9) Decommission plan for Bash-heavy logic
 

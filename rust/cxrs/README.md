@@ -60,6 +60,7 @@ Primary toggles:
 - `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
 - `CX_CMD_TIMEOUT_SECS` (external command timeout, default `120`)
 - `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, `CX_TIMEOUT_SHELL_SECS` (optional per-command-class timeout overrides)
+- Timed commands run in isolated process groups so timeout cleanup covers spawned descendants.
 - `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`
 
 ## Command execution path
@@ -291,7 +292,8 @@ cargo run -- replay <id>
 
 - add richer prompt templates by mode with optional schema snippets
 - add explicit chunking helpers and expose chunk-aware fanout workflows
-- align remaining edge-case behavior for `cxhealth`/`cxdoctor` and command-output formatting parity
+- continue aligning `cxhealth`/`cxdoctor` command-output edge cases; health
+  version probes now fail closed on nonzero provider exits
 - add explicit session-mode preflight (`subscription` vs `visitor`) with log metadata
 
 ## License

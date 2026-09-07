@@ -1105,6 +1105,7 @@ fn log_convergence_summary(
         schema_attempt: None,
         timed_out: None,
         timeout_secs: None,
+        system_status: Some(winner.status_code),
         command_label: Some("task_converge"),
         duration_ms: 0,
         usage: Some(&usage),

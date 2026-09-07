@@ -6,6 +6,7 @@ use std::process::Command;
 use crate::config::{cli_app_name, command_matches_cli, command_with_cli};
 use crate::llm::extract_agent_text;
 use crate::logs::load_values;
+use crate::operator_context::operator_lines;
 use crate::paths::resolve_log_file;
 use crate::process::run_command_output_with_timeout;
 use crate::provider_adapter::adapter_policy_value;
@@ -1596,6 +1597,9 @@ pub fn print_doctor(run_llm_jsonl: JsonlRunner) -> i32 {
     let backend = llm_backend();
     let llm_bin = llm_bin_name();
     println!("== {} doctor ==", cli_app_name());
+    for line in operator_lines() {
+        println!("{line}");
+    }
     let missing_required = check_required_bins(&backend, llm_bin);
     if missing_required > 0 {
         println!(
@@ -1626,7 +1630,19 @@ pub fn cmd_health(run_llm_jsonl: JsonlRunner, run_cxo: CxoRunner) -> i32 {
     let mut version_cmd = Command::new(llm_bin);
     version_cmd.arg("--version");
     match run_command_output_with_timeout(version_cmd, &format!("{llm_bin} --version")) {
-        Ok(out) => print!("{}", String::from_utf8_lossy(&out.stdout)),
+        Ok(out) if out.status.success() => print!("{}", String::from_utf8_lossy(&out.stdout)),
+        Ok(out) => {
+            let status = out
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "terminated by signal".to_string());
+            crate::cx_eprintln!(
+                "{} health: {backend} --version exited with status {status}",
+                cli_app_name(),
+            );
+            return 1;
+        }
         Err(e) => {
             crate::cx_eprintln!("{} health: {backend} --version failed: {e}", cli_app_name());
             return 1;

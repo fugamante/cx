@@ -1,6 +1,7 @@
 use crate::config::cli_app_name;
 use crate::error::{CxError, CxResult};
 use crate::log_contract::REQUIRED_STRICT_FIELDS;
+use crate::quarantine::read_quarantine_record;
 use crate::types::RunEntry;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -93,7 +94,7 @@ fn validate_row_fields(
     if legacy_ok {
         validate_legacy_or_modern_row(obj, line_no, out);
     } else {
-        validate_required_fields(obj, line_no, out);
+        validate_required_fields(obj, line_no, out, true, false);
     }
 }
 
@@ -104,7 +105,7 @@ fn validate_legacy_or_modern_row(
 ) {
     let is_modern = obj.contains_key("execution_id") && obj.contains_key("timestamp");
     if is_modern {
-        validate_required_fields(obj, line_no, out);
+        validate_required_fields(obj, line_no, out, false, true);
         return;
     }
     let mut legacy_ok = true;
@@ -126,6 +127,8 @@ fn validate_required_fields(
     obj: &serde_json::Map<String, Value>,
     line_no: usize,
     out: &mut LogValidateOutcome,
+    check_links: bool,
+    allow_legacy_status: bool,
 ) {
     for k in REQUIRED_STRICT_FIELDS {
         if !obj.contains_key(k) {
@@ -133,6 +136,78 @@ fn validate_required_fields(
             out.issues
                 .push(format!("line {line_no}: missing required field '{k}'"));
         }
+    }
+    validate_command_fields(obj, line_no, out, allow_legacy_status);
+    if check_links {
+        validate_schema_link(obj, line_no, out);
+    }
+}
+
+fn validate_command_fields(
+    obj: &serde_json::Map<String, Value>,
+    line_no: usize,
+    out: &mut LogValidateOutcome,
+    allow_legacy_status: bool,
+) {
+    let command = obj.get("command").and_then(Value::as_str).unwrap_or("");
+    let tool = obj.get("tool").and_then(Value::as_str).unwrap_or("");
+    if command != "capture" && tool != "capture" {
+        return;
+    }
+    let Some(status) = obj.get("system_status") else {
+        if allow_legacy_status {
+            return;
+        }
+        out.corrupted_lines.insert(line_no);
+        out.issues.push(format!(
+            "line {line_no}: capture row missing command-provenance field 'system_status'"
+        ));
+        return;
+    };
+    if allow_legacy_status && status.is_null() {
+        return;
+    }
+    if status
+        .as_i64()
+        .and_then(|v| i32::try_from(v).ok())
+        .is_none()
+    {
+        out.corrupted_lines.insert(line_no);
+        out.issues.push(format!(
+            "line {line_no}: capture row field 'system_status' must be an integer status"
+        ));
+    }
+}
+
+fn validate_schema_link(
+    obj: &serde_json::Map<String, Value>,
+    line_no: usize,
+    out: &mut LogValidateOutcome,
+) {
+    let enforced = obj
+        .get("schema_enforced")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let valid = obj
+        .get("schema_valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if !enforced || valid {
+        return;
+    }
+    let qid = obj
+        .get("quarantine_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if qid.is_empty() {
+        return;
+    }
+    if let Err(e) = read_quarantine_record(qid) {
+        out.corrupted_lines.insert(line_no);
+        out.issues.push(format!(
+            "line {line_no}: schema failure quarantine_id '{qid}' is not readable: {e}"
+        ));
     }
 }
 

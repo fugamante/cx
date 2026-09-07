@@ -80,6 +80,26 @@ fn quarantine_file_by_id(id: &str) -> Option<PathBuf> {
     if path.exists() { Some(path) } else { None }
 }
 
+fn validate_quarantine_record(rec: &QuarantineRecord, requested_id: &str) -> Result<(), String> {
+    if rec.id != requested_id {
+        return Err(format!(
+            "quarantine id mismatch: requested {requested_id}, record has {}",
+            rec.id
+        ));
+    }
+    if rec.prompt_sha256 != sha256_hex(&rec.prompt) {
+        return Err(format!(
+            "quarantine prompt_sha256 mismatch for id {requested_id}"
+        ));
+    }
+    if rec.raw_sha256 != sha256_hex(&rec.raw_response) {
+        return Err(format!(
+            "quarantine raw_sha256 mismatch for id {requested_id}"
+        ));
+    }
+    Ok(())
+}
+
 pub fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
     let path = quarantine_file_by_id(id).ok_or_else(|| format!("quarantine id not found: {id}"))?;
     let mut s = String::new();
@@ -87,7 +107,10 @@ pub fn read_quarantine_record(id: &str) -> Result<QuarantineRecord, String> {
         .map_err(|e| format!("cannot open {}: {e}", path.display()))?
         .read_to_string(&mut s)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    serde_json::from_str(&s).map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))
+    let rec: QuarantineRecord = serde_json::from_str(&s)
+        .map_err(|e| format!("invalid quarantine JSON {}: {e}", path.display()))?;
+    validate_quarantine_record(&rec, id)?;
+    Ok(rec)
 }
 
 fn read_quarantine_rows(qdir: &std::path::Path, n: usize) -> Vec<QuarantineRecord> {

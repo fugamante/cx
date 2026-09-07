@@ -1,0 +1,48 @@
+class Xshelf < Formula
+  desc "Deterministic runtime tooling for LLM-assisted repository work"
+  homepage "https://github.com/fugamante/XSHELF"
+  version "@@VERSION@@"
+  license "MIT"
+
+  on_arm do
+    url "@@ARM_URL@@"
+    sha256 "@@ARM_SHA256@@"
+  end
+
+  on_intel do
+    url "@@INTEL_URL@@"
+    sha256 "@@INTEL_SHA256@@"
+  end
+
+  def install
+    bin.install "bin/xshelf"
+    bin.install_symlink "xshelf" => "xs"
+    bin.install_symlink "xshelf" => "cx"
+    pkgshare.install "share/xshelf/schemas"
+    man1.install "share/man/man1/xshelf.1"
+    man1.install "share/man/man1/xs.1"
+    man1.install "share/man/man1/cx.1"
+    doc.install "README.md", "LICENSE"
+  end
+
+  test do
+    version_output = shell_output("#{bin}/xshelf version --json")
+    assert_match '"contract_version": "version.v1"', version_output
+    assert_match '"version": "@@VERSION@@"', version_output
+    assert_predicate bin/"xs", :executable?
+    assert_predicate bin/"cx", :executable?
+    assert_predicate man1/"xshelf.1", :exist?
+    assert_predicate man1/"xs.1", :exist?
+    assert_predicate man1/"cx.1", :exist?
+    assert_predicate pkgshare/"schemas/commitjson.schema.json", :exist?
+    assert_predicate pkgshare/"schemas/diffsum.schema.json", :exist?
+    assert_predicate pkgshare/"schemas/fixrun.schema.json", :exist?
+    assert_predicate pkgshare/"schemas/next.schema.json", :exist?
+    assert_match "\n  xs <command>", shell_output("#{bin}/xs help")
+    assert_match "\n  cx <command>", shell_output("#{bin}/cx help")
+    schema_output = shell_output("#{bin}/xshelf schema list --json")
+    assert_match '"file_count":4', schema_output.delete(" ")
+    contract_output = shell_output("#{bin}/xshelf contracts validate --profile eval-lab --json")
+    assert_match '"ok": true', contract_output
+  end
+end

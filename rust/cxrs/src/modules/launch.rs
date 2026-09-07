@@ -83,13 +83,13 @@ fn print_missing_cxops(app_name: &str, cxops_bin: &str, err: &str, json_out: boo
                 "reason": "cxops_unavailable",
                 "cxops_bin": cxops_bin,
                 "error": err,
-                "install_hint": "Install the XSHELF suite or run cx-eval-lab/scripts/install_cxops.sh."
+                "install_hint": "Install the optional cxops companion separately, then pass --cxops-bin PATH if it is not on PATH."
             })
         );
     } else {
         crate::cx_eprintln!("{app_name} launch: {err}");
         crate::cx_eprintln!(
-            "{app_name} launch: install cxops with the XSHELF suite installer or run cx-eval-lab/scripts/install_cxops.sh"
+            "{app_name} launch: install the optional cxops companion separately, then pass --cxops-bin PATH if it is not on PATH"
         );
     }
     EXIT_RUNTIME

@@ -6,6 +6,28 @@ use common::{
 };
 use serde_json::Value;
 use std::fs;
+use std::process::{Command, Stdio};
+use std::thread::sleep;
+use std::time::Duration;
+
+fn child_is_running(pid: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat"));
+        stat.ok()
+            .and_then(|value| value.split_whitespace().nth(2).map(str::to_string))
+            .is_some_and(|state| state != "Z")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Command::new("kill")
+            .args(["-0", pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+}
 
 fn assert_required_run_fields(v: &Value) {
     for key in [
@@ -31,6 +53,41 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
 printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":64,"cached_input_tokens":8,"output_tokens":12}}}}'
 "#
     )
+}
+
+#[test]
+fn health_version_failure() {
+    for args in [&["health"][..], &["cx-compat", "cxhealth"][..]] {
+        let repo = TempRepo::new("cxrs-rel");
+        repo.write_mock_primary(
+            r#"#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' 'broken version probe' >&2
+  exit 23
+fi
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}'
+"#,
+        );
+
+        let out = repo.run(args);
+        assert!(
+            !out.status.success(),
+            "health must reject a failed version probe for {args:?}; stdout={} stderr={}",
+            stdout_str(&out),
+            stderr_str(&out)
+        );
+        assert!(
+            stderr_str(&out).contains("--version exited with status 23"),
+            "missing version-probe failure for {args:?}: {}",
+            stderr_str(&out)
+        );
+        assert!(
+            !stdout_str(&out).contains("All systems operational."),
+            "health reported success after failed version probe for {args:?}"
+        );
+    }
 }
 
 #[test]
@@ -71,6 +128,48 @@ sleep 2
 }
 
 #[test]
+fn timeout_stops_children() {
+    let repo = TempRepo::new("cxrs-rel");
+    let pid_file = repo.root.join("timeout-child.pid");
+    let script = format!(
+        "(trap '' TERM; exec sleep 30) >/dev/null 2>&1 & child=$!; printf '%s' \"$child\" > '{}'; wait",
+        pid_file.display()
+    );
+
+    let out = repo.run_with_env(
+        &["capture", "bash", "-c", &script],
+        &[("CX_CMD_TIMEOUT_SECS", "1")],
+    );
+    assert!(
+        !out.status.success(),
+        "expected timeout failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    let child_pid = fs::read_to_string(&pid_file).expect("read child pid");
+    let child_pid = child_pid.trim();
+    let mut child_alive = false;
+    for _ in 0..20 {
+        child_alive = child_is_running(child_pid);
+        if !child_alive {
+            break;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    if child_alive {
+        let _ = Command::new("kill")
+            .args(["-KILL", child_pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    assert!(
+        !child_alive,
+        "timed-out capture left SIGTERM-resistant child {child_pid} running"
+    );
+}
+
+#[test]
 fn timeout_llm_precedence_logged_end_to_end() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
@@ -103,7 +202,7 @@ sleep 2
 }
 
 #[test]
-fn timeout_git_precedence_logged_end_to_end() {
+fn git_timeout_diagnostic() {
     let repo = TempRepo::new("cxrs-rel");
     repo.write_mock(
         "git",
@@ -259,6 +358,44 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":123,"cached_inpu
 }
 
 #[test]
+fn schema_link_strict() {
+    let repo = TempRepo::new("cxrs-rel");
+    repo.write_mock(
+        concat!("co", "dex"),
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"not-json"}}'
+"#,
+    );
+
+    let out = repo.run_with_env(&["next", "echo", "hello"], &[]);
+    assert!(!out.status.success(), "expected schema failure");
+
+    let qid = parse_jsonl(&repo.runs_log())
+        .last()
+        .and_then(|row| row.get("quarantine_id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    assert!(!qid.is_empty(), "schema failure run missing quarantine_id");
+    fs::remove_file(repo.quarantine_file(&qid)).expect("remove quarantine fixture");
+
+    let validate = repo.run(&["logs", "validate", "--strict"]);
+    assert_eq!(
+        validate.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        stdout_str(&validate),
+        stderr_str(&validate)
+    );
+    assert!(
+        stdout_str(&validate).contains("schema failure quarantine_id"),
+        "stdout={}",
+        stdout_str(&validate)
+    );
+}
+
+#[test]
 fn missing_schema_file_fails_structured_command() {
     let repo = TempRepo::new("cxrs-rel");
     let schema_file = repo
@@ -304,6 +441,80 @@ fn corrupted_quarantine_record_fails_show_clear() {
     assert!(
         stderr_str(&out).contains("invalid quarantine JSON"),
         "expected invalid quarantine JSON error: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn quarantine_id_guard() {
+    let repo = TempRepo::new("cxrs-rel");
+    write_quarantine_fixture(&repo, "expected_id", "next", "{}", "prompt", "raw");
+
+    let mut rec: Value = serde_json::from_str(
+        &fs::read_to_string(repo.quarantine_file("expected_id")).expect("read quarantine"),
+    )
+    .expect("fixture JSON");
+    rec["id"] = Value::String("other_id".to_string());
+    fs::write(
+        repo.quarantine_file("expected_id"),
+        serde_json::to_string_pretty(&rec).expect("serialize tampered record"),
+    )
+    .expect("rewrite quarantine");
+
+    let out = repo.run_with_env(&["quarantine", "show", "expected_id"], &[]);
+    assert!(
+        !out.status.success(),
+        "expected id mismatch failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("quarantine id mismatch"),
+        "expected id mismatch in stderr: {}",
+        stderr_str(&out)
+    );
+}
+
+#[test]
+fn quarantine_hash_guard() {
+    let repo = TempRepo::new("cxrs-rel");
+    repo.write_mock(
+        concat!("co", "dex"),
+        r#"#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"commands\":[\"echo ok\"]}"}}'
+"#,
+    );
+    let next_schema = fs::read_to_string(
+        repo.root
+            .join(".cx")
+            .join("schemas")
+            .join("next.schema.json"),
+    )
+    .expect("read next schema");
+    let qid = "hash_mismatch";
+    write_quarantine_fixture(&repo, qid, "next", &next_schema, "prompt", "raw");
+
+    let mut rec: Value =
+        serde_json::from_str(&fs::read_to_string(repo.quarantine_file(qid)).expect("read q"))
+            .expect("fixture JSON");
+    rec["raw_response"] = Value::String("tampered raw".to_string());
+    fs::write(
+        repo.quarantine_file(qid),
+        serde_json::to_string_pretty(&rec).expect("serialize tampered record"),
+    )
+    .expect("rewrite quarantine");
+
+    let out = repo.run_with_env(&["replay", qid], &[]);
+    assert!(
+        !out.status.success(),
+        "expected hash mismatch failure; stdout={} stderr={}",
+        stdout_str(&out),
+        stderr_str(&out)
+    );
+    assert!(
+        stderr_str(&out).contains("quarantine raw_sha256 mismatch"),
+        "expected raw hash mismatch in stderr: {}",
         stderr_str(&out)
     );
 }

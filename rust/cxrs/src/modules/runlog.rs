@@ -5,7 +5,7 @@ use crate::config::app_config;
 use crate::execmeta::{is_schema_tool, make_execution_id, prompt_preview, utc_now_iso};
 use crate::llm::effective_input_tokens;
 use crate::logs::{append_jsonl, validate_execution_log_row};
-use crate::paths::{repo_root, resolve_log_file, resolve_schema_fail_log_file};
+use crate::paths::{repo_root_hint, resolve_log_file, resolve_schema_fail_log_file};
 use crate::provider_adapter::{
     http_profile_opt, selected_adapter_name, selected_http_parser_mode_opt,
     selected_http_provider_format_opt, selected_provider_status, selected_provider_transport,
@@ -27,6 +27,7 @@ pub struct RunLogInput<'a> {
     pub schema_attempt: Option<u64>,
     pub timed_out: Option<bool>,
     pub timeout_secs: Option<u64>,
+    pub system_status: Option<i32>,
     pub command_label: Option<&'a str>,
     pub duration_ms: u64,
     pub usage: Option<&'a UsageStats>,
@@ -74,7 +75,7 @@ fn cwd_scope_root() -> (String, String, String) {
         .ok()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let root = repo_root()
+    let root = repo_root_hint()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
     let scope = if root.is_empty() { "global" } else { "repo" }.to_string();
@@ -311,6 +312,7 @@ pub fn log_primary_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.schema_attempt = input.schema_attempt;
     row.timed_out = input.timed_out;
     row.timeout_secs = input.timeout_secs;
+    row.system_status = input.system_status;
     row.command_label = input.command_label.map(|s| s.to_string());
     row.prompt_preview = Some(prompt_preview(filtered_prompt, 180));
     row.policy_blocked = input.policy_blocked;

@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::env;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::state::{read_state_value, value_at_path};
@@ -7,7 +8,10 @@ use crate::state::{read_state_value, value_at_path};
 /// Canonical application identity (used by routing/help/version surfaces).
 pub const APP_NAME: &str = "cxrs";
 pub const APP_DESC: &str = "Rust runtime for the XSHELF/CX toolchain";
-pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub fn app_version() -> &'static str {
+    include_str!("../../../../VERSION").trim()
+}
 
 /// Canonical runtime defaults.
 pub const DEFAULT_CONTEXT_BUDGET_CHARS: usize = 12_000;
@@ -18,11 +22,22 @@ pub const DEFAULT_QUARANTINE_LIST: usize = 20;
 pub const DEFAULT_CMD_TIMEOUT_SECS: usize = 120;
 pub const CLI_ALIASES: &[&str] = &["xshelf", "xs", "cx"];
 
+fn alias_from_path(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    CLI_ALIASES.contains(&name).then(|| name.to_string())
+}
+
 pub fn cli_app_name() -> String {
     env::var("CX_CLI_NAME")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .or_else(|| {
+            env::args_os()
+                .next()
+                .and_then(|p| alias_from_path(Path::new(&p)))
+        })
+        .or_else(|| env::current_exe().ok().and_then(|p| alias_from_path(&p)))
         .unwrap_or_else(|| "xshelf".to_string())
 }
 
@@ -182,4 +197,21 @@ pub fn init_app_config() {
 
 pub fn app_config() -> &'static AppConfig {
     APP_CONFIG.get_or_init(AppConfig::from_env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::alias_from_path;
+    use std::path::Path;
+
+    #[test]
+    fn alias_path_ok() {
+        assert_eq!(
+            alias_from_path(Path::new("/tmp/xshelf")).as_deref(),
+            Some("xshelf")
+        );
+        assert_eq!(alias_from_path(Path::new("/tmp/xs")).as_deref(), Some("xs"));
+        assert_eq!(alias_from_path(Path::new("/tmp/cx")).as_deref(), Some("cx"));
+        assert_eq!(alias_from_path(Path::new("/tmp/cxrs")), None);
+    }
 }

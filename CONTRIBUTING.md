@@ -6,6 +6,41 @@
 - Bash is compatibility/bootstrap only.
 - Keep behavior deterministic and non-interactive unless explicitly required.
 
+## Operator Session Discipline
+
+- When working inside this repository, treat local repo identity as the first
+  source of truth before reaching for external project lookup. Start from the
+  current working directory, this file, the root `README.md`, and active
+  `docs/project/` policy docs.
+- For feasibility or implementation questions, answer from the local XSHELF
+  runtime state first. Prefer read-only checks such as `./bin/xshelf version`,
+  `./bin/xshelf core --json`, `./bin/xshelf task check --json`, and
+  `./bin/xshelf doctor` before speculating about unrelated public projects.
+- Close completed passes with current state, validation performed, residual
+  risks, and a recommended next direction. When a follow-up pass is useful,
+  include a copyable final prompt with goal, priorities, validation, guardrails,
+  and required final-report fields.
+- Do not generate final prompts mechanically. A next prompt must advance a new
+  decision gate, validation depth, approved mutation, or project objective. If
+  a pass only confirms the same state or completes an audit, ask for the
+  unblocked decision directly instead of repeating the previous prompt shape.
+- In Codex sessions, use an explicit XSHELF lane for noisy or broad command
+  output instead of assuming every tool call is wrapped automatically. Prefer
+  `./bin/xshelf capture ...` for read-only logs, tests, diffs, diagnostics, and
+  repo scans that may exceed ordinary context needs, then check
+  `./bin/xshelf budget` and `./bin/xshelf trace` when token efficiency or
+  clipping quality is part of the question. Use direct shell commands for small
+  exact-output probes. Use `./bin/xshelf cxo ...` only when a natural-language
+  interpretation is worth provider cost and agentic mutation risk. Treat
+  `capture` as provider-safe, not command-sandboxed: the wrapped command can
+  still modify files if the command itself writes.
+- For cross-repo use, an absolute XSHELF path such as
+  `/path/to/xshelf/bin/xshelf capture ...` is still an explicit lane, not a
+  global wrapper. Without `CX_LOG_FILE`, telemetry is written under the caller
+  repo's `.cx/cxlogs/runs.jsonl`. Set `CX_LOG_FILE` when capture evidence should
+  be kept outside the caller repo, and reuse that value for `budget` and
+  `trace`.
+
 ## Branding and Command Stability
 
 - Project branding is `XSHELF (formerly CX)`.
@@ -40,9 +75,13 @@ cd ../..
 ./scripts/compat_docker.sh --quick
 ```
 
-`./scripts/guardrails.sh` includes the release-cadence gate
-(`tools/release_check.py --repo-root ../.. --max-version-age-days 14`) and its
-Python unit tests so the default local path matches `cxrs-compat` CI.
+`./scripts/guardrails.sh` includes the release-cadence gate and its Python unit
+tests so the default local path matches `cxrs-compat` CI. The gate runs
+`tools/release_check.py` with `--max-version-age-days 14` and
+`--require-published-status-docs`; the published-status check follows the newest
+final-release `vN.N.N` tag reachable from `HEAD`, not rolling `VERSION`.
+Run this strict check from a checkout with tags and sufficient history; a
+tagless or depth-limited checkout fails with an explicit fetch diagnostic.
 Use `./scripts/compat_docker.sh --smoke` for a faster Linux-hosted bind-mounted
 signal before paying for the full quick compat suite.
 Smoke prerequisites:
@@ -63,6 +102,10 @@ Do not treat `--smoke` as a release or compat signoff step; use `--quick` or
 Use `./scripts/compat_docker.sh --ci` when you want the local Linux core
 guardrail subset before pushing; inspect `ci_parity.intentional_deltas` in the
 JSON report for workflow-only gates it does not reproduce.
+Linked Git worktrees are supported without mounting the parent checkout's
+common `.git` directory. The wrapper creates a temporary read-only metadata
+snapshot containing the current HEAD history and tags, mounts it over
+`/work/.git`, and removes it when the run exits.
 Use `./scripts/compat_docker.sh --rebuild --full` when you need a Linux-hosted
 compat pass without changing the host-native `scripts/compat_local.sh` contract.
 
@@ -94,11 +137,36 @@ state, and the entrypoint contract.
 - Keep Rust/file/integration guardrails green locally before push: `./scripts/guardrails.sh`, `./scripts/check_rs_max_lines.sh`, and `./scripts/check_integration_guardrails.sh`.
 - Keep third-party GitHub Actions pinned to full 40-character commit SHAs; validate with `./scripts/check_action_pins.sh .`.
 
+## Naming And Comments
+
+- Production Rust identifiers and file stems follow the global compact naming
+  rule: max `3` semantic segments (`2` underscores), enforced by
+  `rust/cxrs/scripts/guardrails.sh`.
+- Longer production names require a committed local allowlist entry with a
+  compatibility or migration reason; do not add long names ad hoc for prose-like
+  clarity.
+- Integration test names have a deliberate local exception: max `7` segments
+  and max `48` characters, enforced by `check_test_naming.py`. This is for
+  behavior-readable test cases only and does not weaken production naming.
+- Prefer concise comments that explain invariants, compatibility constraints,
+  boundaries, or non-obvious tradeoffs. Avoid comments that restate what the
+  code already says.
+
 ## Commit Guidance
 
 - Keep commits focused and reviewable.
 - Prefer small mechanical refactors before functional changes.
 - Add migration notes when changing log/schema contracts.
+
+## Merge Selection
+
+- Use rebase merge when a pull request contains an intentionally structured,
+  independently reviewable commit series whose boundaries improve audit,
+  bisect, or backport workflows.
+- Use squash merge when fixups are present or the pull request represents one
+  logically indivisible change.
+- Merge only after required status checks pass. Keep `main` linear; merge
+  commits remain disabled.
 
 ## Branch Naming
 

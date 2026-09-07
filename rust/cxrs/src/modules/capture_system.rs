@@ -269,6 +269,10 @@ pub fn run_system_command_capture(cmd: &[String]) -> Result<(String, i32, Captur
 }
 
 #[cfg(test)]
+#[path = "capture_system_extra.rs"]
+mod extra_tests;
+
+#[cfg(test)]
 mod tests {
     use super::super::capture_reduce::native_reduce_output_with_metadata;
     use super::*;
@@ -329,36 +333,6 @@ mod tests {
 
         assert!(output < metadata);
         assert!(shadow.text.contains("uncertainty: high"));
-    }
-    #[test]
-    fn shadow_does_not_change_result() {
-        let cmd = vec!["test".to_string()];
-        let raw = "running 1 test\ntest api_error ... FAILED\nthread 'api_error' panicked\nerror: root cause\n";
-        let cfg = test_budget(1000, 80);
-        let without_shadow = process_capture(
-            &cmd,
-            101,
-            raw.to_string(),
-            true,
-            false,
-            CapturePromptProfile::Legacy,
-            &cfg,
-        );
-        let with_shadow = process_capture(
-            &cmd,
-            101,
-            raw.to_string(),
-            true,
-            true,
-            CapturePromptProfile::Legacy,
-            &cfg,
-        );
-
-        assert_eq!(without_shadow.0, with_shadow.0);
-        assert_eq!(
-            format!("{:?}", without_shadow.1),
-            format!("{:?}", with_shadow.1)
-        );
     }
     #[test]
     fn shadow_narrow_assembles() {

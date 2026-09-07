@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CXRS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-help_out="$(cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- help)"
+help_out="$(cargo run --locked --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- help)"
 
 required_cmds=(
   version where doctor state policy bench
@@ -34,7 +34,7 @@ compat_aliases=(
 )
 
 for alias in "${compat_aliases[@]}"; do
-  out="$(cargo run --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- cx-compat "$alias" 2>&1 || true)"
+  out="$(cargo run --locked --quiet --manifest-path "$CXRS_DIR/Cargo.toml" -- cx-compat "$alias" 2>&1 || true)"
   if grep -q "unsupported command" <<<"$out"; then
     echo "[parity] unsupported compat alias: $alias" >&2
     missing=1

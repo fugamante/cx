@@ -18,15 +18,7 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - parity suite validates `policy_blocked` key presence
   - no behavior regressions in existing parity output
 
-## 3) Add explicit test for `CX_TIMEOUT_GIT_SECS`
-
-- Area: `rust/cxrs/tests/reliability_integration.rs`
-- Goal: verify git-class timeout override is respected.
-- Acceptance:
-  - mock `git` command path
-  - timeout event logs `timed_out=true` and expected timeout seconds
-
-## 4) Improve `xshelf help` examples for task runner
+## 3) Improve `xshelf help` examples for task runner
 
 - Area: `rust/cxrs/src/modules/help.rs`
 - Goal: add practical examples for `task run` and `task run-all`.
@@ -35,7 +27,7 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - compatibility examples still render when invoked through `cx help`
   - no command parser changes required
 
-## 5) Add test for native capture stability under malformed system output
+## 4) Add test for native capture stability under malformed system output
 
 - Area: `rust/cxrs/tests/reliability_integration.rs`
 - Goal: verify malformed command output never breaks internal native capture/logging.
@@ -43,7 +35,7 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - `capture_provider=native`
   - command still exits successfully in non-error path
 
-## 6) Add `--json` output for `xshelf policy show`
+## 5) Add `--json` output for `xshelf policy show`
 
 - Area: `rust/cxrs/src/modules/policy.rs`
 - Goal: machine-readable policy output for CI checks.
@@ -51,14 +43,14 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - preserves current human output by default
   - `--json` prints valid JSON and exits 0
 
-## 7) Tighten README command examples to avoid absolute paths
+## 6) Tighten README command examples to avoid absolute paths
 
 - Area: `README.md`, `rust/cxrs/README.md`
 - Goal: keep examples repo-relative and portable.
 - Acceptance:
   - no `/Users/...` references in command examples
 
-## 8) Add quarantine fixture helper for tests
+## 7) Add quarantine fixture helper for tests
 
 - Area: `rust/cxrs/tests/`
 - Goal: deduplicate quarantine fixture setup used in replay tests.
@@ -66,14 +58,14 @@ This list is intentionally scoped for first-time contributors. Every item includ
   - no behavior changes
   - test readability improved
 
-## 9) Add test for `CX_SCHEMA_RELAXED=1` replay behavior
+## 8) Add test for `CX_SCHEMA_RELAXED=1` replay behavior
 
 - Area: `rust/cxrs/tests/reliability_integration.rs`
 - Goal: document/verify relaxed-mode impact in replay path.
 - Acceptance:
   - expected pass/fail semantics captured
 
-## 10) Add command-level changelog lint check
+## 9) Add command-level changelog lint check
 
 - Area: `.github/workflows/cxrs-compat.yml`
 - Goal: ensure command-surface changes include docs/changelog updates.

@@ -16,6 +16,7 @@
     "clip_mode",
     "clip_footer",
     "log_file",
+    "operator_context",
     "last_run_id",
     "schema_registry_dir",
     "schema_registry_files",
@@ -36,6 +37,16 @@
     "sample",
     "route",
     "reason"
+  ],
+  "operator_context_keys": [
+    "project_name",
+    "formerly",
+    "canonical_command",
+    "aliases",
+    "repo_identity_first",
+    "first_checks",
+    "policy_docs",
+    "guidance"
   ],
   "backend_capabilities_keys": [
     "turboquant",
