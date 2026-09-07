@@ -3,186 +3,284 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>CX Manual (Master)</title>
+    <title>XSHELF Operator Manual</title>
     <link rel="stylesheet" href="./apple.css" />
   </head>
-  <body>
-    <div class="wrap">
-      <header>
-        <div class="k">CX</div>
-        <h1>Manual (Master)</h1>
-        <div class="meta">Last updated: 2026-02-26 · Focus: deterministic, observable, safe runtime</div>
-      </header>
-
-      <section class="callout">
-        <p><strong>Intent.</strong> cx is built for predictable LLM-assisted work under load: bounded context, schema-validated structured outputs, strict telemetry, and safe automation boundaries.</p>
-      </section>
-
-      <section class="callout">
-        <p><strong>Technical expose (rust-refactor branch).</strong> Runtime behavior is Rust-canonical and actively modularized. <code>src/app/mod.rs</code> remains the orchestrator while command families have been extracted into focused modules (<code>introspect</code>, <code>runtime_controls</code>, <code>agentcmds</code>, <code>logview</code>, <code>analytics</code>, <code>diagnostics</code>, <code>routing</code>, <code>prompting</code>, <code>optimize</code>, <code>doctor</code>, <code>schema_ops</code>, <code>settings_cmds</code>, <code>structured_cmds</code>, <code>task_cmds</code>). Contract behavior remains deterministic and quarantine-backed.</p>
-      </section>
-
-      <section class="grid" aria-label="Quickstart">
-        <div class="card">
-          <div class="k">Quickstart</div>
-          <p>Run these three commands to confirm routing, budgets, and log location.</p>
-          <pre><code>cd <repo-root>
-./bin/cx version
-./bin/cx budget
-./bin/cx diffsum-staged | jq .</code></pre>
-          <p><strong>What to verify</strong></p>
-          <ul>
-            <li><code>execution_path</code> is Rust when available.</li>
-            <li><code>log_file</code> points to <code>.codex/cxlogs/runs.jsonl</code>.</li>
-            <li><code>budget_chars</code>/<code>budget_lines</code> are explicit.</li>
-            <li><code>diffsum-staged</code> returns JSON that parses with <code>jq</code>.</li>
-            <li>Clipping is visible via <code>./bin/cx trace</code> when it occurs.</li>
-          </ul>
-          <p><span class="pill">Rust-first</span><span class="pill">Schema-enforced</span><span class="pill">Budgeted capture</span></p>
-        </div>
-        <div class="card">
-          <div class="k">Installation / Prereqs</div>
-          <ul>
-            <li><strong>Required:</strong> <code>bash</code></li>
-            <li><strong>Required:</strong> <code>git</code></li>
-            <li><strong>Required:</strong> <code>jq</code></li>
-            <li><strong>Required:</strong> <code>codex</code> CLI (default backend)</li>
-            <li><strong>Dev:</strong> <code>cargo</code>/<code>rustc</code> (build/run <code>cxrs</code>)</li>
-          </ul>
-          <pre><code>./bin/cx doctor
-./bin/cx capture-status</code></pre>
-          <p class="meta">Optional: <code>ollama</code> (local backend).</p>
-        </div>
-      </section>
-
-      <section class="grid" aria-label="Common workflows and troubleshooting">
-        <div class="card">
-          <div class="k">Common workflows</div>
-          <ul>
-            <li><strong>Summarize staged diff (JSON):</strong> <code>./bin/cx diffsum-staged | jq .</code></li>
-            <li><strong>Generate commit object (JSON):</strong> <code>./bin/cx commitjson | jq .</code></li>
-            <li><strong>Fan out an objective:</strong> <code>./bin/cx task fanout "..." --from staged-diff</code></li>
-            <li><strong>Run pending tasks:</strong> <code>./bin/cx task run-all --status pending</code></li>
-            <li><strong>Optimize from history:</strong> <code>./bin/cx optimize 200</code></li>
-          </ul>
-          <p class="meta">More workflows are covered in the sections below.</p>
-        </div>
-        <div class="card">
-          <div class="k">Troubleshooting</div>
-          <ul>
-            <li><strong>Unexpected fallback:</strong> run <code>./bin/cx where &lt;cmd&gt;</code> and confirm <code>execution_path</code> via <code>./bin/cx version</code>.</li>
-            <li><strong>Schema command fails:</strong> inspect <code>./bin/cx quarantine list</code>, then <code>./bin/cx replay &lt;id&gt;</code>.</li>
-            <li><strong>Budget clipping surprises:</strong> run <code>./bin/cx budget</code> and <code>./bin/cx trace</code>; reduce capture scope or raise budgets intentionally.</li>
-            <li><strong>Strict log validation fails:</strong> legacy rows may predate the current telemetry contract; new runs should conform.</li>
-            <li><strong>Backend confusion:</strong> run <code>./bin/cx llm show</code> and verify the selected model when using Ollama.</li>
-          </ul>
-          <pre><code>./bin/cx logs validate --fix=false
-./bin/cx trace</code></pre>
-        </div>
-      </section>
-
-      <nav class="toc">
-        <div class="k">Contents</div>
-        <ul>
-          <li><a href="#start">Start Here: Verify What You’re Running</a></li>
-          <li><a href="#pipeline">The Pipeline (Capture → Budget → Embed)</a></li>
-          <li><a href="#schemas">Structured Outputs (Schemas/Quarantine/Replay)</a></li>
-          <li><a href="#policy">Safety Sandbox (Policy Engine)</a></li>
-          <li><a href="#tasks">Task Graph (Fan-out/Run/Run-all)</a></li>
-          <li><a href="#telemetry">Telemetry (Contract/Validation/Heuristics)</a></li>
-          <li><a href="#optimize">Self-Optimization</a></li>
-          <li><a href="#procedures">Operator Procedures</a></li>
-        </ul>
+  <body class="manual-page">
+    <header class="site-header">
+      <a class="brand" href="../../../index.html" aria-label="XSHELF home">
+        <span class="brand-mark">XS</span>
+        <span>XSHELF</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#start">Start</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#schemas">Schemas</a>
+        <a href="#procedures">Procedures</a>
       </nav>
+      <a class="header-action" href="../../../index.html">Landing</a>
+    </header>
 
-      <section id="start">
-        <h2>Start Here: Verify What You’re Running</h2>
-        <p>Prefer Rust execution. If you are on Bash fallback, expect reduced guarantees.</p>
-        <pre><code>cd <repo-root>
-./bin/cx version
-./bin/cx diag
-./bin/cx where version diffsum-staged task optimize</code></pre>
-      </section>
+    <main id="top" class="manual-shell">
+      <aside class="toc manual-toc" aria-label="Manual contents">
+        <div class="toc-title">Manual</div>
+        <a href="#start">Start here</a>
+        <a href="#orientation">Orientation</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#schemas">Schemas</a>
+        <a href="#policy">Policy</a>
+        <a href="#tasks">Task graph</a>
+        <a href="#telemetry">Telemetry</a>
+        <a href="#backends">Backends</a>
+        <a href="#procedures">Procedures</a>
+        <a href="#rebuild">Source policy</a>
+      </aside>
 
-      <section id="pipeline">
-        <h2>The Pipeline (Capture → Budget → Embed)</h2>
-        <p>System output is constrained before it becomes prompt text.</p>
-        <pre><code>raw system output
+      <article class="manual-content technical-manual">
+        <header class="manual-title">
+          <p class="product-line">XSHELF operator reference</p>
+          <h1>Manual for predictable runtime operation.</h1>
+          <p>
+            Technical reference for the Rust runtime, capture budgets, schema
+            contracts, quarantine/replay, policy checks, task execution, backend
+            routing, and telemetry validation.
+          </p>
+          <dl class="manual-meta">
+            <div>
+              <dt>Canonical source</dt>
+              <dd><code>docs/manuals/03_src/latex/CX_MANUAL_MASTER.tex</code></dd>
+            </div>
+            <div>
+              <dt>Generated PDF</dt>
+              <dd><code>docs/manuals/01_pdf/CX_MANUAL_MASTER.pdf</code></dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd>2026-05-26</dd>
+            </div>
+          </dl>
+        </header>
+
+        <section id="start">
+          <h2>Start Here: Verify What You’re Running</h2>
+          <p>
+            Prefer Rust execution. If a command routes through Bash fallback,
+            expect reduced guarantees and inspect routing before continuing.
+          </p>
+          <pre><code>cd &lt;repo-root&gt;
+./bin/xshelf version
+./bin/xshelf task check --json
+./bin/xshelf core --json
+./bin/xshelf diag --json --window 20
+./bin/xshelf where version diffsum-staged task optimize</code></pre>
+          <div class="manual-note">
+            <strong>Expected:</strong> runtime identity, task readiness, backend
+            state, recent diagnostics, and parseable JSON before backend
+            execution is attempted.
+          </div>
+        </section>
+
+        <section id="orientation">
+          <h2>Orientation</h2>
+          <p>
+            XSHELF is a runtime substrate, not a chat transcript. It constrains
+            repository output before model use, validates structured results,
+            and records enough evidence to explain a run later.
+          </p>
+          <div class="reference-grid">
+            <article>
+              <h3>Canonical runtime</h3>
+              <ul>
+                <li><code>rust/cxrs</code> is authoritative runtime behavior.</li>
+                <li><code>bin/xshelf</code> is the primary entrypoint.</li>
+                <li><code>bin/xs</code> is the short alias.</li>
+                <li><code>bin/cx</code> remains a compatibility alias.</li>
+              </ul>
+            </article>
+            <article>
+              <h3>Runtime state</h3>
+              <ul>
+                <li><code>.cx/schemas/</code> stores schema contracts.</li>
+                <li><code>.cx/cxlogs/</code> stores append-only telemetry.</li>
+                <li><code>.cx/quarantine/</code> stores invalid structured output.</li>
+                <li><code>.cx/</code> also holds task/runtime metadata.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section id="pipeline">
+          <h2>The Pipeline</h2>
+          <p>The core reliability move is that system output is constrained before it becomes prompt text.</p>
+          <pre><code>raw system output
   -&gt; internal native reduction
   -&gt; mandatory budgeting (clip/chunk)
-  -&gt; embed into prompt</code></pre>
-        <p class="callout"><strong>Budgets.</strong> Use <code>CX_CONTEXT_BUDGET_CHARS</code>, <code>CX_CONTEXT_BUDGET_LINES</code>, <code>CX_CONTEXT_CLIP_MODE</code>, <code>CX_CONTEXT_CLIP_FOOTER</code>.</p>
-        <pre><code>./bin/cx budget
-./bin/cx trace</code></pre>
-      </section>
+  -&gt; embed into prompt
+  -&gt; backend execution
+  -&gt; schema validation
+  -&gt; telemetry append</code></pre>
+          <h3>Budget controls</h3>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Variable</th>
+                <th scope="col">Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>CX_CONTEXT_BUDGET_CHARS</code></td>
+                <td>Maximum captured character budget.</td>
+              </tr>
+              <tr>
+                <td><code>CX_CONTEXT_BUDGET_LINES</code></td>
+                <td>Maximum captured line budget.</td>
+              </tr>
+              <tr>
+                <td><code>CX_CONTEXT_CLIP_MODE</code></td>
+                <td><code>smart</code>, <code>head</code>, or <code>tail</code>.</td>
+              </tr>
+              <tr>
+                <td><code>CX_CONTEXT_CLIP_FOOTER</code></td>
+                <td>Controls visible clipping footer evidence.</td>
+              </tr>
+            </tbody>
+          </table>
+          <pre><code>./bin/xshelf budget
+./bin/xshelf trace</code></pre>
+        </section>
 
-      <section id="schemas">
-        <h2>Structured Outputs (Schemas/Quarantine/Replay)</h2>
-        <p>Schema commands request JSON-only output, parse JSON, validate it, and quarantine failures.</p>
-        <pre><code>./bin/cx schema list
-./bin/cx commitjson | jq .
-./bin/cx diffsum-staged | jq .
-./bin/cx next git status | jq .</code></pre>
-        <pre><code>./bin/cx quarantine list
-./bin/cx replay &lt;id&gt;</code></pre>
-      </section>
+        <section id="schemas">
+          <h2>Structured Outputs</h2>
+          <p>
+            Schema commands request JSON-only output, parse JSON, validate it,
+            and quarantine failures. Invalid structured output must be inspectable
+            and replayable.
+          </p>
+          <pre><code>./bin/xshelf schema list
+./bin/xshelf schema list --json | jq .
+./bin/xshelf commitjson | jq .
+./bin/xshelf diffsum-staged | jq .
+./bin/xshelf next git status | jq .</code></pre>
+          <h3>Failure procedure</h3>
+          <pre><code>./bin/xshelf quarantine list
+./bin/xshelf quarantine show &lt;id&gt;
+./bin/xshelf replay &lt;id&gt;</code></pre>
+        </section>
 
-      <section id="policy">
-        <h2>Safety Sandbox (Policy Engine)</h2>
-        <p>Blocks destructive patterns and out-of-repo writes by default.</p>
-        <pre><code>./bin/cx policy show
-./bin/cx policy check "rm -rf ."</code></pre>
-      </section>
-
-      <section id="tasks">
-        <h2>Task Graph (Fan-out/Run/Run-all)</h2>
-        <p>Tasks are the unit of migration to parallel work: small, role-tagged, log-linked.</p>
-        <pre><code>./bin/cx task fanout "Ship release notes improvements" --from staged-diff
-./bin/cx task list --status pending
-./bin/cx task run-all --status pending</code></pre>
-      </section>
-
-      <section id="telemetry">
-        <h2>Telemetry (Contract/Validation/Heuristics)</h2>
-        <pre><code>./bin/cx logs validate --fix=false
-./bin/cx metrics 50
-./bin/cx trace</code></pre>
-        <div class="callout">
-          <p><strong>Heuristics.</strong></p>
+        <section id="policy">
+          <h2>Safety Sandbox</h2>
+          <p>The policy engine is the boundary between suggestion and execution.</p>
           <ul>
-            <li><code>effective_input_tokens</code> high: prompts too large or too variable.</li>
-            <li>cache trend down: stabilize prompt templates and capture scope.</li>
-            <li>clipping frequent: reduce capture scope or raise budgets intentionally.</li>
-            <li>schema failures spike: enforce deterministic mode and reduce ambiguity.</li>
+            <li>Blocks destructive patterns such as <code>sudo</code>, <code>rm -rf</code>, and shell-piped installers.</li>
+            <li>Blocks privileged ownership/mode changes on system paths.</li>
+            <li>Blocks writes outside the repository root by default.</li>
           </ul>
-        </div>
-      </section>
+          <pre><code>./bin/xshelf policy show
+./bin/xshelf policy show --json | jq .
+./bin/xshelf policy check "rm -rf ."</code></pre>
+        </section>
 
-      <section id="optimize">
-        <h2>Self-Optimization</h2>
-        <pre><code>./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .</code></pre>
-      </section>
+        <section id="tasks">
+          <h2>Task Graph</h2>
+          <p>
+            Tasks are the unit of migration to parallel work: small, role-tagged,
+            log-linked, and replayable.
+          </p>
+          <pre><code>./bin/xshelf task add "Implement parser hardening" --role implementer
+./bin/xshelf task fanout "Ship release notes improvements" --from staged-diff
+./bin/xshelf task list --status pending
+./bin/xshelf task check --json | jq .
+./bin/xshelf task run-all --status pending --events-jsonl --json
+./bin/xshelf task events --limit 20 --json</code></pre>
+          <div class="manual-note">
+            <strong>Contract note:</strong> <code>--events-jsonl</code> writes
+            additive progress events to stderr and the task event log, while the
+            final stdout JSON remains parseable.
+          </div>
+        </section>
 
-      <section id="procedures">
-        <h2>Operator Procedures</h2>
-        <h3>Budget stress test</h3>
-        <pre><code>CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
-./bin/cx budget
-./bin/cx trace</code></pre>
-        <h3>Schema integrity check</h3>
-        <pre><code>./bin/cx commitjson | jq .
-./bin/cx diffsum-staged | jq .</code></pre>
-        <h3>Task loop</h3>
-        <pre><code>./bin/cx task fanout "Objective: tighten schema errors" --from log
-./bin/cx task run-all --status pending
-./bin/cx optimize 200</code></pre>
-      </section>
+        <section id="telemetry">
+          <h2>Telemetry</h2>
+          <pre><code>./bin/xshelf logs validate --fix=false
+./bin/xshelf telemetry 50 --json | jq .
+./bin/xshelf logs stats 200 --json | jq .
+./bin/xshelf metrics 50
+./bin/xshelf optimize 200 --json | jq .</code></pre>
+          <ul class="signal-list">
+            <li><code>effective_input_tokens</code> high: prompts are too large or too variable.</li>
+            <li>Cache trend down: stabilize prompt templates and capture scope.</li>
+            <li>Clipping frequent: reduce capture scope or raise budgets intentionally.</li>
+            <li>Schema failures spike: enforce deterministic mode and reduce ambiguity.</li>
+          </ul>
+        </section>
 
-      <hr />
-      <footer>
-        <div>Target: fast scanning + reliable execution.</div>
-      </footer>
-    </div>
+        <section id="backends">
+          <h2>Backend Selection</h2>
+          <pre><code>./bin/xshelf llm show
+./bin/xshelf llm check
+./bin/xshelf llm use primary
+./bin/xshelf llm use ollama llama3.1
+./bin/xshelf llm use llamacpp ggml-org/Qwen3-0.6B-GGUF:Q4_0
+./bin/xshelf llm models list --json | jq .
+./bin/xshelf llm models inspect local_qwen --json | jq .
+./bin/xshelf llm smoke "Respond with OK only."</code></pre>
+          <p>
+            HTTP transport and local backend claims should stay explicit. Do not
+            infer backend capabilities that are not surfaced through a typed
+            runtime field.
+          </p>
+        </section>
+
+        <section id="procedures">
+          <h2>Operator Procedures</h2>
+          <div class="procedure-grid">
+            <article>
+              <h3>Budget stress test</h3>
+              <pre><code>CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/xshelf cxo git status
+./bin/xshelf budget
+./bin/xshelf trace</code></pre>
+            </article>
+            <article>
+              <h3>Schema integrity check</h3>
+              <pre><code>./bin/xshelf commitjson | jq .
+./bin/xshelf diffsum-staged | jq .
+./bin/xshelf quarantine list</code></pre>
+            </article>
+            <article>
+              <h3>CI gate</h3>
+              <pre><code>./scripts/compat_local.sh --quick
+./bin/xshelf task check --json | jq .
+./bin/xshelf logs validate --fix=false</code></pre>
+            </article>
+            <article>
+              <h3>Task loop</h3>
+              <pre><code>./bin/xshelf task fanout "Objective: tighten schema errors" --from log
+./bin/xshelf task run-all --status pending
+./bin/xshelf optimize 200</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section id="rebuild">
+          <h2>Source Policy And Rebuild</h2>
+          <p>
+            Treat the LaTeX source as authoritative for manual content. The HTML
+            page is a tracked reader mirror, not the canonical source.
+          </p>
+          <pre><code>docs/manuals/build.sh</code></pre>
+          <p>
+            Equivalent PDF build output refreshes
+            <code>docs/manuals/01_pdf/CX_MANUAL_MASTER.pdf</code>. The HTML mirror
+            is updated intentionally when the web reader needs to change.
+          </p>
+        </section>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <span>Technical reference for XSHELF runtime operation.</span>
+      <span><a href="../../../index.html">Back to landing</a></span>
+    </footer>
   </body>
 </html>

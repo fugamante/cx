@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
+use crate::config::cli_app_name;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
 
 fn print_worklog_empty(n: usize, log_file: &std::path::Path) {
-    println!("# cxrs Worklog");
+    println!("# {} Worklog", cli_app_name());
     println!();
     println!("Window: last {n} runs");
     println!();
@@ -26,12 +27,12 @@ fn grouped_rows(runs: &[RunEntry]) -> Vec<(String, u64, u64, u64)> {
     let mut grouped: Vec<(String, u64, u64, u64)> = by_tool
         .into_iter()
         .map(|(tool, (count, sum_dur, sum_eff))| {
-            let avg_dur = if count == 0 { 0 } else { sum_dur / count };
-            let avg_eff = if count == 0 { 0 } else { sum_eff / count };
+            let avg_dur = sum_dur.checked_div(count).unwrap_or(0);
+            let avg_eff = sum_eff.checked_div(count).unwrap_or(0);
             (tool, count, avg_dur, avg_eff)
         })
         .collect();
-    grouped.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    grouped.sort_by_key(|row| (std::cmp::Reverse(row.1), std::cmp::Reverse(row.2)));
     grouped
 }
 
@@ -61,7 +62,7 @@ fn print_runs(runs: &[RunEntry]) {
 
 pub fn print_worklog(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return 1;
     };
     if !log_file.exists() {
@@ -71,12 +72,12 @@ pub fn print_worklog(n: usize) -> i32 {
     let runs = match load_runs(&log_file, n) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs worklog: {e}");
+            crate::cx_eprintln!("{} worklog: {e}", cli_app_name());
             return 1;
         }
     };
 
-    println!("# cxrs Worklog");
+    println!("# {} Worklog", cli_app_name());
     println!();
     println!("Window: last {n} runs");
     println!();

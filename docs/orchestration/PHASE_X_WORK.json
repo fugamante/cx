@@ -1,0 +1,103 @@
+{
+  "phase": "phase10",
+  "status": "complete",
+  "title": "token_compression_layer",
+  "goal": "reduce model-visible context through typed semantic and structural reduction while preserving task-critical evidence",
+  "completed_at": "2026-05-29",
+  "completion_evidence": [
+    "all planned slices are done",
+    "reducer metadata, test-output recall, diff recall, and budget-aware section assembly are covered by focused Rust tests",
+    "normal command capture and public telemetry remain unchanged until runtime wiring is explicit"
+  ],
+  "constraints": [
+    "optimize effective input tokens, not compressed byte count",
+    "preserve schema, policy, quarantine, replay, and telemetry contracts",
+    "keep lossy reduction explicit and recoverable",
+    "prefer command-specific deterministic reducers over generic salience ranking",
+    "do not use hash-only schema or context references unless expansion is guaranteed",
+    "keep assembly and SIMD out of capture/control-plane token compression"
+  ],
+  "consensus": [
+    "semantic and structural reduction is the primary prompt-token optimization path",
+    "typed metadata should start internal and compact before any public artifact contract",
+    "critical-span recall gates are required before broad reducer rollout",
+    "byte compression is useful for storage and replay artifacts, not model-visible prompt text",
+    "Rust library and allocation improvements come before any low-level optimization"
+  ],
+  "slices": [
+    {
+      "id": "p10_spec_fixture_plan",
+      "status": "done",
+      "goal": "capture the Phase X design, reducer acceptance gates, fixture classes, and recall metrics"
+    },
+    {
+      "id": "p10_internal_reduction_metadata",
+      "status": "done",
+      "goal": "add private reducer metadata for kind, version, profile, stats, lossiness, uncertainty, and replay pointers without changing public output"
+    },
+    {
+      "id": "p10_test_output_reducer",
+      "status": "done",
+      "goal": "implement the first command-specific reducer with recall gates for failing tests, panic/error/assertion blocks, final summaries, and exit status"
+    },
+    {
+      "id": "p10_diff_reducer",
+      "status": "done",
+      "goal": "add diff reducer recall gates for headers, hunk headers, changed lines, rename/binary markers, and touched paths"
+    },
+    {
+      "id": "p10_budget_aware_assembly",
+      "status": "done",
+      "goal": "assemble compressed context by priority tiers with stable section ordering, omission records, and high-uncertainty fallback"
+    }
+  ],
+  "critical_span_contracts": [
+    "changed_lines",
+    "diff_headers",
+    "hunk_headers",
+    "failing_test_names",
+    "panic_error_assertion_warning_snippets",
+    "command_exit_status",
+    "touched_paths",
+    "schema_names_and_hashes",
+    "quarantine_and_replay_ids",
+    "branch_or_detached_head_state_when_relevant"
+  ],
+  "fixture_classes": [
+    "huge_git_diff",
+    "rename_and_binary_diff",
+    "generated_file_diff",
+    "cargo_test_failure",
+    "clippy_or_build_warnings",
+    "repeated_stack_trace",
+    "jsonl_telemetry_history",
+    "schema_heavy_prompt",
+    "unicode_paths_and_diagnostics",
+    "mixed_stdout_stderr",
+    "misleading_repeated_errors"
+  ],
+  "metrics": [
+    "raw_chars",
+    "reduced_chars",
+    "clipped_chars",
+    "estimated_tokens_before",
+    "estimated_tokens_after",
+    "critical_span_recall",
+    "failed_test_recall",
+    "changed_line_recall",
+    "schema_valid_output_rate",
+    "cache_hit_effect",
+    "task_success_or_replay_outcome",
+    "reducer_wall_time",
+    "reducer_allocation_behavior"
+  ],
+  "references": [
+    "docs/orchestration/PHASE_X_TOKEN_COMPRESSION_LAYER.md",
+    "docs/orchestration/PHASE_VII_BUDGET_AWARE_ORCHESTRATION.md",
+    "docs/orchestration/PHASE_VIII_LOCAL_MODEL_SUBSTRATE.md",
+    "rust/cxrs/src/modules/capture_reduce.rs",
+    "rust/cxrs/src/modules/capture_budget.rs",
+    "rust/cxrs/src/modules/analytics_prompt_stats.rs",
+    "rust/cxrs/src/modules/optimize_rules.rs"
+  ]
+}

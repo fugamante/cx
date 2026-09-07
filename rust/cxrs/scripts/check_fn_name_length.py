@@ -7,6 +7,19 @@ import sys
 PAT_FN = re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
+def load_allowlist(path: str) -> set[str]:
+    p = pathlib.Path(path)
+    if not p.exists():
+        return set()
+    out: set[str] = set()
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.add(line)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Fail if Rust function names exceed max length."
@@ -34,6 +47,11 @@ def main() -> int:
         default=[],
         help="Optional function-name prefix to ignore (repeatable)",
     )
+    parser.add_argument(
+        "--allowlist",
+        default="",
+        help="Optional file with grandfathered function names to ignore (one per line).",
+    )
     args = parser.parse_args()
 
     root = pathlib.Path(args.root)
@@ -46,6 +64,7 @@ def main() -> int:
     if args.max_segments < 0:
         print("error: --max-segments must be >= 0", file=sys.stderr)
         return 2
+    allowlist = load_allowlist(args.allowlist) if args.allowlist else set()
 
     len_violations: list[tuple[pathlib.Path, int, int, str]] = []
     seg_violations: list[tuple[pathlib.Path, int, int, str]] = []
@@ -59,6 +78,8 @@ def main() -> int:
                 continue
             name = m.group(1)
             if args.allow_prefix and any(name.startswith(p) for p in args.allow_prefix):
+                continue
+            if name in allowlist:
                 continue
             if len(name) > args.max_len:
                 len_violations.append((path, i, len(name), name))

@@ -1,0 +1,112 @@
+{
+  "contract_version": "turboquant-phase2-validate.v1",
+  "binary": "llama-cli",
+  "model": "sha256-667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29",
+  "context_target": 8192,
+  "runs": [
+    {
+      "mode": "baseline",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 294.6,
+      "decode_tokens_per_sec": 81.8,
+      "wall_ms": 4610,
+      "quality_rule": "exact_OK",
+      "passed": true,
+      "response_text": "OK"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 204.1,
+      "decode_tokens_per_sec": 39.0,
+      "wall_ms": 1580,
+      "quality_rule": "exact_OK",
+      "passed": false,
+      "response_text": "I can help with that."
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 585.2,
+      "decode_tokens_per_sec": 36.0,
+      "wall_ms": 4600,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive contains 120 identical entries for a neutral project ledger entry for baseline context expansion."
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 452.0,
+      "decode_tokens_per_sec": 28.0,
+      "wall_ms": 6130,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The project ledger entries for baseline context expansion are neutral, with a focus on expanding the context of the project."
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 544.3,
+      "decode_tokens_per_sec": 23.1,
+      "wall_ms": 7640,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": true,
+      "response_text": "TURBO-314159"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 444.4,
+      "decode_tokens_per_sec": 26.7,
+      "wall_ms": 9140,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": false,
+      "response_text": "The secret code is TURBO-314159."
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 585.9,
+      "decode_tokens_per_sec": 34.3,
+      "wall_ms": 5110,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 454.2,
+      "decode_tokens_per_sec": 28.0,
+      "wall_ms": 6110,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\n  \"status\": \"ready\",\n  \"focus\": \"turboquant-baseline\",\n  \"next_step\": \"phase2-v-cache\"\n}"
+    }
+  ]
+}

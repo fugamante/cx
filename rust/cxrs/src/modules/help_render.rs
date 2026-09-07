@@ -6,6 +6,15 @@ fn replace_tokens(input: &str, run_window: usize, quarantine_list: usize) -> Str
         .replace("{QUARANTINE_LIST}", &quarantine_list.to_string())
 }
 
+fn replace_tokens_app(
+    input: &str,
+    app_name: &str,
+    run_window: usize,
+    quarantine_list: usize,
+) -> String {
+    replace_tokens(input, run_window, quarantine_list).replace("{APP}", app_name)
+}
+
 pub fn render_help(
     app_name: &str,
     app_desc: &str,
@@ -24,16 +33,16 @@ pub fn render_help(
         .unwrap_or(24)
         + 2;
     for c in MAIN_COMMANDS {
-        let usage = replace_tokens(c.usage, run_window, quarantine_list);
-        let desc = replace_tokens(c.description, run_window, quarantine_list);
+        let usage = replace_tokens_app(c.usage, app_name, run_window, quarantine_list);
+        let desc = replace_tokens_app(c.description, app_name, run_window, quarantine_list);
         out.push_str(&format!("  {usage:<width$}{desc}\n"));
     }
     out
 }
 
-pub fn render_task_help() -> String {
+pub fn render_task_help(app_name: &str) -> String {
     let mut out = String::new();
-    out.push_str("cx help task\n\n");
+    out.push_str(&format!("{app_name} help task\n\n"));
     out.push_str("Task commands:\n");
     let width = TASK_COMMANDS
         .iter()
@@ -42,7 +51,40 @@ pub fn render_task_help() -> String {
         .unwrap_or(24)
         + 2;
     for c in TASK_COMMANDS {
-        out.push_str(&format!("  {:<width$}{}\n", c.usage, c.description));
+        let usage = replace_tokens_app(c.usage, app_name, 0, 0);
+        out.push_str(&format!("  {usage:<width$}{}\n", c.description));
     }
+    out.push_str("\nExamples:\n");
+    out.push_str(&format!(
+        "  {app_name} task run task_001 --mode deterministic --backend primary\n"
+    ));
+    out.push_str(&format!(
+        "  {app_name} task run-all --status pending --mode mixed\n"
+    ));
+    out.push_str(&format!(
+        "  {app_name} task run-all --status pending --mode parallel --strict-plan --max-workers 2\n"
+    ));
+    out.push_str(&format!(
+        "  {app_name} task run-all --status pending --mode parallel --plan-json --json | jq .\n"
+    ));
+    out.push_str(&format!(
+        "  {app_name} task run-all --status pending --dry-run --json | jq .\n"
+    ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_task_help;
+
+    #[test]
+    fn task_help_examples() {
+        let text = render_task_help("xshelf");
+        assert!(text.contains("Examples:"));
+        assert!(text.contains("xshelf task run task_001 --mode deterministic --backend primary"));
+        assert!(text.contains("xshelf task run-all --status pending --mode mixed"));
+        assert!(text.contains(
+            "xshelf task run-all --status pending --mode parallel --strict-plan --max-workers 2"
+        ));
+    }
 }

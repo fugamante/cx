@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::config::cli_app_name;
+
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 use crate::types::RunEntry;
@@ -35,7 +37,7 @@ pub(super) fn load_runs_for(
     n: usize,
 ) -> Result<(std::path::PathBuf, Vec<RunEntry>), i32> {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return Err(1);
     };
     if !log_file.exists() {
@@ -44,7 +46,7 @@ pub(super) fn load_runs_for(
     match load_runs(&log_file, n) {
         Ok(v) => Ok((log_file, v)),
         Err(e) => {
-            crate::cx_eprintln!("cxrs {command}: {e}");
+            crate::cx_eprintln!("{} {command}: {e}", cli_app_name());
             Err(1)
         }
     }

@@ -1,6 +1,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::config::cli_app_name;
+
 pub type CxResult<T> = Result<T, CxError>;
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_RUNTIME: i32 = 1;
@@ -95,7 +97,7 @@ impl std::error::Error for CxError {
 }
 
 pub fn format_error(command: &str, error: &str) -> String {
-    format!("cxrs {command}: {error}")
+    format!("{} {command}: {error}", cli_app_name())
 }
 
 pub fn print_runtime_error(command: &str, error: &str) -> i32 {

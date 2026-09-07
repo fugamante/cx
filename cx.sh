@@ -13,7 +13,7 @@ _cx_warn_deprecated_root_loader() {
   [[ -t 2 ]] || return 0
   CX_ROOT_SH_WARNED=1
   export CX_ROOT_SH_WARNED
-  printf '%s\n' "cx: root loader 'cx.sh' is deprecated; prefer 'lib/cx.sh'." >&2
+  printf '%s\n' "XSHELF/CX: root loader 'cx.sh' is deprecated; prefer 'lib/cx.sh'." >&2
 }
 
 _cx_warn_deprecated_root_loader

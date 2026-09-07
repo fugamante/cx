@@ -73,7 +73,7 @@ fn normalize_execution_log_row(
     repo_root_val: String,
     has_modern: bool,
 ) -> ExecutionLog {
-    let backend_used = get_str(obj, &["backend_used", "llm_backend"], "codex");
+    let backend_used = get_str(obj, &["backend_used", "llm_backend"], "primary");
     let (schema_enforced, schema_valid) = normalize_schema_fields(obj);
     let mut row = ExecutionLog {
         execution_id: get_str(obj, &["execution_id"], "").if_empty_else(|| {
@@ -115,6 +115,9 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.provider_status = normalize_provider_status(get_opt_str(obj, "provider_status").as_deref())
         .to_log_field()
         .map(str::to_string);
+    row.execution_lane = get_opt_str(obj, "execution_lane");
+    row.execution_lane_detail = get_opt_str(obj, "execution_lane_detail");
+    row.http_request_profile = get_opt_str(obj, "http_request_profile");
     row.http_provider_format = get_opt_str(obj, "http_provider_format");
     row.http_parser_mode = get_opt_str(obj, "http_parser_mode");
     row.capture_provider = get_opt_str(obj, "capture_provider");
@@ -141,6 +144,15 @@ fn fill_optional_fields(obj: &serde_json::Map<String, Value>, row: &mut Executio
     row.clip_footer = get_opt_bool(obj, "clip_footer");
     row.rtk_used = get_opt_bool(obj, "rtk_used");
     row.prompt_sha256 = get_opt_str(obj, "prompt_sha256");
+    row.prompt_sha256_raw = get_opt_str(obj, "prompt_sha256_raw");
+    row.prompt_sha256_filtered = get_opt_str(obj, "prompt_sha256_filtered");
+    row.prompt_len_raw = get_opt_u64(obj, "prompt_len_raw");
+    row.prompt_len_filtered = get_opt_u64(obj, "prompt_len_filtered");
+    row.prompt_filter_applied = get_opt_bool(obj, "prompt_filter_applied");
+    row.capture_prompt_profile = get_opt_str(obj, "capture_prompt_profile");
+    row.capture_prompt_profile_applied = get_opt_bool(obj, "capture_prompt_profile_applied");
+    row.capture_prompt_reducer_kind = get_opt_str(obj, "capture_prompt_reducer_kind");
+    row.capture_prompt_fallback_reason = get_opt_str(obj, "capture_prompt_fallback_reason");
     row.schema_prompt_sha256 = get_opt_str(obj, "schema_prompt_sha256");
     row.schema_sha256 = get_opt_str(obj, "schema_sha256");
     row.schema_attempt = get_opt_u64(obj, "schema_attempt");

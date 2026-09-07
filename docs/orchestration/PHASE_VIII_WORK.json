@@ -1,0 +1,75 @@
+{
+  "phase": "phase8",
+  "status": "complete",
+  "title": "local_model_substrate",
+  "goal": "turn local model selection into a typed lifecycle substrate for MLX and other local backends while preserving XSHELF adapter boundaries",
+  "completed_at": "2026-05-29",
+  "completion_evidence": [
+    "all planned slices are done",
+    "resident-server probe path validated locally through llm-resident.v1 with model_count=1 on the explicit local-MLX HTTP boundary",
+    "process adapters remain defaults and HTTP remains explicit opt-in"
+  ],
+  "constraints": [
+    "preserve existing CX_MLX_MODEL and llm use mlx <model> compatibility",
+    "keep process adapters as defaults",
+    "do not claim persisted KV restore unless a selected backend exposes evidence",
+    "keep TurboQuant cache and memory metrics typed",
+    "avoid hidden downloads or slow disk scans during normal execution"
+  ],
+  "slices": [
+    {
+      "id": "p8_registry",
+      "status": "done",
+      "goal": "add a local model registry with deterministic list/add/remove behavior"
+    },
+    {
+      "id": "p8_alias_resolution",
+      "status": "done",
+      "goal": "allow llm use and task model overrides to resolve registry aliases while direct model strings remain compatible"
+    },
+    {
+      "id": "p8_inspection",
+      "status": "done",
+      "goal": "add inspect and cheap accounting for local model path, size, cache location, and unresolved states"
+    },
+    {
+      "id": "p8_capabilities",
+      "status": "done",
+      "goal": "surface typed runtime capabilities for process, HTTP, resident-server, cache, batching, VLM, embedding, and reranker support"
+    },
+    {
+      "id": "p8_mlx_verification",
+      "status": "done",
+      "goal": "add registry-aware MLX smoke and optional benchmark profiles with typed runtime and cache metrics"
+    },
+    {
+      "id": "p8_resident_server",
+      "status": "done",
+      "goal": "support optional OpenAI-compatible resident local MLX servers through explicit HTTP adapter configuration with a local-only resident boundary"
+    }
+  ],
+  "initial_registry_fields": [
+    "id",
+    "alias",
+    "backend",
+    "provider",
+    "repo_id",
+    "revision",
+    "resolved_model",
+    "local_path",
+    "quantization",
+    "format",
+    "size_bytes",
+    "cache_path",
+    "last_used_at",
+    "last_smoke_status",
+    "preferred_args",
+    "trust_remote_code"
+  ],
+  "references": [
+    "docs/orchestration/PHASE_VIII_LOCAL_MODEL_SUBSTRATE.md",
+    "docs/turboquant/TURBOQUANT_METRIC.md",
+    "docs/turboquant/TURBOQUANT_CAP_MLX.md",
+    "docs/providers/PROVIDER_ADAPTER_PLAN.md"
+  ]
+}

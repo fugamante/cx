@@ -9,7 +9,7 @@ count="$(printf '%s' "$out" | jq -r '.file_count')"
 
 for name in commitjson.schema.json diffsum.schema.json next.schema.json fixrun.schema.json; do
   printf '%s' "$out" | jq -e --arg n "$name" '.schemas[] | select(.name == $n)' >/dev/null
-  [[ -f "$ROOT/.codex/schemas/$name" ]]
+  [[ -f "$ROOT/.cx/schemas/$name" ]]
 done
 
 $ROOT/bin/cx supports commitjson >/dev/null

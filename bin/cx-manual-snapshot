@@ -10,7 +10,7 @@ if [[ ! -d "$MANUAL_DIR" ]]; then
 fi
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
-out_dir="$REPO_ROOT/.codex/manual_backups/$ts"
+out_dir="$REPO_ROOT/.cx/manual_backups/$ts"
 mkdir -p "$out_dir"
 
 if command -v rsync >/dev/null 2>&1; then

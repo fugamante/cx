@@ -43,7 +43,39 @@ fi
 
 print_json_summary() {
   local file="$1"
-  jq -r '{contract_version,actions_contract_version,severity,actions:(.actions|length)}' "$file"
+  jq -r '({
+    contract_version,
+    actions_contract_version,
+    severity,
+    actions:(.actions|length),
+    task_readiness: (
+      if .task_readiness then
+        {
+          mode: .task_readiness.recommended_mode,
+          mixed: .task_readiness.can_run_mixed,
+          parallel: .task_readiness.can_run_parallel,
+          waves: .task_readiness.waves,
+          pwaves: .task_readiness.parallel_waves,
+          pmax: .task_readiness.largest_parallel_wave
+        }
+      else null end
+    ),
+    task_execution: (
+      if .task_execution then
+        {
+          mode: .task_execution.last_mode,
+          halt: .task_execution.halted_remaining,
+          fb: .task_execution.backend_fallback_rows,
+          pressure: (.task_execution.wave_pressure.kind // null),
+          pmode: (.task_execution.wave_pressure.suggested_mode // null),
+          pms: (.task_execution.wave_pressure.max_queue_wave_ms // null),
+          advice: .task_execution.advice,
+          next_kind: (.task_execution.next_action.kind // null),
+          next: (.task_execution.next_action.command // null)
+        }
+      else null end
+    )
+  } | with_entries(select(.value != null)))' "$file"
 }
 
 run_gate() {

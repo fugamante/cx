@@ -1,0 +1,112 @@
+{
+  "contract_version": "turboquant-phase2-validate.v1",
+  "binary": "llama-cli",
+  "model": "sha256-667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29",
+  "context_target": 8192,
+  "runs": [
+    {
+      "mode": "baseline",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 193.7,
+      "decode_tokens_per_sec": 64.9,
+      "wall_ms": 2680,
+      "quality_rule": "exact_OK",
+      "passed": true,
+      "response_text": "OK"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 172.7,
+      "decode_tokens_per_sec": 4.9,
+      "wall_ms": 3610,
+      "quality_rule": "exact_OK",
+      "passed": false,
+      "response_text": "OK of the 1 1"
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 321.5,
+      "decode_tokens_per_sec": 28.2,
+      "wall_ms": 7620,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive contains 120 identical entries for a neutral project ledger entry for baseline context expansion."
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 196.2,
+      "decode_tokens_per_sec": 5.2,
+      "wall_ms": 15700,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive line  archive, the archive line  archive, the archive line 109: neutral project ledger entry for baseline context expansion."
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 365.2,
+      "decode_tokens_per_sec": 9.2,
+      "wall_ms": 11660,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": true,
+      "response_text": "TURBO-314159"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 183.1,
+      "decode_tokens_per_sec": 3.9,
+      "wall_ms": 24300,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": false,
+      "response_text": "Archive    and archive  neutral project ledger  neutral project ledger entry for"
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 351.5,
+      "decode_tokens_per_sec": 15.6,
+      "wall_ms": 8150,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 212.4,
+      "decode_tokens_per_sec": 6.6,
+      "wall_ms": 17790,
+      "quality_rule": "exact_JSON_contract",
+      "passed": false,
+      "response_text": "{\n,\n{\n  \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \"status\": \""
+    }
+  ]
+}

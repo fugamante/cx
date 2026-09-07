@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::config::cli_app_name;
+
 mod catalog;
 mod guard;
 mod resolution;
@@ -76,7 +78,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
     let (log_file, rows) = match read_window_rows(days) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs {e}");
+            crate::cx_eprintln!("{} {e}", cli_app_name());
             return 1;
         }
     };
@@ -145,7 +147,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
         match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
             Err(e) => {
-                crate::cx_eprintln!("cxrs quota: failed to render json: {e}");
+                crate::cx_eprintln!("{} quota: failed to render json: {e}", cli_app_name());
                 return 1;
             }
         }
@@ -154,7 +156,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
 
     if probe {
         let probe_payload = quota_probe_payload(days, &log_file, &rows, None, None);
-        println!("== cx quota probe (last {days} days) ==");
+        println!("== {} quota probe (last {days} days) ==", cli_app_name());
         println!(
             "backend: {}",
             probe_payload
@@ -239,7 +241,7 @@ pub fn cmd_quota(args: &[String]) -> i32 {
         return 0;
     }
 
-    println!("== cx quota (last {days} days) ==");
+    println!("== {} quota (last {days} days) ==", cli_app_name());
     println!("runs: {runs}");
     println!("effective_input_tokens: {total_effective}");
     println!("output_tokens: {total_output}");

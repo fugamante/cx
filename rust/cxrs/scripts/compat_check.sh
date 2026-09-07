@@ -27,15 +27,15 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 ensure_seed_runlog() {
-  local runlog="$REPO_ROOT/.codex/cxlogs/runs.jsonl"
+  local runlog="$REPO_ROOT/.cx/cxlogs/runs.jsonl"
   if [[ -s "$runlog" ]]; then
     return 0
   fi
   mkdir -p "$(dirname "$runlog")"
   cat > "$runlog" <<'JSONL'
-{"execution_id":"seed_1","timestamp":"2026-01-01T00:00:00Z","ts":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","cwd":".","duration_ms":1200,"input_tokens":1000,"cached_input_tokens":200,"effective_input_tokens":800,"output_tokens":120,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"lean","schema_enforced":false,"schema_valid":true}
-{"execution_id":"seed_2","timestamp":"2026-01-01T00:01:00Z","ts":"2026-01-01T00:01:00Z","command":"cxcommitjson","tool":"cxcommitjson","cwd":".","duration_ms":1800,"input_tokens":1300,"cached_input_tokens":400,"effective_input_tokens":900,"output_tokens":160,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
-{"execution_id":"seed_3","timestamp":"2026-01-01T00:02:00Z","ts":"2026-01-01T00:02:00Z","command":"cxdiffsum_staged","tool":"cxdiffsum_staged","cwd":".","duration_ms":2200,"input_tokens":1600,"cached_input_tokens":600,"effective_input_tokens":1000,"output_tokens":200,"scope":"repo","repo_root":".","backend_used":"codex","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
+{"execution_id":"seed_1","timestamp":"2026-01-01T00:00:00Z","ts":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo","cwd":".","duration_ms":1200,"input_tokens":1000,"cached_input_tokens":200,"effective_input_tokens":800,"output_tokens":120,"scope":"repo","repo_root":".","backend_used":"primary","capture_provider":"native","execution_mode":"lean","schema_enforced":false,"schema_valid":true}
+{"execution_id":"seed_2","timestamp":"2026-01-01T00:01:00Z","ts":"2026-01-01T00:01:00Z","command":"cxcommitjson","tool":"cxcommitjson","cwd":".","duration_ms":1800,"input_tokens":1300,"cached_input_tokens":400,"effective_input_tokens":900,"output_tokens":160,"scope":"repo","repo_root":".","backend_used":"primary","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
+{"execution_id":"seed_3","timestamp":"2026-01-01T00:02:00Z","ts":"2026-01-01T00:02:00Z","command":"cxdiffsum_staged","tool":"cxdiffsum_staged","cwd":".","duration_ms":2200,"input_tokens":1600,"cached_input_tokens":600,"effective_input_tokens":1000,"output_tokens":200,"scope":"repo","repo_root":".","backend_used":"primary","capture_provider":"native","execution_mode":"deterministic","schema_enforced":true,"schema_valid":true}
 JSONL
 }
 

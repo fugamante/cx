@@ -8,7 +8,7 @@ fn broker_bench_strict_fails_insufficient_samples() {
     let repo = TempRepo::new("cxrs-it");
     let row = serde_json::json!({
         "execution_id":"bs1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
-        "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+        "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
         "duration_ms":1200,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
     });
     write_runs_log_row(&repo, &row);
@@ -17,7 +17,7 @@ fn broker_bench_strict_fails_insufficient_samples() {
         "broker",
         "benchmark",
         "--backend",
-        "codex",
+        "primary",
         "--backend",
         "ollama",
         "--window",
@@ -63,7 +63,7 @@ fn broker_bench_critical_allows_warn_only() {
     let rows = vec![
         serde_json::json!({
             "execution_id":"bc1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
-            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
             "duration_ms":1000,"schema_enforced":false,"schema_valid":true
         }),
         serde_json::json!({
@@ -78,7 +78,7 @@ fn broker_bench_critical_allows_warn_only() {
         "broker",
         "benchmark",
         "--backend",
-        "codex",
+        "primary",
         "--backend",
         "ollama",
         "--window",
@@ -104,7 +104,7 @@ fn broker_bench_warn_fails_on_warn_violations() {
     let rows = vec![
         serde_json::json!({
             "execution_id":"bw1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
-            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
             "duration_ms":900,"schema_enforced":false,"schema_valid":true
         }),
         serde_json::json!({
@@ -119,7 +119,7 @@ fn broker_bench_warn_fails_on_warn_violations() {
         "broker",
         "benchmark",
         "--backend",
-        "codex",
+        "primary",
         "--backend",
         "ollama",
         "--window",

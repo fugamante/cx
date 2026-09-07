@@ -1,3 +1,4 @@
+use crate::config::cli_app_name;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 
@@ -10,28 +11,37 @@ fn show_field<T: ToString>(label: &str, value: Option<T>) {
 
 pub fn print_trace(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return 1;
     };
     if !log_file.exists() {
-        crate::cx_eprintln!("cxrs trace: no log file at {}", log_file.display());
+        crate::cx_eprintln!(
+            "{} trace: no log file at {}",
+            cli_app_name(),
+            log_file.display()
+        );
         return 1;
     }
 
     let runs = match load_runs(&log_file, usize::MAX) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs trace: {e}");
+            crate::cx_eprintln!("{} trace: {e}", cli_app_name());
             return 1;
         }
     };
     if runs.is_empty() {
-        crate::cx_eprintln!("cxrs trace: no runs in {}", log_file.display());
+        crate::cx_eprintln!(
+            "{} trace: no runs in {}",
+            cli_app_name(),
+            log_file.display()
+        );
         return 1;
     }
     if n == 0 || n > runs.len() {
         crate::cx_eprintln!(
-            "cxrs trace: run index out of range (requested {}, available {})",
+            "{} trace: run index out of range (requested {}, available {})",
+            cli_app_name(),
             n,
             runs.len()
         );
@@ -40,7 +50,7 @@ pub fn print_trace(n: usize) -> i32 {
     let idx = runs.len() - n;
     let run = runs.get(idx).cloned().unwrap_or_default();
 
-    println!("== cxrs trace (run #{n} most recent) ==");
+    println!("== {} trace (run #{n} most recent) ==", cli_app_name());
     show_field("ts", run.ts);
     show_field("tool", run.tool);
     show_field("cwd", run.cwd);

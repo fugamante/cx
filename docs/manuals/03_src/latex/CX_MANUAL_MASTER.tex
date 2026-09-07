@@ -1,18 +1,34 @@
 \documentclass[11pt]{article}
 \input{docs/manuals/03_src/latex/_preamble.tex}
 
-\title{CX Manual (Master)}
+\title{XSHELF Manual (Master)}
 \author{}
-\date{Last updated: 2026-02-26}
+\date{Last updated: 2026-05-26}
 
 \begin{document}
 \maketitle
 \vspace{-0.6em}
 
-\section*{Intent}
-cx is built for one outcome: \textbf{predictable LLM-assisted work under load}.
-That means bounded context, schema-validated structured outputs, strict telemetry, and safe
-automation boundaries.
+\section*{Operator Promise}
+XSHELF is built for one outcome: \textbf{predictable LLM-assisted work under load}.
+It wraps repository commands with bounded capture, schema-validated structured outputs,
+explicit execution policy, and telemetry that operators can replay later.
+
+If you only remember one thing: XSHELF is a runtime substrate, not a chat transcript.
+It captures relevant repository output, enforces budgets before that output reaches the model,
+makes structured results checkable, and records enough telemetry to explain what happened later.
+
+XSHELF is designed to fail differently from loose LLM tooling. When it cannot preserve a
+deterministic contract, it should stop, show the broken boundary, store replayable evidence,
+and keep stdout/stderr behavior predictable for automation.
+
+The operator path is intentionally short:
+\begin{enumerate}
+  \item verify the active runtime and backend state,
+  \item inspect the policy and task graph before execution,
+  \item run only bounded commands,
+  \item validate telemetry and quarantine evidence after failure.
+\end{enumerate}
 
 This master manual synthesizes three viewpoints:
 \begin{itemize}
@@ -21,48 +37,89 @@ This master manual synthesizes three viewpoints:
   \item an operator playbook (to validate and execute safely).
 \end{itemize}
 
+\section*{First Operator Scan}
+\begin{lstlisting}[style=cx]
+./bin/xshelf version
+./bin/xshelf task check --json
+./bin/xshelf core --json
+./bin/xshelf diag --json --window 20
+\end{lstlisting}
+
+Expected result: the operator can see runtime identity, task readiness, backend state,
+recent diagnostics, and parseable JSON before any backend execution is attempted.
+
 \section*{Architecture Overview}
 \begin{itemize}
   \item Canonical engine: \texttt{cxrs} (Rust). Bash is fallback only.
-  \item Authoritative entrypoint: \texttt{bin/cx} routes Rust-first with explicit fallback.
+  \item Canonical entrypoint: \texttt{bin/xshelf}. \texttt{bin/cx} remains the compatibility alias.
   \item Capture pipeline applies to \emph{system output} only (internal native reduction, then budgets).
   \item Structured commands are schema-enforced (JSON-only, validated, replayable).
-  \item Schema failures are quarantined (\texttt{.codex/quarantine/}) and logged with \texttt{quarantine\_id}.
-  \item Run telemetry is append-only JSONL (\texttt{.codex/cxlogs/runs.jsonl}).
+  \item Schema failures are quarantined (\texttt{.cx/quarantine/}) and logged with \texttt{quarantine\_id}.
+  \item Run telemetry is append-only JSONL (\texttt{.cx/cxlogs/runs.jsonl}).
   \item Policy engine blocks destructive/out-of-repo writes by default.
 \end{itemize}
 
-\section*{Technical Expose (Rust Refactor Branch)}
+\section*{Runtime Architecture Notes}
 \begin{itemize}
-  \item Active branch focus: split monolithic command logic into cohesive Rust modules.
+  \item Runtime direction: split command logic into cohesive Rust modules.
   \item Orchestrator: \texttt{src/app/mod.rs} (routing + composition).
   \item Runtime config is centralized in \texttt{src/modules/config.rs} (\texttt{AppConfig} loaded once at startup).
-  \item Core extracted command modules: \texttt{introspect}, \texttt{runtime\_controls}, \texttt{agentcmds}, \texttt{logview}, \texttt{analytics}, \texttt{diagnostics}, \texttt{routing}, \texttt{prompting}, \texttt{optimize}, \texttt{doctor}, \texttt{schema\_ops}, \texttt{settings\_cmds}, \texttt{structured\_cmds}, \texttt{task\_cmds}.
-  \item Non-schema LLM commands share one execution path in \texttt{agentcmds} via \texttt{execute\_llm\_command(..., LlmMode)}.
+  \item Core extracted command modules are grouped by runtime concern:
+\end{itemize}
+\begin{lstlisting}[style=cx]
+introspect, runtime_controls, agentcmds, logview,
+analytics, diagnostics, routing, prompting,
+optimize, doctor, schema_ops, settings_cmds,
+structured_cmds, task_cmds
+\end{lstlisting}
+\begin{itemize}
+  \item Non-schema LLM commands share one execution path in \texttt{agentcmds}:
+\end{itemize}
+\begin{lstlisting}[style=cx]
+execute_llm_command(..., LlmMode)
+\end{lstlisting}
+\begin{itemize}
   \item Behavioral contract is unchanged: deterministic schemas, quarantine/replay, policy gating, budgeted capture, append-only logs.
   \item Quality gate per extraction slice: \texttt{cargo fmt} + \texttt{cargo test} must pass.
 \end{itemize}
 
-\section*{Quickstart (3 Commands)}
+\section*{Install and Verify}
 \begin{lstlisting}[style=cx]
-cd <repo-root>
-./bin/cx version
-./bin/cx budget
-./bin/cx diffsum-staged | jq .
+./bin/xshelf version
+./bin/xshelf task check --json
+./bin/xshelf core --json
+./bin/xshelf llm check
+./bin/xshelf doctor
+./bin/xshelf health
 \end{lstlisting}
 
-\section*{Common Workflows (Copy/Paste)}
+Run \texttt{cxo} only after readiness and backend checks are healthy:
 \begin{lstlisting}[style=cx]
-# Structured outputs:
-./bin/cx diffsum-staged | jq .
-./bin/cx commitjson | jq .
+./bin/xshelf cxo git status
+\end{lstlisting}
 
-# Task graph:
-./bin/cx task fanout "Objective..." --from staged-diff
-./bin/cx task run-all --status pending
+\section*{Core Capability Groups}
+\subsection*{Runtime state}
+\begin{lstlisting}[style=cx]
+./bin/xshelf core --json
+./bin/xshelf mode --json | jq .
+./bin/xshelf broker show --json | jq .
+\end{lstlisting}
 
-# Optimization:
-./bin/cx optimize 200
+\subsection*{Task graph}
+\begin{lstlisting}[style=cx]
+./bin/xshelf task fanout "Objective..." --from staged-diff
+./bin/xshelf task check --json | jq .
+./bin/xshelf task run-all --status pending --events-jsonl --json
+\end{lstlisting}
+
+\subsection*{Policy and telemetry}
+\begin{lstlisting}[style=cx]
+./bin/xshelf diffsum-staged | jq .
+./bin/xshelf commitjson | jq .
+./bin/xshelf policy show --json | jq .
+./bin/xshelf logs validate --fix=false
+./bin/xshelf telemetry 50 --json | jq .
 \end{lstlisting}
 
 \section*{Installation / Prereqs}
@@ -70,23 +127,35 @@ cd <repo-root>
   \item Required: \texttt{bash}
   \item Required: \texttt{git}
   \item Required: \texttt{jq}
-  \item Required: \texttt{codex} CLI (default backend)
+  \item Required for default backend: \texttt{primary} CLI
   \item Development: Rust toolchain (\texttt{cargo}, \texttt{rustc})
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-./bin/cx doctor
-./bin/cx capture-status
+./bin/xshelf doctor
+./bin/xshelf capture-status
 \end{lstlisting}
 Optional: \texttt{ollama} (local backend).
 
 \section*{Troubleshooting (Fast)}
 \begin{itemize}
-  \item Unexpected fallback: \texttt{./bin/cx where <cmd>} and confirm \texttt{execution\_path} via \texttt{./bin/cx version}.
-  \item Schema command fails: inspect \texttt{./bin/cx quarantine list}, then \texttt{./bin/cx replay <id>}.
-  \item Budget clipping surprises: check \texttt{./bin/cx budget} and \texttt{./bin/cx trace}; reduce capture scope or adjust budgets intentionally.
+  \item Unexpected fallback: inspect routing, then confirm \texttt{execution\_path}.
+\end{itemize}
+\begin{lstlisting}[style=cx]
+./bin/xshelf where <cmd>
+./bin/xshelf version
+\end{lstlisting}
+\begin{itemize}
+  \item Schema command fails: inspect quarantine, then replay the stored response.
+\end{itemize}
+\begin{lstlisting}[style=cx]
+./bin/xshelf quarantine list
+./bin/xshelf replay <id>
+\end{lstlisting}
+\begin{itemize}
+  \item Budget clipping surprises: check budget and trace data; reduce capture scope or adjust budgets intentionally.
   \item Strict log validation fails: legacy rows may predate the current telemetry contract; new runs should conform.
-  \item Backend confusion: run \texttt{./bin/cx llm show} and verify the selected model when using ollama.
+  \item Backend confusion: run \texttt{./bin/xshelf llm show} and verify the selected model when using ollama.
 \end{itemize}
 
 \tableofcontents
@@ -96,14 +165,14 @@ Optional: \texttt{ollama} (local backend).
 \subsection*{Fast path (30 seconds)}
 \begin{lstlisting}[style=cx]
 cd <repo-root>
-./bin/cx version
-./bin/cx diag
-./bin/cx where version diffsum-staged task optimize
+./bin/xshelf version
+./bin/xshelf diag
+./bin/xshelf where version diffsum-staged task optimize
 \end{lstlisting}
 
 If \texttt{execution\_path} is not Rust, you are on fallback. Expect reduced guarantees.
 
-\section{The Pipeline (What cx Does With Your Reality)}
+\section{The Pipeline (What XSHELF Does With Your Reality)}
 \subsection{Capture and Budgeting}
 The core reliability move is this: \textbf{system output is constrained before it becomes prompt text}.
 
@@ -124,8 +193,8 @@ Budgets (defaults):
 
 Inspect current budgets + last-run clip stats:
 \begin{lstlisting}[style=cx]
-./bin/cx budget
-./bin/cx trace
+./bin/xshelf budget
+./bin/xshelf trace
 \end{lstlisting}
 
 \subsection{Modes}
@@ -139,7 +208,7 @@ Schema commands always force deterministic mode by default. Override with \textt
 
 \section{Structured Outputs (Schemas, Quarantine, Replay)}
 \subsection{Schema Registry}
-Schemas live under \texttt{.codex/schemas/}:
+Schemas live under \texttt{.cx/schemas/}:
 \begin{itemize}
   \item \texttt{commitjson.schema.json}
   \item \texttt{diffsum.schema.json}
@@ -148,24 +217,24 @@ Schemas live under \texttt{.codex/schemas/}:
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-./bin/cx schema list
-./bin/cx schema list --json | jq .
+./bin/xshelf schema list
+./bin/xshelf schema list --json | jq .
 \end{lstlisting}
 
 \subsection{Schema Commands}
 \begin{lstlisting}[style=cx]
-./bin/cx commitjson | jq .
-./bin/cx diffsum-staged | jq .
-./bin/cx next git status | jq .
+./bin/xshelf commitjson | jq .
+./bin/xshelf diffsum-staged | jq .
+./bin/xshelf next git status | jq .
 \end{lstlisting}
 
 \subsection{Failure Procedure}
-If validation fails, cx writes the raw response + metadata to quarantine and returns non-zero.
+If validation fails, XSHELF writes the raw response + metadata to quarantine and returns non-zero.
 
 \begin{lstlisting}[style=cx]
-./bin/cx quarantine list
-./bin/cx quarantine show <id>
-./bin/cx replay <id>
+./bin/xshelf quarantine list
+./bin/xshelf quarantine show <id>
+./bin/xshelf replay <id>
 \end{lstlisting}
 
 \section{Safety Sandbox (Policy Engine)}
@@ -179,8 +248,8 @@ Blocked by default (minimum):
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-./bin/cx policy show
-./bin/cx policy check "rm -rf ."
+./bin/xshelf policy show
+./bin/xshelf policy check "rm -rf ."
 \end{lstlisting}
 
 \section{Task Graph (Fan-out, Run, Run-all)}
@@ -188,26 +257,26 @@ Blocked by default (minimum):
 Tasks are the unit of migration to parallel work: small, role-tagged, log-linked, and replayable.
 
 \begin{lstlisting}[style=cx]
-./bin/cx task fanout "Ship release notes improvements" --from staged-diff
-./bin/cx task list --status pending
+./bin/xshelf task fanout "Ship release notes improvements" --from staged-diff
+./bin/xshelf task list --status pending
 \end{lstlisting}
 
 \subsection{Run tasks}
 \begin{lstlisting}[style=cx]
-./bin/cx task run task_001 --mode deterministic --backend codex
-./bin/cx task run-all --status pending
+./bin/xshelf task run task_001 --mode deterministic --backend primary
+./bin/xshelf task run-all --status pending
 \end{lstlisting}
 
 \section{Telemetry (Contract, Validation, Interpretation)}
 \subsection{Log locations}
 \begin{itemize}
-  \item runs: \texttt{.codex/cxlogs/runs.jsonl}
-  \item schema failures: \texttt{.codex/cxlogs/schema\_failures.jsonl}
+  \item runs: \texttt{.cx/cxlogs/runs.jsonl}
+  \item schema failures: \texttt{.cx/cxlogs/schema\_failures.jsonl}
 \end{itemize}
 
 \subsection{Validate}
 \begin{lstlisting}[style=cx]
-./bin/cx logs validate --fix=false
+./bin/xshelf logs validate --fix=false
 \end{lstlisting}
 Note: strict validation will flag older historical rows that predate the current contract.
 
@@ -221,29 +290,29 @@ Note: strict validation will flag older historical rows that predate the current
 
 \section{Self-Optimization (Pure Analysis)}
 \begin{lstlisting}[style=cx]
-./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .
+./bin/xshelf optimize 200
+./bin/xshelf optimize 200 --json | jq .
 \end{lstlisting}
 
 \section{Operator Procedures (Copy/Paste)}
 \subsection*{Budget stress test}
 \begin{lstlisting}[style=cx]
-CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
-./bin/cx budget
-./bin/cx trace
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/xshelf cxo git status
+./bin/xshelf budget
+./bin/xshelf trace
 \end{lstlisting}
 
 \subsection*{Schema integrity check}
 \begin{lstlisting}[style=cx]
-./bin/cx commitjson | jq .
-./bin/cx diffsum-staged | jq .
+./bin/xshelf commitjson | jq .
+./bin/xshelf diffsum-staged | jq .
 \end{lstlisting}
 
 \subsection*{Task loop}
 \begin{lstlisting}[style=cx]
-./bin/cx task fanout "Objective: tighten schema errors" --from log
-./bin/cx task run-all --status pending
-./bin/cx optimize 200
+./bin/xshelf task fanout "Objective: tighten schema errors" --from log
+./bin/xshelf task run-all --status pending
+./bin/xshelf optimize 200
 \end{lstlisting}
 
 \end{document}

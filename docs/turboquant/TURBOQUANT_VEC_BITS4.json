@@ -1,0 +1,224 @@
+{
+  "contract_version": "turboquant-phase2-validate.v1",
+  "binary": "llama-cli",
+  "model": "sha256-667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29",
+  "context_target": 8192,
+  "runs": [
+    {
+      "mode": "baseline",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 312.8,
+      "decode_tokens_per_sec": 72.9,
+      "wall_ms": 1580,
+      "quality_rule": "exact_OK",
+      "passed": true,
+      "response_text": "OK",
+      "turboquant_report": null
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 205.5,
+      "decode_tokens_per_sec": 25.0,
+      "wall_ms": 1580,
+      "quality_rule": "exact_OK",
+      "passed": false,
+      "response_text": "OK, I'm not sure what to",
+      "turboquant_report": {
+        "layers": 320,
+        "raw": 6684672,
+        "sidecar": 186368,
+        "simulated": 186368,
+        "rows": 1632,
+        "bypassed": 0,
+        "evicted_rows": 0,
+        "evicted_bytes": 0,
+        "decode_calls": 0,
+        "decode_rows": 0,
+        "raw_ratio": 2.79,
+        "sim_ratio": 100.0,
+        "codecs": [
+          "vec"
+        ],
+        "read": {
+          "layers": 224,
+          "decode_calls": 896,
+          "decode_rows": 35840,
+          "decode_groups": 573440,
+          "rows": 8960,
+          "codecs": [
+            "vec"
+          ]
+        }
+      }
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 582.1,
+      "decode_tokens_per_sec": 36.5,
+      "wall_ms": 4630,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive contains 120 identical entries for a neutral project ledger entry for baseline context expansion.",
+      "turboquant_report": null
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 337.0,
+      "decode_tokens_per_sec": 11.5,
+      "wall_ms": 12140,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive line 001: neutral project ledger entry for baseline context expansion.\nThe archive line 002: neutral project ledger entry for baseline context expansion.\nThe archive line 003: neutral project ledger entry for baseline context expansion.\nThe archive line 004: neutral project ledger entry for baseline context expansion.\nThe archive line",
+      "turboquant_report": {
+        "layers": 2208,
+        "raw": 235667456,
+        "sidecar": 4247552,
+        "simulated": 4247552,
+        "rows": 57536,
+        "bypassed": 0,
+        "evicted_rows": 0,
+        "evicted_bytes": 0,
+        "decode_calls": 0,
+        "decode_rows": 0,
+        "raw_ratio": 1.8,
+        "sim_ratio": 100.0,
+        "codecs": [
+          "vec"
+        ],
+        "read": {
+          "layers": 2112,
+          "decode_calls": 60704,
+          "decode_rows": 11849088,
+          "decode_groups": 189585408,
+          "rows": 429856,
+          "codecs": [
+            "vec"
+          ]
+        }
+      }
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 563.4,
+      "decode_tokens_per_sec": 32.0,
+      "wall_ms": 7620,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": true,
+      "response_text": "TURBO-314159",
+      "turboquant_report": null
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 324.4,
+      "decode_tokens_per_sec": 7.6,
+      "wall_ms": 13690,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": false,
+      "response_text": "TURBO-314159.\nThe final answer is: TURBO-",
+      "turboquant_report": {
+        "layers": 768,
+        "raw": 453115904,
+        "sidecar": 7276544,
+        "simulated": 7276544,
+        "rows": 110624,
+        "bypassed": 0,
+        "evicted_rows": 0,
+        "evicted_bytes": 0,
+        "decode_calls": 0,
+        "decode_rows": 0,
+        "raw_ratio": 1.61,
+        "sim_ratio": 100.0,
+        "codecs": [
+          "vec"
+        ],
+        "read": {
+          "layers": 672,
+          "decode_calls": 4032,
+          "decode_rows": 1503744,
+          "decode_groups": 24059904,
+          "rows": 273984,
+          "codecs": [
+            "vec"
+          ]
+        }
+      }
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 587.8,
+      "decode_tokens_per_sec": 36.6,
+      "wall_ms": 5110,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}",
+      "turboquant_report": null
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 336.4,
+      "decode_tokens_per_sec": 10.3,
+      "wall_ms": 9140,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}",
+      "turboquant_report": {
+        "layers": 1024,
+        "raw": 240123904,
+        "sidecar": 4014080,
+        "simulated": 4014080,
+        "rows": 58624,
+        "bypassed": 0,
+        "evicted_rows": 0,
+        "evicted_bytes": 0,
+        "decode_calls": 0,
+        "decode_rows": 0,
+        "raw_ratio": 1.67,
+        "sim_ratio": 100.0,
+        "codecs": [
+          "vec"
+        ],
+        "read": {
+          "layers": 928,
+          "decode_calls": 11328,
+          "decode_rows": 3036864,
+          "decode_groups": 48589824,
+          "rows": 270464,
+          "codecs": [
+            "vec"
+          ]
+        }
+      }
+    }
+  ]
+}

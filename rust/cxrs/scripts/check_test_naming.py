@@ -4,7 +4,11 @@ import pathlib
 import re
 import sys
 
-PAT_FN = re.compile(r"^\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PAT_FN = re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PAT_TEST_ATTR = re.compile(
+    r"^\s*#\[\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*::)*)test(?:\s*\(.*\))?\s*\]\s*$"
+)
+PAT_ATTR = re.compile(r"^\s*#\[[^\]]+\]\s*$")
 PAT_SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -47,31 +51,42 @@ def main() -> int:
     for path in sorted(root.glob("*.rs")):
         lines = path.read_text(encoding="utf-8").splitlines()
         for idx, line in enumerate(lines):
-            if line.strip() != "#[test]":
+            if not PAT_TEST_ATTR.match(line):
                 continue
-            if idx + 1 >= len(lines):
-                violations.append(f"{path}:{idx + 1}: missing function after #[test]")
+            fn_line = idx + 1
+            while fn_line < len(lines):
+                raw = lines[fn_line]
+                stripped = raw.strip()
+                if not stripped:
+                    fn_line += 1
+                    continue
+                if PAT_ATTR.match(raw):
+                    fn_line += 1
+                    continue
+                break
+            if fn_line >= len(lines):
+                violations.append(f"{path}:{idx + 1}: missing function after test attribute")
                 continue
-            m = PAT_FN.match(lines[idx + 1])
+            m = PAT_FN.match(lines[fn_line])
             if not m:
                 violations.append(
-                    f"{path}:{idx + 2}: expected test fn immediately after #[test]"
+                    f"{path}:{fn_line + 1}: expected test fn after test attribute"
                 )
                 continue
             test_count += 1
             name = m.group(1)
             if not PAT_SNAKE.match(name):
                 violations.append(
-                    f"{path}:{idx + 2}: non-snake-case test name: {name}"
+                    f"{path}:{fn_line + 1}: non-snake-case test name: {name}"
                 )
             if len(name) > args.max_len:
                 violations.append(
-                    f"{path}:{idx + 2}: len={len(name)}>{args.max_len}: {name}"
+                    f"{path}:{fn_line + 1}: len={len(name)}>{args.max_len}: {name}"
                 )
             segments = name.count("_") + 1
             if segments > args.max_segments:
                 violations.append(
-                    f"{path}:{idx + 2}: segments={segments}>{args.max_segments}: {name}"
+                    f"{path}:{fn_line + 1}: segments={segments}>{args.max_segments}: {name}"
                 )
 
     if violations:

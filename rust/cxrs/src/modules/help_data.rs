@@ -3,8 +3,13 @@ use super::CommandHelp;
 pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "version",
-        usage: "version",
+        usage: "version [--json]",
         description: "Print tool version",
+    },
+    CommandHelp {
+        name: "contracts",
+        usage: "contracts <export|validate> [--profile eval-lab|full] [--json]",
+        description: "Export or validate stable machine-contract bundle metadata",
     },
     CommandHelp {
         name: "where",
@@ -18,12 +23,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "diag",
-        usage: "diag [--json] [--window N] [--strict] [--actions] [--severity warning|critical]",
+        usage: "diag [--json|--text] [--window N] [--strict] [--actions] [--severity warning|critical]",
         description: "Non-interactive diagnostic report",
     },
     CommandHelp {
         name: "scheduler",
-        usage: "scheduler [--json] [--window N] [--strict] [--actions] [--severity warning|critical]",
+        usage: "scheduler [--json|--text] [--window N] [--strict] [--actions] [--severity warning|critical]",
         description: "Scheduler-focused diagnostics summary",
     },
     CommandHelp {
@@ -48,12 +53,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "logs",
-        usage: "logs stats [N] [--json] [--strict] [--severity]",
+        usage: "logs stats [N] [--json|--text] [--strict] [--severity]",
         description: "Telemetry health and contract-drift summary",
     },
     CommandHelp {
         name: "telemetry",
-        usage: "telemetry [N] [--json] [--strict] [--severity]",
+        usage: "telemetry [N] [--json|--text] [--strict] [--severity]",
         description: "Alias for 'logs stats'",
     },
     CommandHelp {
@@ -63,13 +68,23 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "core",
-        usage: "core",
+        usage: "core [--json]",
         description: "Show execution-core pipeline config",
     },
     CommandHelp {
+        name: "mode",
+        usage: "mode [show|explain] [--json] [--cli json|text] [--command-default json|text]",
+        description: "Explain output-mode resolution (cli/env/state/auto/default)",
+    },
+    CommandHelp {
         name: "broker",
-        usage: "broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend codex|ollama]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|warning|critical]>",
+        usage: "broker <show [--json] | set --policy latency|quality|cost|balanced|quota_saver | benchmark [--backend primary|ollama|llamacpp|mlx]... [--window N] [--json] [--strict] [--min-runs N] [--severity warn|warning|critical]>",
         description: "Show/set broker policy and benchmark backend performance from local run logs",
+    },
+    CommandHelp {
+        name: "launch",
+        usage: "launch [--json] [--no-open] [--local|--remote] [--cxops-bin PATH]",
+        description: "Start the cxops UI/server companion and open the dashboard",
     },
     CommandHelp {
         name: "task",
@@ -89,7 +104,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "llm",
         usage: "llm <op> [...]",
-        description: "Manage LLM backend/model defaults (show|use|unset|set-backend|set-model|clear-model)",
+        description: "Manage and verify LLM backend/model defaults (show|check|smoke|verify|resident show|resident probe-models|use|unset|set-backend|set-model|clear-model|models list|models add|models inspect|models remove)",
     },
     CommandHelp {
         name: "state",
@@ -98,7 +113,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "policy",
-        usage: "policy [show|check ...]",
+        usage: "policy [show [--json]|check ...]",
         description: "Show safety rules or classify a command",
     },
     CommandHelp {
@@ -109,12 +124,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "cx",
         usage: "cx <cmd...>",
-        description: "Run command output through LLM text mode",
+        description: "Compatibility LLM text-mode command; prefer cxo for explicit XSHELF output",
     },
     CommandHelp {
         name: "cxj",
         usage: "cxj <cmd...>",
-        description: "Run command output through LLM JSONL mode",
+        description: "Compatibility LLM JSONL command",
     },
     CommandHelp {
         name: "cxo",
@@ -124,12 +139,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "cxol",
         usage: "cxol <cmd...>",
-        description: "Run command output through LLM plain mode",
+        description: "Compatibility LLM plain-output command",
     },
     CommandHelp {
         name: "cxcopy",
         usage: "cxcopy <cmd...>",
-        description: "Copy cxo output to clipboard (pbcopy/wl-copy/xclip)",
+        description: "Compatibility helper that copies cxo output to clipboard",
     },
     CommandHelp {
         name: "fix",
@@ -149,7 +164,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "health",
         usage: "health",
-        description: "Run end-to-end selected-LLM/cx smoke checks",
+        description: "Run end-to-end selected-LLM XSHELF/CX smoke checks",
     },
     CommandHelp {
         name: "capture-status",
@@ -159,12 +174,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "log-on",
         usage: "log-on",
-        description: "Enable cx logging (process-local)",
+        description: "Enable XSHELF/CX logging (process-local)",
     },
     CommandHelp {
         name: "log-off",
         usage: "log-off",
-        description: "Disable cx logging in this process",
+        description: "Disable XSHELF/CX logging in this process",
     },
     CommandHelp {
         name: "alert-show",
@@ -204,7 +219,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "prompt",
         usage: "prompt <mode> <request>",
-        description: "Generate Codex-ready prompt block",
+        description: "Generate agent-ready prompt block",
     },
     CommandHelp {
         name: "roles",
@@ -224,12 +239,12 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "cx-compat",
         usage: "cx-compat <cmd...>",
-        description: "Compatibility shim for bash-style cx command names",
+        description: "Legacy compatibility shim for bash-style cx command names",
     },
     CommandHelp {
         name: "profile",
         usage: "profile [N]",
-        description: "Summarize last N runs from resolved cx log (default {RUN_WINDOW})",
+        description: "Summarize last N runs from resolved runtime log (default {RUN_WINDOW})",
     },
     CommandHelp {
         name: "alert",
@@ -238,7 +253,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     },
     CommandHelp {
         name: "optimize",
-        usage: "optimize [N] [--json] [--actions] [--strict] [--severity warning|critical]",
+        usage: "optimize [N] [--json|--text] [--actions] [--strict] [--severity warning|critical]",
         description: "Recommend cost/latency improvements from last N runs",
     },
     CommandHelp {
@@ -249,7 +264,7 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "trace",
         usage: "trace [N]",
-        description: "Show Nth most-recent run from resolved cx log (default 1)",
+        description: "Show Nth most-recent run from resolved runtime log (default 1)",
     },
     CommandHelp {
         name: "next",
@@ -306,52 +321,67 @@ pub const MAIN_COMMANDS: &[CommandHelp] = &[
 pub const TASK_COMMANDS: &[CommandHelp] = &[
     CommandHelp {
         name: "task add",
-        usage: "cx task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--backend <auto|codex|ollama>] [--model <name>] [--profile <fast|balanced|quality|schema_strict>] [--converge <none|first_valid|majority|judge|score>] [--replicas <n>] [--max-concurrency <n>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
+        usage: "{APP} task add \"<objective>\" [--role <architect|implementer|reviewer|tester|doc>] [--backend <auto|primary|ollama|llamacpp|mlx>] [--model <name>] [--profile <fast|balanced|quality|schema_strict>] [--converge <none|first_valid|majority|judge|score>] [--replicas <n>] [--max-concurrency <n>] [--mode <sequential|parallel>] [--depends-on <id1,id2>] [--resource <key>]",
         description: "Create a task with role, routing, and orchestration metadata",
     },
     CommandHelp {
         name: "task list",
-        usage: "cx task list [--status pending|in_progress|complete|failed]",
+        usage: "{APP} task list [--status pending|in_progress|complete|failed] [--json|--text]",
         description: "List tasks with optional status filter",
     },
     CommandHelp {
         name: "task claim",
-        usage: "cx task claim <id>",
+        usage: "{APP} task claim <id>",
         description: "Mark task as in_progress",
     },
     CommandHelp {
         name: "task complete",
-        usage: "cx task complete <id>",
+        usage: "{APP} task complete <id>",
         description: "Mark task as complete",
     },
     CommandHelp {
         name: "task fail",
-        usage: "cx task fail <id>",
+        usage: "{APP} task fail <id>",
         description: "Mark task as failed",
     },
     CommandHelp {
         name: "task show",
-        usage: "cx task show <id>",
-        description: "Show one task record",
+        usage: "{APP} task show <id> | {APP} task show list [--status pending|in_progress|complete|failed] [--json|--text]",
+        description: "Show one task record or route to list view",
     },
     CommandHelp {
         name: "task fanout",
-        usage: "cx task fanout \"<objective>\" [--from staged-diff|worktree|log|file:PATH]",
+        usage: "{APP} task fanout \"<objective>\" [--from staged-diff|worktree|log|file:PATH]",
         description: "Generate role-tagged subtasks",
     },
     CommandHelp {
+        name: "task check",
+        usage: "{APP} task check [--status pending|in_progress|complete|failed] [--strict-plan] [--json|--text]",
+        description: "Preflight blocked tasks, strict-plan readiness, and recommended mode",
+    },
+    CommandHelp {
+        name: "task sandbox",
+        usage: "{APP} task sandbox <show|check|enable|disable|set-image|clear-image> [--json|--text|<image>]",
+        description: "Inspect, preflight, or configure the repo-scoped Docker task sandbox",
+    },
+    CommandHelp {
+        name: "task events",
+        usage: "{APP} task events [--limit N] [--json|--jsonl] [--follow]",
+        description: "Read task-events.v1 progress events emitted by run-all",
+    },
+    CommandHelp {
         name: "task run-plan",
-        usage: "cx task run-plan [--status pending|in_progress|complete|failed] [--json]",
+        usage: "{APP} task run-plan [--status pending|in_progress|complete|failed] [--json]",
         description: "Preview deterministic execution waves before run-all",
     },
     CommandHelp {
         name: "task run",
-        usage: "cx task run <id> [--mode lean|deterministic|verbose] [--backend codex|ollama]",
+        usage: "{APP} task run <id> [--mode lean|deterministic|verbose] [--backend primary|ollama|llamacpp|mlx] [--json|--text]",
         description: "Run one task objective",
     },
     CommandHelp {
         name: "task run-all",
-        usage: "cx task run-all [--status pending] [--mode sequential|mixed] [--backend-pool codex,ollama] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded] [--halt-on-critical|--continue-on-critical]",
+        usage: "{APP} task run-all [--status pending] [--mode sequential|mixed|parallel] [--strict-plan] [--plan-json] [--dry-run] [--backend-pool primary,ollama,llamacpp,mlx] [--backend-cap backend=limit] [--max-workers N] [--fairness round_robin|least_loaded] [--halt-on-critical|--continue-on-critical] [--events-jsonl] [--summary text|json] [--json|--text]",
         description: "Run tasks by status (sequential default; mixed uses run-plan waves and broker-aware backend routing)",
     },
 ];

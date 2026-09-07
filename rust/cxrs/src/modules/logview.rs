@@ -2,7 +2,7 @@ use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use crate::config::app_config;
+use crate::config::{app_config, cli_app_name};
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 
@@ -15,11 +15,11 @@ fn show_field<T: ToString>(label: &str, value: Option<T>) {
 
 pub fn cmd_budget() -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return 1;
     };
     let cfg = app_config();
-    println!("== cxbudget ==");
+    println!("== {} budget ==", cli_app_name());
     println!("CX_CONTEXT_BUDGET_CHARS={}", cfg.budget_chars);
     println!("CX_CONTEXT_BUDGET_LINES={}", cfg.budget_lines);
     println!("CX_CONTEXT_CLIP_MODE={}", cfg.clip_mode);
@@ -64,17 +64,25 @@ pub fn cmd_budget() -> i32 {
 
 pub fn cmd_log_tail(n: usize) -> i32 {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return 1;
     };
     if !log_file.exists() {
-        crate::cx_eprintln!("cxrs log-tail: no log file at {}", log_file.display());
+        crate::cx_eprintln!(
+            "{} log-tail: no log file at {}",
+            cli_app_name(),
+            log_file.display()
+        );
         return 1;
     }
     let file = match File::open(&log_file) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs log-tail: cannot open {}: {e}", log_file.display());
+            crate::cx_eprintln!(
+                "{} log-tail: cannot open {}: {e}",
+                cli_app_name(),
+                log_file.display()
+            );
             return 1;
         }
     };

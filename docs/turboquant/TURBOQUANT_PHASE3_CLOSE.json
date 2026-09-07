@@ -1,0 +1,70 @@
+{
+  "contract_version": "turboquant-phase3-close.v1",
+  "decision": "phase3_vector_go",
+  "winner": "vec_bits6_bypass256",
+  "reason": "The hardened 6-bit vector path preserves exact-task correctness through 8k/16k/32k while materially outperforming the closed scalar track on both storage ratio and decode throughput.",
+  "scalar_reference": {
+    "passes": 4,
+    "total": 4,
+    "decode_tps": 2.73,
+    "wall_ms": 17022.5,
+    "raw_ratio": 26.56,
+    "bytes_saved_pct": 73.44
+  },
+  "vector_reference_8k": {
+    "passes": 4,
+    "total": 4,
+    "decode_tps": 17.68,
+    "wall_ms": 12655,
+    "raw_ratio": 3.12,
+    "bytes_saved_pct": 96.88
+  },
+  "vector_ladder": [
+    {
+      "label": "8k",
+      "context_target": 8192,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 17.68,
+      "wall_ms_mean": 12655,
+      "raw_ratio_mean": 3.12,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    },
+    {
+      "label": "16k",
+      "context_target": 16384,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 21.3,
+      "wall_ms_mean": 9632.5,
+      "raw_ratio_mean": 6.23,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    },
+    {
+      "label": "32k",
+      "context_target": 32768,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 19.05,
+      "wall_ms_mean": 10267.5,
+      "raw_ratio_mean": 6.23,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    }
+  ],
+  "next_step": "phase3_closeout_or_mlx_followthrough"
+}

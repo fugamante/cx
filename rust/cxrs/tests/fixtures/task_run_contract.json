@@ -1,0 +1,24 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "task_id",
+    "mode_override",
+    "backend_override",
+    "managed_by_parent",
+    "preflight",
+    "status",
+    "execution_id"
+  ],
+  "preflight_keys": [
+    "status_filter",
+    "selected_status_count",
+    "runnable_now",
+    "wave_index",
+    "wave_mode",
+    "blocked_reason",
+    "dependencies",
+    "resource_keys",
+    "recommended_command",
+    "recommended_reason"
+  ]
+}

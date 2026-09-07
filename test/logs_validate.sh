@@ -10,7 +10,7 @@ git init -q
 $ROOT/bin/cx cxo git status >/dev/null 2>/dev/null || true
 $ROOT/bin/cx logs validate >/dev/null
 
-printf '{"bad":1}\n' >> .codex/cxlogs/runs.jsonl
+printf '{"bad":1}\n' >> .cx/cxlogs/runs.jsonl
 if ! $ROOT/bin/cx logs validate >/dev/null 2>/dev/null; then
   echo "expected logs validate default mode to pass with warnings" >&2
   exit 1

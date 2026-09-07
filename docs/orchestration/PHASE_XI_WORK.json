@@ -1,0 +1,72 @@
+{
+  "phase": "phase11",
+  "status": "complete",
+  "title": "token_compression_runtime_wiring",
+  "goal": "wire token-compression primitives through shadow-first runtime gates without changing default capture contracts",
+  "constraints": [
+    "default command capture output must remain unchanged unless an explicit opt-in is enabled",
+    "shadow assembly must not feed the model or write public telemetry",
+    "public JSON, log, schema, policy, quarantine, and replay contracts stay stable until additive contract slices land",
+    "high-uncertainty reduction must retain source evidence or fall back to the existing capture path",
+    "avoid hidden downloads, slow disk scans, and storage-compression work in the capture control plane"
+  ],
+  "slices": [
+    {
+      "id": "p11_spec_rollout_contract",
+      "status": "done",
+      "goal": "document the Phase XI shadow-first rollout contract, acceptance gates, rollback rule, and public-surface boundaries"
+    },
+    {
+      "id": "p11_shadow_assembly",
+      "status": "done",
+      "goal": "run typed assembly in a private shadow path and prove returned capture text, status, stats, and public contracts remain unchanged"
+    },
+    {
+      "id": "p11_opt_in_profile",
+      "status": "done",
+      "goal": "add an explicit opt-in prompt profile for narrow command classes only after shadow evidence is fixture-backed"
+    },
+    {
+      "id": "p11_measurement_gates",
+      "status": "done",
+      "goal": "collect non-public fixture measurements for omission counts, recall, replay recoverability, and size deltas"
+    },
+    {
+      "id": "p11_rollout_decision",
+      "status": "done",
+      "goal": "document whether typed assembly should remain opt-in, expand through additive surfaces, or defer default wiring"
+    }
+  ],
+  "acceptance_gates": [
+    "default_unchanged",
+    "critical_span_recall",
+    "lossiness_declared",
+    "fallback_safe",
+    "bounded_cost",
+    "contract_neutral",
+    "rollback_simple"
+  ],
+  "references": [
+    "docs/orchestration/PHASE_XI_TOKEN_COMPRESSION_RUNTIME_WIRING.md",
+    "docs/orchestration/PHASE_X_TOKEN_COMPRESSION_LAYER.md",
+    "rust/cxrs/src/modules/capture_system.rs",
+    "rust/cxrs/src/modules/capture_budget.rs",
+    "rust/cxrs/src/modules/capture_reduce.rs"
+  ],
+  "decision": {
+    "mode": "opt_in_only",
+    "completed_at": "2026-06-03",
+    "summary": "keep typed assembly runtime wiring behind the explicit shadow_narrow prompt profile only",
+    "rationale": [
+      "default capture output and public contracts remain intentionally unchanged",
+      "fixture-backed evidence exists only for the narrow test_output and git_diff reducer classes",
+      "rollback remains one env toggle and preserves the existing run -> reduce -> clip path",
+      "public telemetry, quarantine, replay, and schema surfaces should change only through additive contract work"
+    ],
+    "follow_on": [
+      "expand fixture-backed recall and fallback coverage before widening reducer eligibility",
+      "introduce additive diagnostics or telemetry only with explicit contract fixtures and changelog coverage",
+      "defer any default prompt replacement until opt-in operation proves stable across a broader command corpus"
+    ]
+  }
+}

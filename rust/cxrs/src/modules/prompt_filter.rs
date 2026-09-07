@@ -63,13 +63,21 @@ pub fn process_prompt(raw: &str, schema_enforced: bool) -> PromptTransform {
 #[cfg(test)]
 mod tests {
     use super::process_prompt;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn prompt_filter_compacts_blank_lines_when_enabled() {
+        let _guard = env_lock();
         // SAFETY: tests run in-process and intentionally toggle env vars.
         unsafe {
             std::env::set_var("CX_PROMPT_FILTER", "1");
             std::env::set_var("CX_PROMPT_FILTER_STRICT", "1");
+            std::env::remove_var("CX_PROMPT_FILTER_MAX_CHARS");
         }
         let tx = process_prompt("line1\n\n\nline2   \n", false);
         assert_eq!(tx.filtered, "line1\n\nline2");
@@ -77,10 +85,12 @@ mod tests {
 
     #[test]
     fn prompt_filter_bypasses_schema_prompts_by_default() {
+        let _guard = env_lock();
         // SAFETY: tests run in-process and intentionally toggle env vars.
         unsafe {
             std::env::set_var("CX_PROMPT_FILTER", "1");
             std::env::set_var("CX_PROMPT_FILTER_STRICT", "0");
+            std::env::remove_var("CX_PROMPT_FILTER_MAX_CHARS");
         }
         let raw = "a\n\n\nb  ";
         let tx = process_prompt(raw, true);

@@ -1,0 +1,57 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "status_filter",
+    "count",
+    "list_readiness",
+    "tasks"
+  ],
+  "list_readiness_keys": [
+    "selected_count",
+    "runnable_now_count",
+    "blocked_now_count",
+    "inspect_only_count",
+    "wave_count",
+    "blocked_count",
+    "next_wave"
+  ],
+  "list_readiness_next_wave_keys": [
+    "index",
+    "mode",
+    "size"
+  ],
+  "task_keys": [
+    "id",
+    "objective",
+    "role",
+    "status",
+    "parent_id",
+    "context_ref",
+    "backend",
+    "model",
+    "profile",
+    "converge",
+    "replicas",
+    "max_concurrency",
+    "run_mode",
+    "depends_on",
+    "resource_keys",
+    "max_retries",
+    "timeout_secs",
+    "created_at",
+    "updated_at",
+    "run_readiness"
+  ],
+  "run_readiness_keys": [
+    "status_filter",
+    "selected_status_count",
+    "runnable_now",
+    "wave_index",
+    "wave_mode",
+    "blocked_reason",
+    "dependencies",
+    "resource_keys",
+    "recommended_command",
+    "recommended_reason"
+  ]
+}

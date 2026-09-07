@@ -16,8 +16,14 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+fn unique_test_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 
 fn git_bin() -> String {
     if let Ok(v) = std::env::var("GIT_BIN")
@@ -41,6 +47,9 @@ fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
             .arg("init")
             .arg("-q")
             .arg(format!("--template={}", template_dir.display()))
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .current_dir(root)
             .output()
             .expect("run git init");
@@ -56,7 +65,7 @@ fn init_git_repo_with_retry(root: &Path, template_dir: &Path) {
 fn repo_root() -> PathBuf {
     let mut cur = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for _ in 0..6 {
-        if cur.join(".codex").join("schemas").is_dir() && cur.join("bin").join("cx").is_file() {
+        if cur.join(".cx").join("schemas").is_dir() && cur.join("bin").join("cx").is_file() {
             return cur;
         }
         if !cur.pop() {
@@ -83,9 +92,13 @@ impl TempRepo {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
-        let root = base.join(format!("{prefix}-repo-{}-{ts}", std::process::id()));
-        let home = base.join(format!("{prefix}-home-{}-{ts}", std::process::id()));
-        let mock_bin = base.join(format!("{prefix}-mockbin-{}-{ts}", std::process::id()));
+        let uniq = unique_test_id();
+        let root = base.join(format!("{prefix}-repo-{}-{ts}-{uniq}", std::process::id()));
+        let home = base.join(format!("{prefix}-home-{}-{ts}-{uniq}", std::process::id()));
+        let mock_bin = base.join(format!(
+            "{prefix}-mockbin-{}-{ts}-{uniq}",
+            std::process::id()
+        ));
 
         fs::create_dir_all(&root).expect("create temp repo dir");
         fs::create_dir_all(&home).expect("create temp home dir");
@@ -106,8 +119,8 @@ impl TempRepo {
     }
 
     pub fn copy_schema_registry(&self) {
-        let src = repo_root().join(".codex").join("schemas");
-        let dst = self.root.join(".codex").join("schemas");
+        let src = repo_root().join(".cx").join("schemas");
+        let dst = self.root.join(".cx").join("schemas");
         fs::create_dir_all(&dst).expect("create schema dst dir");
         for entry in fs::read_dir(&src).expect("read schema src dir") {
             let entry = entry.expect("schema dir entry");
@@ -131,8 +144,26 @@ impl TempRepo {
         }
     }
 
-    pub fn write_mock_codex(&self, body: &str) {
-        self.write_mock("codex", body);
+    pub fn write_mock_primary(&self, body: &str) {
+        self.write_mock(concat!("co", "dex"), body);
+    }
+
+    pub fn write_cx_wrapper(&self) {
+        let bin_dir = self.root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        let body = format!(
+            "#!/usr/bin/env bash\nexec \"{}\" \"$@\"\n",
+            env!("CARGO_BIN_EXE_cxrs")
+        );
+        let path = bin_dir.join("cx");
+        fs::write(&path, body).expect("write cx wrapper");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&path).expect("wrapper metadata").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).expect("set wrapper executable");
+        }
     }
 
     pub fn run(&self, args: &[&str]) -> Output {
@@ -145,7 +176,10 @@ impl TempRepo {
         cmd.args(args)
             .current_dir(&self.root)
             .env("HOME", &self.home)
-            .env("PATH", path);
+            .env("PATH", path)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE");
         for (k, v) in envs {
             cmd.env(k, v);
         }
@@ -153,37 +187,48 @@ impl TempRepo {
     }
 
     pub fn tasks_file(&self) -> PathBuf {
-        self.root.join(".codex").join("tasks.json")
+        self.root.join(".cx").join("tasks.json")
     }
 
     pub fn schema_fail_log(&self) -> PathBuf {
         self.root
-            .join(".codex")
+            .join(".cx")
             .join("cxlogs")
             .join("schema_failures.jsonl")
     }
 
     pub fn runs_log(&self) -> PathBuf {
-        self.root.join(".codex").join("cxlogs").join("runs.jsonl")
+        self.root.join(".cx").join("cxlogs").join("runs.jsonl")
+    }
+
+    pub fn task_events_log(&self) -> PathBuf {
+        self.root
+            .join(".codex")
+            .join("cxlogs")
+            .join("task_events.jsonl")
     }
 
     pub fn quarantine_dir(&self) -> PathBuf {
-        self.root.join(".codex").join("quarantine")
+        self.root.join(".cx").join("quarantine")
     }
 
     pub fn quarantine_file(&self, id: &str) -> PathBuf {
         self.root
-            .join(".codex")
+            .join(".cx")
             .join("quarantine")
             .join(format!("{id}.json"))
     }
 
     pub fn state_file(&self) -> PathBuf {
-        self.root.join(".codex").join("state.json")
+        self.root.join(".cx").join("state.json")
     }
 
     pub fn quota_catalog_file(&self) -> PathBuf {
-        self.root.join(".codex").join("quota_catalog.json")
+        self.root.join(".cx").join("quota_catalog.json")
+    }
+
+    pub fn local_models_file(&self) -> PathBuf {
+        self.root.join(".cx").join("local_models.json")
     }
 }
 
@@ -239,6 +284,80 @@ pub fn parse_jsonl(path: &Path) -> Vec<Value> {
         .filter(|l| !l.trim().is_empty())
         .map(|line| serde_json::from_str::<Value>(line).expect("valid json line"))
         .collect()
+}
+
+pub fn expect_schema_fail(repo: &TempRepo) -> String {
+    let qdir = repo.quarantine_dir();
+    let mut has_entries = false;
+    for _ in 0..20 {
+        if let Ok(rd) = fs::read_dir(&qdir)
+            && rd.filter_map(Result::ok).next().is_some()
+        {
+            has_entries = true;
+            break;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    assert!(
+        has_entries,
+        "expected quarantine entries in {}",
+        qdir.display()
+    );
+
+    let sf_last = parse_jsonl(&repo.schema_fail_log())
+        .into_iter()
+        .last()
+        .expect("schema failure log row");
+    let qid = sf_last
+        .get("quarantine_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    assert!(!qid.is_empty(), "schema failure log missing quarantine_id");
+
+    let run_last = parse_jsonl(&repo.runs_log())
+        .into_iter()
+        .last()
+        .expect("last run row");
+    assert_eq!(
+        run_last.get("schema_valid").and_then(Value::as_bool),
+        Some(false),
+        "expected schema_valid=false in run log row: {run_last}"
+    );
+    assert_eq!(
+        run_last.get("quarantine_id").and_then(Value::as_str),
+        Some(qid.as_str()),
+        "run log quarantine_id should match schema failure row: {run_last}"
+    );
+    qid
+}
+
+pub fn write_quarantine_fixture(
+    repo: &TempRepo,
+    id: &str,
+    tool: &str,
+    schema: &str,
+    prompt: &str,
+    raw_response: &str,
+) {
+    let payload = serde_json::json!({
+        "id": id,
+        "ts": "2026-01-01T00:00:00Z",
+        "tool": tool,
+        "reason": "invalid_json",
+        "schema": schema,
+        "prompt": prompt,
+        "prompt_sha256": "fixture",
+        "raw_response": raw_response,
+        "raw_sha256": "fixture",
+        "attempts": []
+    });
+    fs::create_dir_all(repo.quarantine_dir()).expect("create quarantine dir");
+    fs::write(
+        repo.quarantine_file(id),
+        serde_json::to_string_pretty(&payload).expect("serialize quarantine fixture"),
+    )
+    .expect("write quarantine fixture");
 }
 
 #[cfg(unix)]

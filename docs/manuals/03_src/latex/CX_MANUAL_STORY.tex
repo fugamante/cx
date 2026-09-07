@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \input{docs/manuals/03_src/latex/_preamble.tex}
 
-\title{CX Manual (Story-First Walkthrough)}
+\title{XSHELF Manual (Story-First Walkthrough)}
 \author{}
 \date{Last updated: 2026-02-22}
 
@@ -14,34 +14,34 @@ You are in a repo, you want answers you can trust, and you want the runtime to s
 This walkthrough follows one realistic loop: \emph{capture context} \textrightarrow{} \emph{summarize}
 \textrightarrow{} \emph{fan out} \textrightarrow{} \emph{run tasks} \textrightarrow{} \emph{optimize}.
 
-\section{The Cast (What cx Actually Is)}
+\section{The Cast (What XSHELF Actually Is)}
 \begin{itemize}
-  \item \textbf{bin/cx}: the one entrypoint you call. It routes Rust-first and falls back explicitly.
+  \item \textbf{bin/xshelf}: the canonical entrypoint. \texttt{bin/cx} remains the compatibility alias.
   \item \textbf{cxrs}: the canonical Rust engine. It owns capture, budgeting, schemas, quarantine, logging.
   \item \textbf{Bash}: compatibility/bootstrap only (\texttt{lib/cx/*.sh}).
-  \item \textbf{.codex/}: the repo-local memory: schemas, logs, quarantine, tasks, state.
+  \item \textbf{.cx/}: the repo-local memory: schemas, logs, quarantine, tasks, state.
 \end{itemize}
 
 \section{Scene 1: You Enter the Repo}
-You start by asking cx who it is \emph{today}: which backend is active, what the budgets are, and
+You start by asking XSHELF who it is \emph{today}: which backend is active, what the budgets are, and
 where logs are going.
 
 \begin{lstlisting}[style=cx]
 cd <repo-root>
-./bin/cx version
-./bin/cx diag
+./bin/xshelf version
+./bin/xshelf diag
 \end{lstlisting}
 
 What you should notice:
 \begin{itemize}
-  \item \texttt{execution\_path} is \texttt{rust:bin/cx} when cxrs is available.
-  \item \texttt{log\_file} points at \texttt{.codex/cxlogs/runs.jsonl}.
+  \item \texttt{execution\_path} reports Rust when cxrs is available.
+  \item \texttt{log\_file} points at \texttt{.cx/cxlogs/runs.jsonl}.
   \item Budgets are explicit (chars/lines/clip\_mode).
 \end{itemize}
 
 \section{Scene 2: Capture Reality (Without Drowning the Model)}
 The most common failure mode is context bloat: huge diffs, noisy logs, unbounded output.
-cx treats system output as a first-class input with a strict pipeline:
+XSHELF treats system output as a first-class input with a strict pipeline:
 
 \begin{lstlisting}[style=cx]
 raw system output
@@ -52,13 +52,13 @@ raw system output
 
 Try a benign capture-driven call:
 \begin{lstlisting}[style=cx]
-./bin/cx cxo git status
+./bin/xshelf cxo git status
 \end{lstlisting}
 
 If the repo is large and output is clipped, it should be \emph{visible} in telemetry:
 \begin{lstlisting}[style=cx]
-./bin/cx budget
-./bin/cx trace
+./bin/xshelf budget
+./bin/xshelf trace
 \end{lstlisting}
 
 \section{Scene 3: Ask for a Deterministic Summary (Schema-Enforced)}
@@ -66,47 +66,47 @@ When you need a structured artifact (commit JSON, diff summary, next commands), 
 want prose. You want JSON-only, validated, and replayable.
 
 \begin{lstlisting}[style=cx]
-./bin/cx schema list
-./bin/cx diffsum-staged | jq .
+./bin/xshelf schema list
+./bin/xshelf diffsum-staged | jq .
 \end{lstlisting}
 
-If the model returns invalid JSON, cx quarantines it and gives you a handle:
+If the model returns invalid JSON, XSHELF quarantines it and gives you a handle:
 \begin{lstlisting}[style=cx]
-./bin/cx quarantine list
-./bin/cx quarantine show <id>
-./bin/cx replay <id>
+./bin/xshelf quarantine list
+./bin/xshelf quarantine show <id>
+./bin/xshelf replay <id>
 \end{lstlisting}
 
 \section{Scene 4: Turn Work Into Tasks (Fan-out)}
 When the objective is bigger than a single prompt, you fan out into small, role-tagged tasks.
 
 \begin{lstlisting}[style=cx]
-./bin/cx task fanout "Harden schema validation errors" --from staged-diff
-./bin/cx task list --status pending
+./bin/xshelf task fanout "Harden schema validation errors" --from staged-diff
+./bin/xshelf task list --status pending
 \end{lstlisting}
 
 \section{Scene 5: Execute Tasks (Sequential for Now)}
 You run a task (or run all pending tasks) through the same engine, and logs link the run to the task.
 
 \begin{lstlisting}[style=cx]
-./bin/cx task run task_001 --mode deterministic --backend codex
-./bin/cx task run-all --status pending
+./bin/xshelf task run task_001 --mode deterministic --backend primary
+./bin/xshelf task run-all --status pending
 \end{lstlisting}
 
 \section{Scene 6: Stay Safe When Commands Are Suggested}
 For semi-autonomy, suggestions are cheap. Execution is dangerous. The policy engine is the gate.
 
 \begin{lstlisting}[style=cx]
-./bin/cx policy show
-./bin/cx policy check "rm -rf ."
+./bin/xshelf policy show
+./bin/xshelf policy check "rm -rf ."
 \end{lstlisting}
 
 \section{Scene 7: Learn From the Past (Optimize)}
 The loop ends by asking: what is slow, what is token-heavy, and what is drifting?
 
 \begin{lstlisting}[style=cx]
-./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .
+./bin/xshelf optimize 200
+./bin/xshelf optimize 200 --json | jq .
 \end{lstlisting}
 
 \section{Appendix: Rules You Can Quote}

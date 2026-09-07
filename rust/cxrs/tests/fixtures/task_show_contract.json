@@ -1,0 +1,51 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "id",
+    "objective",
+    "role",
+    "status",
+    "parent_id",
+    "context_ref",
+    "backend",
+    "model",
+    "profile",
+    "converge",
+    "replicas",
+    "max_concurrency",
+    "run_mode",
+    "depends_on",
+    "resource_keys",
+    "max_retries",
+    "timeout_secs",
+    "created_at",
+    "updated_at",
+    "latest_run",
+    "run_readiness"
+  ],
+  "latest_run_keys": [
+    "execution_id",
+    "timestamp",
+    "tool",
+    "backend_used",
+    "execution_lane",
+    "execution_lane_detail",
+    "execution_mode",
+    "duration_ms",
+    "schema_valid",
+    "timed_out",
+    "policy_blocked"
+  ],
+  "run_readiness_keys": [
+    "status_filter",
+    "selected_status_count",
+    "runnable_now",
+    "wave_index",
+    "wave_mode",
+    "blocked_reason",
+    "dependencies",
+    "resource_keys",
+    "recommended_command",
+    "recommended_reason"
+  ]
+}

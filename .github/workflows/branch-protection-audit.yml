@@ -1,0 +1,47 @@
+name: branch-protection-audit
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report intended action without changing branch protection"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-protection-audit
+  cancel-in-progress: false
+
+jobs:
+  restore-review-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Workflow Action Pin Guardrail
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          ./scripts/check_action_pins.sh "$GITHUB_WORKSPACE"
+
+      - name: Audit Branch Protection
+        env:
+          GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN || github.token }}
+          BRANCH_PROTECTION_TOKEN_PRESENT: ${{ secrets.BRANCH_PROTECTION_TOKEN != '' }}
+          BRANCH_PROTECTION_BRANCH: main
+          BRANCH_PROTECTION_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 ./scripts/branch_protection_audit.py

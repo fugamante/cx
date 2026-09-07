@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::config::cli_app_name;
+
 use super::resolution::quota_probe_payload;
 use super::shared::read_window_rows;
 use crate::state::{read_state_value, set_state_path, value_at_path};
@@ -130,12 +132,13 @@ fn evaluate_quota_guard(
         }
     }
 
+    let cli = cli_app_name();
     let options = json!([
         { "id":"continue", "description":"Continue with current settings." },
-        { "id":"quota_saver", "description":"Set broker policy to quota_saver.", "command":"cx broker set --policy quota_saver" },
-        { "id":"lean_mode", "description":"Run sensitive tasks with lean mode.", "command":"CX_MODE=lean cx <command>" },
-        { "id":"tight_budgets", "description":"Lower context budgets for next run.", "command":"CX_CONTEXT_BUDGET_CHARS=8000 CX_CONTEXT_BUDGET_LINES=200 cx <command>" },
-        { "id":"strict_gate", "description":"Fail fast when warning/critical remains.", "command":"cx quota guard check 30 --strict" }
+        { "id":"quota_saver", "description":"Set broker policy to quota_saver.", "command": format!("{cli} broker set --policy quota_saver") },
+        { "id":"lean_mode", "description":"Run sensitive tasks with lean mode.", "command": format!("CX_MODE=lean {cli} <command>") },
+        { "id":"tight_budgets", "description":"Lower context budgets for next run.", "command": format!("CX_CONTEXT_BUDGET_CHARS=8000 CX_CONTEXT_BUDGET_LINES=200 {cli} <command>") },
+        { "id":"strict_gate", "description":"Fail fast when warning/critical remains.", "command": format!("{cli} quota guard check 30 --strict") }
     ]);
 
     let payload = json!({
@@ -183,7 +186,7 @@ fn cmd_quota_guard_check(args: &[String]) -> i32 {
     let (log_file, rows) = match read_window_rows(days) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs {e}");
+            crate::cx_eprintln!("{} {e}", cli_app_name());
             return 1;
         }
     };
@@ -194,14 +197,20 @@ fn cmd_quota_guard_check(args: &[String]) -> i32 {
         match serde_json::to_string_pretty(&payload) {
             Ok(s) => println!("{s}"),
             Err(e) => {
-                crate::cx_eprintln!("cxrs quota guard check: failed to render json: {e}");
+                crate::cx_eprintln!(
+                    "{} quota guard check: failed to render json: {e}",
+                    cli_app_name()
+                );
                 return 1;
             }
         }
         return code;
     }
 
-    println!("== cx quota guard check (last {days} days) ==");
+    println!(
+        "== {} quota guard check (last {days} days) ==",
+        cli_app_name()
+    );
     println!(
         "status: {}",
         payload
@@ -286,7 +295,7 @@ pub(super) fn cmd_quota_guard(args: &[String]) -> i32 {
     match sub {
         "show" => {
             let cfg = guard_config_from_state();
-            println!("== cx quota guard ==");
+            println!("== {} quota guard ==", cli_app_name());
             println!("enabled: {}", if cfg.enabled { "true" } else { "false" });
             println!("warn_pct: {}%", (cfg.warn_pct * 100.0).round() as i64);
             println!(
@@ -412,8 +421,11 @@ pub(super) fn cmd_quota_set(args: &[String]) -> i32 {
         return 2;
     }
     let backend_norm = backend.trim().to_lowercase();
-    if !matches!(backend_norm.as_str(), "codex" | "ollama" | "default") {
-        crate::cx_eprintln!("quota set: backend must be codex|ollama|default");
+    if !matches!(
+        backend_norm.as_str(),
+        "primary" | "ollama" | "llamacpp" | "mlx" | "default"
+    ) {
+        crate::cx_eprintln!("quota set: backend must be primary|ollama|llamacpp|mlx|default");
         return 2;
     }
     let total = match total_raw.trim().parse::<u64>() {
@@ -448,15 +460,21 @@ pub(super) fn cmd_quota_unset(args: &[String]) -> i32 {
     let backend_norm = backend.trim().to_lowercase();
     let mut keys: Vec<String> = Vec::new();
     match backend_norm.as_str() {
-        "codex" | "ollama" => keys.push(format!("preferences.quota.{}_total_tokens", backend_norm)),
+        "primary" | "ollama" | "llamacpp" | "mlx" => {
+            keys.push(format!("preferences.quota.{}_total_tokens", backend_norm))
+        }
         "default" => keys.push("preferences.quota.default_total_tokens".to_string()),
         "all" => {
-            keys.push("preferences.quota.codex_total_tokens".to_string());
+            keys.push("preferences.quota.primary_total_tokens".to_string());
             keys.push("preferences.quota.ollama_total_tokens".to_string());
+            keys.push("preferences.quota.llamacpp_total_tokens".to_string());
+            keys.push("preferences.quota.mlx_total_tokens".to_string());
             keys.push("preferences.quota.default_total_tokens".to_string());
         }
         _ => {
-            crate::cx_eprintln!("quota unset: backend must be codex|ollama|default|all");
+            crate::cx_eprintln!(
+                "quota unset: backend must be primary|ollama|llamacpp|mlx|default|all"
+            );
             return 2;
         }
     }

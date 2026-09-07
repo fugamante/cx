@@ -13,12 +13,12 @@ fn broker_benchmark_json_reports_backend_stats() {
     let rows = vec![
         serde_json::json!({
             "execution_id":"b1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
-            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
             "duration_ms":1000,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
         }),
         serde_json::json!({
             "execution_id":"b2","timestamp":"2026-01-01T00:00:01Z","command":"cxo","tool":"cxo",
-            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
             "duration_ms":3000,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":300,"output_tokens":60
         }),
         serde_json::json!({
@@ -37,7 +37,7 @@ fn broker_benchmark_json_reports_backend_stats() {
         "broker",
         "benchmark",
         "--backend",
-        "codex",
+        "primary",
         "--backend",
         "ollama",
         "--window",
@@ -58,23 +58,23 @@ fn broker_benchmark_json_reports_backend_stats() {
         .expect("summary array");
     assert_eq!(summary.len(), 2, "summary={summary:?}");
 
-    let codex = summary
+    let primary = summary
         .iter()
-        .find(|row| row.get("backend").and_then(Value::as_str) == Some("codex"))
-        .expect("codex summary row");
-    assert_eq!(codex.get("runs").and_then(Value::as_u64), Some(2));
+        .find(|row| row.get("backend").and_then(Value::as_str) == Some("primary"))
+        .expect("primary summary row");
+    assert_eq!(primary.get("runs").and_then(Value::as_u64), Some(2));
     assert_eq!(
-        codex.get("avg_duration_ms").and_then(Value::as_u64),
+        primary.get("avg_duration_ms").and_then(Value::as_u64),
         Some(2000)
     );
     assert_eq!(
-        codex
+        primary
             .get("avg_effective_input_tokens")
             .and_then(Value::as_u64),
         Some(200)
     );
     assert_eq!(
-        codex.get("avg_output_tokens").and_then(Value::as_u64),
+        primary.get("avg_output_tokens").and_then(Value::as_u64),
         Some(40)
     );
 }
@@ -87,7 +87,7 @@ fn broker_benchmark_json_matches_contract_fixture() {
     let rows = vec![
         serde_json::json!({
             "execution_id":"bb1","timestamp":"2026-01-01T00:00:00Z","command":"cxo","tool":"cxo",
-            "backend_used":"codex","backend_selected":"codex","capture_provider":"native","execution_mode":"lean",
+            "backend_used":"primary","backend_selected":"primary","capture_provider":"native","execution_mode":"lean",
             "duration_ms":1200,"schema_enforced":false,"schema_valid":true,"effective_input_tokens":100,"output_tokens":20
         }),
         serde_json::json!({

@@ -22,5 +22,5 @@ tmp="$(mktemp)"
 grep -Fv "$LINE" "$SHELL_RC" > "$tmp" || true
 mv "$tmp" "$SHELL_RC"
 
-echo "Removed cx source line from $SHELL_RC (if present)."
+echo "Removed XSHELF/CX source line from $SHELL_RC (if present)."
 echo "Run: source \"$SHELL_RC\""

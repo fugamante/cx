@@ -1,0 +1,21 @@
+# Grandfathered file stems with >3 segments (max 2 underscores policy).
+# New file names should satisfy <=3 segments.
+backend_benchmark_report_tests
+backend_benchmark_strict_tests
+broker_benchmark_json_contract
+check_fn_name_length
+check_rs_max_lines
+cli_edge_case_tests
+CX_MANUAL_FIELD_GUIDE
+LANDING_PAGE_RESEARCH_BOARD
+PHASE_IV_MULTI_MODEL_ORCHESTRATION
+PHASE_V_IMPLEMENTATION_BACKLOG
+PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION
+PHASE_VI_EXECUTION_GUIDANCE
+PHASE_VI_PARALLEL_SUBSTRATE
+PHASE_VII_BUDGET_AWARE_ORCHESTRATION
+PHASE_VIII_LOCAL_MODEL_SUBSTRATE
+PHASE_X_TOKEN_COMPRESSION_LAYER
+POST_PHASE_VI_OVERVIEW
+TURBOQUANT_GROUPED_SCALAR_SNAPSHOT
+test_output_reducer_manifest

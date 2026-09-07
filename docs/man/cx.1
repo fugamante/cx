@@ -1,0 +1,244 @@
+.TH XSHELF 1 "April 2026" "XSHELF" "User Commands"
+.SH NAME
+xshelf, xs, cx \- deterministic Rust-first runtime for repo-aware LLM workflows
+.SH SYNOPSIS
+.B xshelf
+\fICOMMAND\fR [\fIARGS\fR...]
+.br
+.B xs
+\fICOMMAND\fR [\fIARGS\fR...]
+.br
+.B cx
+\fICOMMAND\fR [\fIARGS\fR...]
+.br
+.B ./bin/xshelf
+\fICOMMAND\fR [\fIARGS\fR...]
+.br
+.B ./bin/xs
+\fICOMMAND\fR [\fIARGS\fR...]
+.br
+.B ./bin/cx
+\fICOMMAND\fR [\fIARGS\fR...]
+.SH DESCRIPTION
+.B xshelf
+is a repository-local AI runtime and orchestration CLI.
+It is Rust-first and deterministic for structured operations.
+.PP
+\fBxs\fR is a supported short alias for \fBxshelf\fR.
+.PP
+\fBcx\fR remains a supported compatibility alias during the rename transition.
+.PP
+Core capabilities include:
+.IP \(bu 2
+repo-aware command execution and LLM routing,
+.IP \(bu 2
+schema-enforced structured commands with quarantine/replay,
+.IP \(bu 2
+context budgeting and capture telemetry,
+.IP \(bu 2
+task graph orchestration and controlled execution lanes,
+.IP \(bu 2
+diagnostics, validation, and optimization tooling.
+.SH QUICK START
+.nf
+./bin/xshelf version
+./bin/xshelf core
+./bin/xshelf doctor
+./bin/xshelf health
+./bin/xshelf cxo git status
+.fi
+.SH COMMON COMMANDS
+.TP
+.B version
+Print tool version and source metadata.
+.TP
+.B core
+Show execution-core pipeline config.
+.TP
+.B help
+Print full command list.
+.TP
+.B where
+Show binary/source/log resolution details.
+.TP
+.B routes [\-\-json] [cmd...]
+Routing introspection for supported commands.
+.TP
+.B diag [\-\-json] [\-\-window N] [\-\-strict] [\-\-actions] [\-\-severity warning|critical]
+Non-interactive diagnostic report.
+.TP
+.B doctor
+Environment/runtime checks.
+.TP
+.B health
+End-to-end smoke checks.
+.SH LLM EXECUTION
+.TP
+.B xshelf cxo <cmd...>
+Run captured command output and print the last agent message.
+.TP
+.B cx <cmd...>
+Compatibility LLM text-mode command.
+.TP
+.B cxj <cmd...>
+Run through LLM JSONL mode.
+.TP
+.B cxo <cmd...>
+Run and print last agent message.
+.TP
+.B cxol <cmd...>
+Run through LLM plain mode.
+.TP
+.B cxcopy <cmd...>
+Copy cxo output to clipboard.
+.SH STRUCTURED COMMANDS
+.TP
+.B commitjson
+Generate strict JSON commit object.
+.TP
+.B commitmsg
+Generate commit message text from staged diff.
+.TP
+.B diffsum
+Summarize unstaged diff.
+.TP
+.B diffsum-staged
+Summarize staged diff.
+.TP
+.B next <cmd...>
+Suggest next shell commands.
+.TP
+.B fix-run <cmd...>
+Generate remediation command list from failure context.
+.TP
+.B replay <id>
+Replay quarantined schema run in strict mode.
+.TP
+.B schema list [\-\-json]
+List registered schemas.
+.SH TASK ORCHESTRATION
+.TP
+.B task add/list/show/claim/complete/fail/fanout/run/run-all
+Task graph management and controlled execution.
+.SH LOGS AND ANALYTICS
+.TP
+.B metrics [N]
+Token/duration aggregates.
+.TP
+.B profile [N]
+Run profile summary.
+.TP
+.B trace [N]
+Inspect Nth-most-recent run.
+.TP
+.B alert [N]
+Anomaly report over recent runs.
+.TP
+.B optimize [N] [\-\-json] [\-\-actions] [\-\-strict] [\-\-severity warning|critical]
+Optimization recommendations from historical telemetry.
+.TP
+.B logs validate [\-\-strict] [\-\-legacy-ok]
+Validate run-log JSONL contract.
+.TP
+.B logs stats [N] [\-\-json] [\-\-strict] [\-\-severity ...]
+Telemetry health/contract drift summary.
+.SH BACKEND AND STATE
+.TP
+.B llm show|check|smoke|use|unset|set-backend|set-model|clear-model
+Manage and verify backend/model selection.
+.TP
+.B state show|get|set
+Read/write repo state in \fB.cx/state.json\fR.
+.TP
+.B quota ...
+Quota probing/catalog/guard controls.
+.SH SAFETY
+.TP
+.B policy show
+Show active command safety policy.
+.TP
+.B policy check <cmd...>
+Classify a command as safe/dangerous.
+.SH FILES
+.TP
+.I .cx/cxlogs/runs.jsonl
+Execution telemetry log.
+.TP
+.I .cx/cxlogs/schema_failures.jsonl
+Schema failure ledger.
+.TP
+.I .cx/quarantine/
+Quarantined malformed structured outputs.
+.TP
+.I .cx/schemas/
+Schema registry.
+.SH ENVIRONMENT
+.TP
+.B CX_MODE
+Execution mode (for example: lean, deterministic, verbose).
+.TP
+.B CX_LLM_BACKEND
+Backend selection (for example: primary, ollama, llamacpp, mlx).
+.TP
+.B CX_OLLAMA_MODEL
+Model used when backend is ollama.
+.TP
+.B CX_LLAMA_CPP_MODEL
+GGUF model path or llama.cpp Hugging Face repo spec used when backend is llamacpp.
+For example: /models/model.gguf or ggml-org/Qwen3-0.6B-GGUF:Q4_0.
+.TP
+.B CX_LLAMA_CPP_BIN
+llama.cpp CLI binary path/name. Defaults to llama-cli.
+.TP
+.B CX_LLAMA_CPP_ARGS
+Additional shell-split arguments appended to llama-cli.
+.TP
+.B CX_MLX_MODEL
+MLX model identifier/path used when backend is mlx.
+.TP
+.B CX_MLX_PYTHON
+Python executable for mlx-lm. Defaults to python3.
+.TP
+.B CX_MLX_ARGS
+Additional shell-split arguments appended to python -m mlx_lm generate.
+.TP
+.B CX_MLX_MAX_TOKENS
+Optional max-token value passed to mlx-lm generate.
+.TP
+.B CX_CONTEXT_BUDGET_CHARS
+Context character budget.
+.TP
+.B CX_CONTEXT_BUDGET_LINES
+Context line budget.
+.TP
+.B CX_CONTEXT_CLIP_MODE
+Clipping mode (head, tail, smart).
+.TP
+.B CX_CONTEXT_CLIP_FOOTER
+Include clipping footer when clipping occurs.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Runtime/processing error.
+.TP
+.B 2
+Usage/argument error.
+.SH EXAMPLES
+.nf
+xshelf version
+xshelf llm show
+xshelf cxo git status
+xshelf schema list --json | jq .
+xshelf logs validate --strict
+xshelf optimize 200 --json | jq .
+man xshelf
+man xs
+man cx
+.fi
+.SH SEE ALSO
+.BR cxrs (1),
+.BR jq (1),
+.BR git (1)

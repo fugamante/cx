@@ -2,10 +2,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLI_NAME="${CX_CLI_NAME:-$(basename "$0")}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: cx <subcommand> [args...]" >&2
-  echo "Example: cx cxversion" >&2
+  echo "Usage: $CLI_NAME <subcommand> [args...]" >&2
+  echo "Example: $CLI_NAME version" >&2
   exit 2
 fi
 
@@ -14,8 +15,9 @@ subcommand="$1"
 # Rust runtime is authoritative.
 CXRS_WRAPPER="$REPO_ROOT/rust/cxrs/bin/cxrs"
 CXRS_MANIFEST="$REPO_ROOT/rust/cxrs/Cargo.toml"
-CXRS_BIN_RELEASE="$REPO_ROOT/rust/cxrs/target/release/cxrs"
-CXRS_BIN_DEBUG="$REPO_ROOT/rust/cxrs/target/debug/cxrs"
+CXRS_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/rust/cxrs/target}"
+CXRS_BIN_RELEASE="$CXRS_TARGET_DIR/release/cxrs"
+CXRS_BIN_DEBUG="$CXRS_TARGET_DIR/debug/cxrs"
 
 _cx_needs_build() {
   local bin="$1"
@@ -57,7 +59,7 @@ _cx_run_rust() {
     return 127
   fi
 
-  CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
+  CX_REPO_ROOT="$REPO_ROOT" CX_BIN_CX="$REPO_ROOT/bin/cx" CX_CLI_NAME="$CLI_NAME" CX_SOURCE_LOCATION="repo:$REPO_ROOT/cx.sh" CX_EXECUTION_PATH="rust:bin/cx" \
     "$cxrs_bin" "$@"
 }
 
@@ -69,6 +71,6 @@ if _cx_run_rust supports "$subcommand" >/dev/null 2>&1; then
   fi
   exit $?
 fi
-echo "cx: unsupported command '$subcommand' (rust-only runtime; no bash fallback)" >&2
-echo "Run 'cx help' to list supported commands." >&2
+echo "$CLI_NAME: unsupported command '$subcommand' (rust-only runtime; no bash fallback)" >&2
+echo "Run '$CLI_NAME help' to list supported commands." >&2
 exit 2

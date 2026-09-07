@@ -1,0 +1,80 @@
+{
+  "contract_version": "turboquant-vec-harden.v2",
+  "slice": "centroid_shadow_and_lookup",
+  "contexts": [
+    {
+      "label": "16k",
+      "prompts": {
+        "smoke": {
+          "wall_ms_before": 3080,
+          "wall_ms_after": 1570,
+          "wall_delta_ms": -1510,
+          "decode_tps_before": 16.9,
+          "decode_tps_after": 48.9,
+          "passed": true
+        },
+        "context_fill": {
+          "wall_ms_before": 69650,
+          "wall_ms_after": 9630,
+          "wall_delta_ms": -60020,
+          "decode_tps_before": 4.9,
+          "decode_tps_after": 13.9,
+          "passed": true
+        },
+        "retrieval": {
+          "wall_ms_before": 61500,
+          "wall_ms_after": 16190,
+          "wall_delta_ms": -45310,
+          "decode_tps_before": 6.9,
+          "decode_tps_after": 10.7,
+          "passed": true
+        },
+        "instruct": {
+          "wall_ms_before": 35290,
+          "wall_ms_after": 11140,
+          "wall_delta_ms": -24150,
+          "decode_tps_before": 8.7,
+          "decode_tps_after": 11.7,
+          "passed": true
+        }
+      }
+    },
+    {
+      "label": "32k",
+      "prompts": {
+        "smoke": {
+          "wall_ms_before": 2580,
+          "wall_ms_after": 2080,
+          "wall_delta_ms": -500,
+          "decode_tps_before": 29.3,
+          "decode_tps_after": 43.5,
+          "passed": true
+        },
+        "context_fill": {
+          "wall_ms_before": 32280,
+          "wall_ms_after": 10630,
+          "wall_delta_ms": -21650,
+          "decode_tps_before": 10.1,
+          "decode_tps_after": 10.4,
+          "passed": true
+        },
+        "retrieval": {
+          "wall_ms_before": 58960,
+          "wall_ms_after": 16700,
+          "wall_delta_ms": -42260,
+          "decode_tps_before": 7.3,
+          "decode_tps_after": 10.5,
+          "passed": true
+        },
+        "instruct": {
+          "wall_ms_before": 34300,
+          "wall_ms_after": 11660,
+          "wall_delta_ms": -22640,
+          "decode_tps_before": 8.4,
+          "decode_tps_after": 11.8,
+          "passed": true
+        }
+      }
+    }
+  ]
+}

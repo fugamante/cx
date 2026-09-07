@@ -50,7 +50,7 @@ fn parse_env_secs(name: &str) -> Option<u64> {
 
 fn timeout_secs_for_label(label: &str) -> u64 {
     let lower = label.to_ascii_lowercase();
-    if (lower.contains("codex") || lower.contains("ollama"))
+    if (lower.contains("primary") || lower.contains("ollama"))
         && let Some(v) = parse_env_secs("CX_TIMEOUT_LLM_SECS")
     {
         return v;

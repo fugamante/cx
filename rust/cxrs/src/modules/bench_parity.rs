@@ -11,7 +11,7 @@ use crate::bench_parity_support::{
     BenchStats, ParityRow, maybe_collect_tokens, print_bench_summary, print_parity_table,
     run_parity_path, setup_temp_repo,
 };
-use crate::config::app_config;
+use crate::config::{app_config, cli_app_name};
 use crate::logs::file_len;
 use crate::paths::{repo_root_hint, resolve_log_file};
 use crate::process::run_command_output_with_timeout;
@@ -47,7 +47,7 @@ fn run_command_for_bench(
 
 fn validate_bench_args(app_name: &str, runs: usize, command: &[String]) -> Result<(), i32> {
     if runs == 0 {
-        crate::cx_eprintln!("cxrs bench: runs must be > 0");
+        crate::cx_eprintln!("{} bench: runs must be > 0", cli_app_name());
         return Err(2);
     }
     if command.is_empty() {
@@ -80,7 +80,7 @@ pub fn cmd_bench(app_name: &str, runs: usize, command: &[String]) -> i32 {
         let code = match run_command_for_bench(command, disable_cx_log, passthru) {
             Ok(c) => c,
             Err(e) => {
-                crate::cx_eprintln!("cxrs bench: {e}");
+                crate::cx_eprintln!("{} bench: {e}", cli_app_name());
                 return 1;
             }
         };
@@ -270,7 +270,7 @@ pub fn cmd_parity() -> i32 {
             return 1;
         }
     };
-    let temp_log_file = temp_repo.join(".codex").join("cxlogs").join("runs.jsonl");
+    let temp_log_file = temp_repo.join(".cx").join("cxlogs").join("runs.jsonl");
     let mock_dir = match setup_parity_mocks(&repo, &temp_repo) {
         Ok(v) => v,
         Err(e) => return parity_error(&temp_repo, &e),

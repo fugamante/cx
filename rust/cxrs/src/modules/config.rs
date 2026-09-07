@@ -6,7 +6,7 @@ use crate::state::{read_state_value, value_at_path};
 
 /// Canonical application identity (used by routing/help/version surfaces).
 pub const APP_NAME: &str = "cxrs";
-pub const APP_DESC: &str = "Rust runtime for the cx toolchain";
+pub const APP_DESC: &str = "Rust runtime for the XSHELF/CX toolchain";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Canonical runtime defaults.
@@ -16,6 +16,25 @@ pub const DEFAULT_RUN_WINDOW: usize = 50;
 pub const DEFAULT_OPTIMIZE_WINDOW: usize = 200;
 pub const DEFAULT_QUARANTINE_LIST: usize = 20;
 pub const DEFAULT_CMD_TIMEOUT_SECS: usize = 120;
+pub const CLI_ALIASES: &[&str] = &["xshelf", "xs", "cx"];
+
+pub fn cli_app_name() -> String {
+    env::var("CX_CLI_NAME")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "xshelf".to_string())
+}
+
+pub fn command_with_cli(tail: &str) -> String {
+    format!("{} {tail}", cli_app_name())
+}
+
+pub fn command_matches_cli(command: &str, tail: &str) -> bool {
+    CLI_ALIASES
+        .iter()
+        .any(|name| command.starts_with(&format!("{name} {tail}")))
+}
 
 /// Process-level configuration snapshot.
 ///
@@ -29,7 +48,9 @@ pub struct AppConfig {
     pub clip_footer: bool,
     pub llm_backend: String,
     pub ollama_model: String,
-    pub codex_model: String,
+    pub llama_cpp_model: String,
+    pub mlx_model: String,
+    pub primary_model: String,
     pub cxbench_log: bool,
     pub cxbench_passthru: bool,
     pub cxfix_run: bool,
@@ -76,11 +97,13 @@ fn resolve_backend(state: &Option<Value>) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| state_pref_str(state, "preferences.llm_backend"))
-        .unwrap_or_else(|| "codex".to_string());
-    if raw.eq_ignore_ascii_case("ollama") {
-        "ollama".to_string()
-    } else {
-        "codex".to_string()
+        .unwrap_or_else(|| "primary".to_string());
+    match raw.to_ascii_lowercase().as_str() {
+        "primary" => "primary".to_string(),
+        "ollama" => "ollama".to_string(),
+        "llamacpp" | "llama.cpp" | "llama_cpp" => "llamacpp".to_string(),
+        "mlx" => "mlx".to_string(),
+        _ => "primary".to_string(),
     }
 }
 
@@ -90,6 +113,24 @@ fn resolve_ollama_model(state: &Option<Value>) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| state_pref_str(state, "preferences.ollama_model"))
+        .unwrap_or_default()
+}
+
+fn resolve_llama_cpp_model(state: &Option<Value>) -> String {
+    env::var("CX_LLAMA_CPP_MODEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| state_pref_str(state, "preferences.llama_cpp_model"))
+        .unwrap_or_default()
+}
+
+fn resolve_mlx_model(state: &Option<Value>) -> String {
+    env::var("CX_MLX_MODEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| state_pref_str(state, "preferences.mlx_model"))
         .unwrap_or_default()
 }
 
@@ -116,7 +157,9 @@ impl AppConfig {
             clip_footer: env_bool("CX_CONTEXT_CLIP_FOOTER", true),
             llm_backend: resolve_backend(&state),
             ollama_model: resolve_ollama_model(&state),
-            codex_model: env::var("CX_MODEL").unwrap_or_default(),
+            llama_cpp_model: resolve_llama_cpp_model(&state),
+            mlx_model: resolve_mlx_model(&state),
+            primary_model: env::var("CX_MODEL").unwrap_or_default(),
             cxbench_log: env_bool("CXBENCH_LOG", true),
             cxbench_passthru: env_bool("CXBENCH_PASSTHRU", false),
             cxfix_run: env_bool("CXFIX_RUN", false),

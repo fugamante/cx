@@ -1,0 +1,27 @@
+{
+  "contract_version": "turboquant-vec-value.v1",
+  "ctx": 8192,
+  "snapshot_replay": true,
+  "vector": {
+    "passes": 4,
+    "total": 4,
+    "mean_baseline_decode_tps": 45.45,
+    "mean_turboquant_decode_tps": 30.6,
+    "mean_baseline_wall_ms": 4840.0,
+    "mean_turboquant_wall_ms": 6707.5,
+    "mean_raw_ratio": 1.76,
+    "mean_bytes_saved_pct": 98.24
+  },
+  "scalar_reference": {
+    "passes": 4,
+    "total": 4,
+    "mean_baseline_decode_tps": 32.4,
+    "mean_turboquant_decode_tps": 2.73,
+    "mean_baseline_wall_ms": 7642.5,
+    "mean_turboquant_wall_ms": 17022.5,
+    "mean_raw_ratio": 26.56,
+    "mean_bytes_saved_pct": 73.44
+  },
+  "decision": "vector_go",
+  "reason": "Vector snapshot replay passes the fixed 8k suite and materially beats the closed scalar reference on both runtime and storage: higher decode throughput, lower wall time, and smaller sidecar ratio."
+}

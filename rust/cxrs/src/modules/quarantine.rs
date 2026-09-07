@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
+use crate::config::cli_app_name;
+
 use crate::execmeta::utc_now_iso;
 use crate::paths::resolve_quarantine_dir;
 use crate::types::{QuarantineAttempt, QuarantineRecord};
@@ -117,18 +119,21 @@ fn read_quarantine_rows(qdir: &std::path::Path, n: usize) -> Vec<QuarantineRecor
 
 pub fn cmd_quarantine_list(n: usize) -> i32 {
     let Some(qdir) = resolve_quarantine_dir() else {
-        crate::cx_eprintln!("cxrs quarantine list: unable to resolve quarantine directory");
+        crate::cx_eprintln!(
+            "{} quarantine list: unable to resolve quarantine directory",
+            cli_app_name()
+        );
         return 1;
     };
     if !qdir.exists() {
-        println!("== cxrs quarantine list ==");
+        println!("== {} quarantine list ==", cli_app_name());
         println!("entries: 0");
         println!("quarantine_dir: {}", qdir.display());
         return 0;
     }
 
     let rows = read_quarantine_rows(&qdir, n);
-    println!("== cxrs quarantine list ==");
+    println!("== {} quarantine list ==", cli_app_name());
     println!("entries: {}", rows.len());
     for rec in rows {
         println!("- {} | {} | {} | {}", rec.id, rec.ts, rec.tool, rec.reason);
@@ -141,7 +146,7 @@ pub fn cmd_quarantine_show(id: &str) -> i32 {
     let rec = match read_quarantine_record(id) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs quarantine show: {e}");
+            crate::cx_eprintln!("{} quarantine show: {e}", cli_app_name());
             return 1;
         }
     };
@@ -151,7 +156,10 @@ pub fn cmd_quarantine_show(id: &str) -> i32 {
             0
         }
         Err(e) => {
-            crate::cx_eprintln!("cxrs quarantine show: failed to render JSON: {e}");
+            crate::cx_eprintln!(
+                "{} quarantine show: failed to render JSON: {e}",
+                cli_app_name()
+            );
             1
         }
     }

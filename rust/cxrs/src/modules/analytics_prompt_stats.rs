@@ -1,8 +1,8 @@
-use serde_json::{Value, json};
-use std::collections::BTreeMap;
-
+use crate::config::cli_app_name;
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 fn parse_args(args: &[String]) -> Result<(usize, bool), String> {
     let mut n = 200usize;
@@ -78,7 +78,10 @@ pub fn cmd_prompt_stats(args: &[String]) -> i32 {
         }
     };
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs prompt-stats: unable to resolve log file");
+        crate::cx_eprintln!(
+            "{} prompt-stats: unable to resolve log file",
+            cli_app_name()
+        );
         return 1;
     };
     if !log_file.exists() {
@@ -99,7 +102,7 @@ pub fn cmd_prompt_stats(args: &[String]) -> i32 {
                 })
             );
         } else {
-            println!("== cx prompt-stats (last {n} runs) ==");
+            println!("== {} prompt-stats (last {n} runs) ==", cli_app_name());
             println!("runs: 0");
             println!("rows_with_prompt_lengths: 0");
             println!("prompt_filter_applied_runs: 0");
@@ -113,7 +116,7 @@ pub fn cmd_prompt_stats(args: &[String]) -> i32 {
     let rows = match load_values(&log_file, n) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs prompt-stats: {e}");
+            crate::cx_eprintln!("{} prompt-stats: {e}", cli_app_name());
             return 1;
         }
     };
@@ -159,14 +162,17 @@ pub fn cmd_prompt_stats(args: &[String]) -> i32 {
         match serde_json::to_string_pretty(&payload) {
             Ok(s) => println!("{s}"),
             Err(e) => {
-                crate::cx_eprintln!("cxrs prompt-stats: failed to render json: {e}");
+                crate::cx_eprintln!(
+                    "{} prompt-stats: failed to render json: {e}",
+                    cli_app_name()
+                );
                 return 1;
             }
         }
         return 0;
     }
 
-    println!("== cx prompt-stats (last {n} runs) ==");
+    println!("== {} prompt-stats (last {n} runs) ==", cli_app_name());
     println!("runs: {}", rows.len());
     println!("rows_with_prompt_lengths: {rows_with_prompt_lengths}");
     println!("prompt_filter_applied_runs: {applied}");

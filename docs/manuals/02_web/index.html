@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>XSHELF Web Manuals</title>
+    <link rel="stylesheet" href="./apple.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="XSHELF web manuals">
+        <span class="brand-mark">XS</span>
+        <span>XSHELF</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="./CX_MANUAL_MASTER.html#pipeline">Pipeline</a>
+        <a href="./CX_MANUAL_MASTER.html#capabilities">Capabilities</a>
+        <a href="./CX_MANUAL_MASTER.html#install">Install</a>
+        <a href="./CX_MANUAL_MASTER.html#manual">Manual</a>
+      </nav>
+      <a class="header-action" href="./CX_MANUAL_MASTER.html">Open Manual</a>
+    </header>
+
+    <main id="top">
+      <section class="hero index-hero">
+        <div class="hero-copy">
+          <p class="product-line">Web manuals</p>
+          <h1>Operator references for XSHELF.</h1>
+          <p class="lead">
+            Start with the master manual for the runtime model, command checks,
+            policy boundaries, task graph, telemetry, and operator procedures.
+          </p>
+          <div class="hero-actions" aria-label="Manual actions">
+            <a class="button primary" href="./CX_MANUAL_MASTER.html">Open master manual</a>
+            <a class="button secondary" href="../00_README.md">Read source policy</a>
+          </div>
+        </div>
+
+        <div class="terminal-panel" aria-label="Manual quick check">
+          <div class="terminal-top">
+            <span>manual entrypoint</span>
+            <div class="window-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+          <pre><code>docs/manuals/
+  01_pdf/CX_MANUAL_MASTER.pdf
+  02_web/CX_MANUAL_MASTER.html
+  03_src/latex/CX_MANUAL_MASTER.tex
+  04_notes/WEB_VISUAL_QA.md</code></pre>
+          <div class="terminal-footer">
+            <span>Source -&gt; Mirror -&gt; Render QA</span>
+            <span class="live-dot">tracked</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-head">
+          <span class="section-index">01</span>
+          <div>
+            <h2>Available Manuals</h2>
+            <p>
+              The HTML page is a tracked reader mirror. The LaTeX source remains
+              canonical until an automated HTML generation path exists.
+            </p>
+          </div>
+        </div>
+        <div class="card-grid">
+          <article class="card">
+            <h3>Master web manual</h3>
+            <p>Operator-first HTML reader for the current XSHELF runtime model.</p>
+            <code>02_web/CX_MANUAL_MASTER.html</code>
+          </article>
+          <article class="card">
+            <h3>Master PDF</h3>
+            <p>Generated PDF artifact built from the canonical LaTeX source.</p>
+            <code>01_pdf/CX_MANUAL_MASTER.pdf</code>
+          </article>
+          <article class="card">
+            <h3>Canonical source</h3>
+            <p>Authoritative source for manual content and PDF rebuilds.</p>
+            <code>03_src/latex/CX_MANUAL_MASTER.tex</code>
+          </article>
+          <article class="card">
+            <h3>Visual QA note</h3>
+            <p>Render checks and screenshot guidance for the tracked web mirror.</p>
+            <code>04_notes/WEB_VISUAL_QA.md</code>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Manual index for tracked XSHELF web docs.</span>
+      <span>Open locally from docs/manuals/02_web/index.html</span>
+    </footer>
+  </body>
+</html>

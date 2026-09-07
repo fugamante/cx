@@ -1,0 +1,19 @@
+{
+  "contract_version": "turboquant-mlx-close.v1",
+  "phase": "phase3a",
+  "status": "closed",
+  "decision": "mlx_portable_go",
+  "baseline_reference": "vec_bits6_bypass256",
+  "mlx_model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+  "summary": {
+    "contexts_green": [
+      8192,
+      16384,
+      32768
+    ],
+    "memory_metric": "cache_nbytes",
+    "memory_metric_note": "cache_nbytes is the preferred cache-footprint metric on the MLX path, alongside peak_memory_gb. It is not a raw_ratio analog.",
+    "runtime_note": "MLX preserved exact-task correctness across the fixed ladder and remained materially faster than the llama.cpp vector reference on this machine."
+  },
+  "next_step": "freeze_phase3a_or_open_mlx_specific_hardening"
+}

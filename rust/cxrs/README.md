@@ -1,21 +1,21 @@
-# cxrs (Rust runtime for XSHELF/CX)
+# cxrs (Rust runtime for XSHELF)
 
-`cxrs` is the canonical Rust implementation for the `XSHELF/CX` toolchain.
+`cxrs` is the canonical Rust implementation for the `XSHELF` toolchain.
 
 Project naming note:
-- `XSHELF/CX/cxrs` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
+- `XSHELF/cxrs` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
 
 Current scope:
 - standalone binary scaffold
 - stable CLI surface for experimentation
-- non-interactive `doctor` checks (binaries + Codex JSON pipeline + text probe)
+- non-interactive `doctor` checks (binaries + primary JSON pipeline + text probe)
 - typed `state` command (`show/get/set`) with atomic JSON writes
 - `policy` command for dangerous-command classification rules
 - `bench` command for repeated runtime/token summaries
 - `bench` log correlation using appended-run windows + prompt-hash preference
 - `metrics` parity command for token/time aggregates
 - prompt engineering commands: `prompt`, `roles`, `fanout`, `promptlint`
-- execution helpers: `cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`
+- execution helpers: `xshelf` canonical command surface plus compatibility helpers (`cx`, `cxj`, `cxo`, `cxol`, `cxcopy`, `fix`)
 - operational helpers: `budget`, `log-tail`, `health`
 - capture inspection helper: `capture-status`
 - process-local utility toggles: `log-off`, `alert-show`, `alert-off`
@@ -35,11 +35,13 @@ Current scope:
 - strict `commitjson` and `commitmsg` from staged diff
 - strict `diffsum` and `diffsum-staged` PR-summary generators
 - strict `fix-run` remediation suggestions with dangerous-command blocking
-- LLM backend routing: `codex` (default) or `ollama` (local alternative)
+- LLM backend routing: `primary` (default), `ollama` (local alternative), `llamacpp` (local GGUF via llama.cpp `llama-cli`), or `mlx` (Apple-local via `mlx-lm`)
 - quality gate currently clean (`file_violations=0`, `function_violations=0`)
 - naming guardrails enforce concise Rust symbols and test names in CI/local checks
+- test naming guardrail covers both `#[test]` and async forms like `#[tokio::test]`
+- readability discipline enforces max 3 segments (2 underscores) for new file/function names via grandfathered allowlists
 
-This crate is authoritative runtime behavior for `cx`.
+This crate is authoritative runtime behavior for XSHELF.
 Bash is reduced to a thin bootstrap shim and no longer provides command fallback.
 
 ## Configuration
@@ -51,7 +53,10 @@ Runtime configuration is centralized in `src/modules/config.rs`:
 
 Primary toggles:
 - `CX_MODE`, `CX_SCHEMA_RELAXED`
-- `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
+- `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_LLAMA_CPP_MODEL`, `CX_LLAMA_CPP_BIN`, `CX_LLAMA_CPP_ARGS`, `CX_MLX_MODEL`, `CX_MLX_PYTHON`, `CX_MLX_ARGS`, `CX_MLX_MAX_TOKENS`, `CX_MODEL`
+- `CX_HTTP_PROVIDER_URL`, `CX_HTTP_PROVIDER_TOKEN`, `CX_HTTP_PROVIDER_FORMAT`
+- `CX_HTTP_REQUIRE_HTTPS` (default `1`), `CX_HTTP_ALLOW_LOCAL_HTTP` (default `1`)
+- `CX_HTTP_ALLOWED_HOSTS` (optional CSV allowlist), `CX_HTTP_TLS_PINNEDPUBKEY` (optional curl pinning hook)
 - `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
 - `CX_CMD_TIMEOUT_SECS` (external command timeout, default `120`)
 - `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, `CX_TIMEOUT_SHELL_SECS` (optional per-command-class timeout overrides)
@@ -69,9 +74,9 @@ Primary toggles:
 
 End users do not need the full test suite for normal product usage.
 
-- Normal runtime usage: `cx`, `cxrs`, `doctor`, `health`, schema commands, task commands
-- Lightweight runtime verification: `cx doctor`, `cx health`
-- Maintainer-only validation: `cargo test`, `compat-check`, `parity-check`, CI guardrails
+- Normal runtime usage: `xshelf`, `xs`, `cxrs`, `doctor`, `health`, schema commands, task commands
+- Lightweight runtime verification: `xshelf doctor`, `xshelf health`
+- Maintainer-only validation: `cargo test`, `compat-check`, `parity-check`, `cargo outdated`, CI guardrails
 
 The shipped runtime does not run the full test suite during normal command execution.
 Tests and guardrails are for development, CI, and release confidence.
@@ -93,7 +98,7 @@ cargo build
 | `bash` | 5.0+ | 5.3.9 | Shell/bootstrap compatibility paths |
 | `git` | 2.30+ | 2.53.0 | Repo, diff, and task context capture |
 | `jq` | 1.6+ | 1.8.1 | JSON helpers/scripts |
-| `codex` CLI | 0.103.0+ | 0.103.0 | Default backend |
+| `primary` CLI | 0.103.0+ | 0.103.0 | Default backend |
 
 ### Runtime (optional)
 
@@ -105,8 +110,8 @@ cargo build
 
 | Dependency | Minimum | Validated in this repo | Notes |
 |---|---:|---:|---|
-| `rustc` | 1.93.1 | 1.93.1 | Build/runtime implementation |
-| `cargo` | 1.93.1 | 1.93.1 | Build/test tooling |
+| `rustc` | 1.95.0 | 1.95.0 | Build/runtime implementation |
+| `cargo` | 1.95.0 | 1.95.0 | Build/test tooling |
 | `python3` | 3.10+ | 3.14.3 | Quality gate + support scripts |
 | `make` | 3.81+ | 3.81 | Convenience build/check targets |
 
@@ -117,6 +122,7 @@ Platform notes:
 - Shell examples assume POSIX `bash`.
 - System capture provider is internal native only.
 - Native reduction can be toggled with `CX_NATIVE_REDUCE=1|0` (default `1`) and tuned with `CX_CAPTURE_PROFILE=fast|balanced|deep` (default `balanced`).
+- Phase XI runtime wiring stays opt-in: `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` lets fixture-backed `test` and `git diff` command classes use typed assembly as prompt text, while unsupported or unsafe tight-budget cases fall back to the legacy reduced-text path.
 
 ## Install
 
@@ -145,7 +151,16 @@ Compatibility check against Bash baseline:
 cd rust/cxrs
 make compat-check N=50
 make parity-check
+
+# unified local compat runner (repo root)
+cd ../..
+./scripts/compat_local.sh --quick
 ```
+
+The quick runner uses representative reliability and scheduler smoke tests so
+it stays stable under harness load. Run the full integration binaries directly,
+or use `./scripts/compat_local.sh --full`, when collecting release-signoff
+evidence.
 
 Reliability/failure-injection suite:
 
@@ -163,18 +178,17 @@ Current compat coverage:
 
 GitHub Actions:
 - Workflow: `cxrs-compat` (`.github/workflows/cxrs-compat.yml`)
-- Triggered on pushes/PRs that touch Rust/Bash-compat paths.
-- Toggle via repo variable: set `CXRS_COMPAT_CHECK=0` to skip the job.
+- Maintainer-invoked workflow used alongside local compat gates.
 
 Capture provider:
 - Native internal capture/reduction path only.
-- Optional tuning: `CX_NATIVE_REDUCE=1|0` and `CX_CAPTURE_PROFILE=fast|balanced|deep`.
+- Optional tuning: `CX_NATIVE_REDUCE=1|0`, `CX_CAPTURE_PROFILE=fast|balanced|deep`, and `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` for the narrow Phase XI opt-in path.
 
 ## Development vs Runtime Requirements
 
 Runtime users need only the runtime dependencies listed above plus either:
 - an installed `cxrs` binary, or
-- the repo checkout with `bin/cx`
+- the repo checkout with `bin/xshelf` (`bin/cx` remains the compatibility alias)
 
 Maintainers additionally need:
 - Rust toolchain
@@ -188,12 +202,12 @@ Runtime users do not need:
 - CI guardrail scripts
 - contributor-only validation fixtures under `tests/`
 
-## Codex access and session modes
+## Primary backend access and session modes
 
 Current implementation:
-- `codex` remains the primary/default backend (`CX_LLM_BACKEND=codex`).
+- `primary` remains the primary/default backend (`CX_LLM_BACKEND=primary`).
 - `ollama` can be used as a local alternative (`CX_LLM_BACKEND=ollama` + `CX_OLLAMA_MODEL`).
-- If `CX_LLM_BACKEND=ollama` and no model is set, `cxrs` asks once (interactive TTY) and persists selection in `.codex/state.json` (`preferences.ollama_model`).
+- If `CX_LLM_BACKEND=ollama` and no model is set, `cxrs` asks once (interactive TTY) and persists selection in `.cx/state.json` (`preferences.ollama_model`).
 - No explicit "session mode" handshake exists yet before command execution.
 
 Planned implementation:
@@ -201,7 +215,7 @@ Planned implementation:
   - `subscription` (authenticated account tier)
   - `visitor` (non-login path when backend support exists)
 - Emit session metadata to logs so command behavior can be tied to access mode.
-- Enforce mode-aware limits/fallbacks before running Codex piping commands.
+- Enforce mode-aware limits/fallbacks before running primary backend commands.
 
 ## Run
 
@@ -212,14 +226,18 @@ cargo run -- where
 cargo run -- doctor
 cargo run -- where
 cargo run -- llm show
+cargo run -- llm check
 cargo run -- llm use ollama llama3.1
+cargo run -- llm use llamacpp ggml-org/Qwen3-0.6B-GGUF:Q4_0
+cargo run -- llm smoke "Respond with OK only."
 cargo run -- llm unset model
 cargo run -- llm unset backend
 cargo run -- llm set-backend ollama
 cargo run -- llm set-model llama3.1
-cargo run -- llm set-backend codex
+cargo run -- llm set-backend primary
 CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- doctor
 CX_LLM_BACKEND=ollama CX_OLLAMA_MODEL=llama3.1 cargo run -- cxo git status
+CX_LLM_BACKEND=llamacpp CX_LLAMA_CPP_MODEL=ggml-org/Qwen3-0.6B-GGUF:Q4_0 CX_CMD_TIMEOUT_SECS=600 CX_LLAMA_CPP_ARGS="-n 64 --temp 0 -c 2048 --simple-io" cargo run -- cxo printf 'xshelf llamacpp smoke\n'
 cargo run -- state show
 cargo run -- state set preferences.conventional_commits true
 cargo run -- state get preferences.conventional_commits

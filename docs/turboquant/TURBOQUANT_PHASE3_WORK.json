@@ -1,0 +1,108 @@
+{
+  "phase": "phase3",
+  "status": "closed",
+  "representation": "tq_v1_vec",
+  "steps": [
+    {
+      "id": "p3_contract",
+      "status": "complete",
+      "goal": "lock first vector/codebook contract and success gates"
+    },
+    {
+      "id": "p3_codebook",
+      "status": "complete",
+      "goal": "define fixed centroid table shape and sidecar payload layout in docs/turboquant/TURBOQUANT_VEC_LAYOUT.md"
+    },
+    {
+      "id": "p3_patch1",
+      "status": "complete",
+      "goal": "add compile-clean vector codebook scaffold on the host-backed V path"
+    },
+    {
+      "id": "p3_validate",
+      "status": "complete",
+      "goal": "land the first vector replay wiring and validation artifact"
+    },
+    {
+      "id": "p3_value",
+      "status": "complete",
+      "goal": "record the provisional vector runtime/value comparison versus scalar reference"
+    },
+    {
+      "id": "p3_patch4",
+      "status": "complete",
+      "goal": "correct read-path accounting and prove real replay activity in docs/turboquant/TURBOQUANT_VEC_CHECK.json"
+    },
+    {
+      "id": "p3_replay_fix",
+      "status": "complete",
+      "goal": "restore exact smoke and strict JSON correctness on the real vec replay path at 8k"
+    },
+    {
+      "id": "p3_bits_sweep",
+      "status": "complete",
+      "goal": "map the corrected 8k replay curve for vec codebook bits and select the next optimization target"
+    },
+    {
+      "id": "p3_bits6_baseline",
+      "status": "complete",
+      "goal": "promote 6-bit vec replay with small-kv bypass 256 as the current Phase 3 baseline"
+    },
+    {
+      "id": "p3_ladder_fix",
+      "status": "complete",
+      "goal": "re-run 16k and 32k on the corrected 6-bit vec baseline and replace provisional ladder readings"
+    },
+    {
+      "id": "p3_profile_fix",
+      "status": "complete",
+      "goal": "restore read-side accounting on the corrected ladder path and identify the dominant long-context replay hotspots"
+    },
+    {
+      "id": "p3_instruct_harden",
+      "status": "complete",
+      "goal": "reduce instruct replay cost on the corrected 6-bit vec path without losing exact-task correctness"
+    },
+    {
+      "id": "p3_row_lookup",
+      "status": "complete",
+      "goal": "remove linear row scans and per-group decode allocation from the current vec replay path"
+    },
+    {
+      "id": "p3_locality",
+      "status": "complete",
+      "goal": "improve centroid decode/locality on the current 6-bit vec path after row lookup hardening"
+    },
+    {
+      "id": "p3_closeout",
+      "status": "complete",
+      "goal": "decide whether the hardened 6-bit vec baseline is strong enough to close Phase 3 or merits one final narrow value pass"
+    }
+  ],
+  "references": [
+    "docs/turboquant/TURBOQUANT_PHASE3.md",
+    "docs/turboquant/TURBOQUANT_VEC.md",
+    "docs/turboquant/TURBOQUANT_HARDEN.md",
+    "docs/turboquant/TURBOQUANT_SCALAR_VALUE.json",
+    "docs/turboquant/TURBOQUANT_SCALAR_COMPARE.json",
+    "docs/turboquant/TURBOQUANT_VEC_LAYOUT.md",
+    "docs/turboquant/TURBOQUANT_VEC_CHECK.json",
+    "patches/tq_p3_slice1.patch",
+    "patches/tq_p3_slice2.patch",
+    "patches/tq_p3_slice3.patch",
+    "patches/tq_p3_slice4.patch",
+    "docs/turboquant/TURBOQUANT_VEC_VALUE.json",
+    "docs/turboquant/TURBOQUANT_VEC_16K.json",
+    "docs/turboquant/TURBOQUANT_VEC_32K.json",
+    "docs/turboquant/TURBOQUANT_VEC_LADDER.json",
+    "docs/turboquant/TURBOQUANT_VEC_PROFILE.json",
+    "patches/tq_p3_slice5.patch",
+    "docs/turboquant/TURBOQUANT_VEC_SWEEP.json",
+    "patches/tq_p3_slice6.patch",
+    "docs/turboquant/TURBOQUANT_VEC_TUNE.json",
+    "patches/tq_p3_slice7.patch",
+    "patches/tq_p3_slice8.patch",
+    "docs/turboquant/TURBOQUANT_VEC_HARDEN.json",
+    "docs/turboquant/TURBOQUANT_PHASE3_CLOSE.json"
+  ]
+}

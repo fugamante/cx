@@ -1,0 +1,160 @@
+{
+  "contract_version": "turboquant-vec-profile.v4",
+  "variant": "bits6_bypass256",
+  "contexts": [
+    {
+      "context_target": 8192,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 17.68,
+      "wall_ms_mean": 12655,
+      "raw_ratio_mean": 3.12
+    },
+    {
+      "context_target": 16384,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 21.3,
+      "wall_ms_mean": 9632.5,
+      "raw_ratio_mean": 6.23
+    },
+    {
+      "context_target": 32768,
+      "passes": 4,
+      "total": 4,
+      "decode_tps_mean": 19.05,
+      "wall_ms_mean": 10267.5,
+      "raw_ratio_mean": 6.23
+    }
+  ],
+  "prompts": {
+    "smoke": [
+      {
+        "context_target": 8192,
+        "decode_tps": 41.9,
+        "wall_ms": 1570,
+        "raw_ratio": 4.57,
+        "read_layers": 32,
+        "read_calls": 32,
+        "read_rows": 1280,
+        "read_groups": 20480
+      },
+      {
+        "context_target": 16384,
+        "decode_tps": 48.9,
+        "wall_ms": 1570,
+        "raw_ratio": 12.01,
+        "read_layers": 32,
+        "read_calls": 32,
+        "read_rows": 1280,
+        "read_groups": 20480
+      },
+      {
+        "context_target": 32768,
+        "decode_tps": 43.5,
+        "wall_ms": 2080,
+        "raw_ratio": 12.01,
+        "read_layers": 32,
+        "read_calls": 32,
+        "read_rows": 1280,
+        "read_groups": 20480
+      }
+    ],
+    "context_fill": [
+      {
+        "context_target": 8192,
+        "decode_tps": 11.7,
+        "wall_ms": 12650,
+        "raw_ratio": 2.66,
+        "read_layers": 608,
+        "read_calls": 4448,
+        "read_rows": 897792,
+        "read_groups": 14364672
+      },
+      {
+        "context_target": 16384,
+        "decode_tps": 13.9,
+        "wall_ms": 9630,
+        "raw_ratio": 4.49,
+        "read_layers": 672,
+        "read_calls": 5568,
+        "read_rows": 1116192,
+        "read_groups": 17859072
+      },
+      {
+        "context_target": 32768,
+        "decode_tps": 10.4,
+        "wall_ms": 10630,
+        "raw_ratio": 4.49,
+        "read_layers": 672,
+        "read_calls": 5568,
+        "read_rows": 1116192,
+        "read_groups": 17859072
+      }
+    ],
+    "retrieval": [
+      {
+        "context_target": 8192,
+        "decode_tps": 8.3,
+        "wall_ms": 21730,
+        "raw_ratio": 2.45,
+        "read_layers": 384,
+        "read_calls": 864,
+        "read_rows": 344256,
+        "read_groups": 5508096
+      },
+      {
+        "context_target": 16384,
+        "decode_tps": 10.7,
+        "wall_ms": 16190,
+        "raw_ratio": 3.56,
+        "read_layers": 384,
+        "read_calls": 864,
+        "read_rows": 344256,
+        "read_groups": 5508096
+      },
+      {
+        "context_target": 32768,
+        "decode_tps": 10.5,
+        "wall_ms": 16700,
+        "raw_ratio": 3.56,
+        "read_layers": 384,
+        "read_calls": 864,
+        "read_rows": 344256,
+        "read_groups": 5508096
+      }
+    ],
+    "instruct": [
+      {
+        "context_target": 8192,
+        "decode_tps": 8.8,
+        "wall_ms": 14670,
+        "raw_ratio": 2.78,
+        "read_layers": 928,
+        "read_calls": 11328,
+        "read_rows": 3036864,
+        "read_groups": 48589824
+      },
+      {
+        "context_target": 16384,
+        "decode_tps": 11.7,
+        "wall_ms": 11140,
+        "raw_ratio": 4.87,
+        "read_layers": 928,
+        "read_calls": 11328,
+        "read_rows": 3036864,
+        "read_groups": 48589824
+      },
+      {
+        "context_target": 32768,
+        "decode_tps": 11.8,
+        "wall_ms": 11660,
+        "raw_ratio": 4.87,
+        "read_layers": 928,
+        "read_calls": 11328,
+        "read_rows": 3036864,
+        "read_groups": 48589824
+      }
+    ]
+  }
+}

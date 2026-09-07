@@ -1,0 +1,49 @@
+diff --git a/src/old_name.rs b/src/new_name.rs
+similarity index 88%
+rename from src/old_name.rs
+rename to src/new_name.rs
+index 1111111..2222222 100644
+--- a/src/old_name.rs
++++ b/src/new_name.rs
+@@ -1,6 +1,6 @@
+ fn main() {
+-    println!("old path");
++    println!("new path");
+     unchanged_line_one();
+     unchanged_line_two();
+     unchanged_line_three();
+     unchanged_line_four();
+     unchanged_line_five();
+     unchanged_line_six();
+     unchanged_line_seven();
+     unchanged_line_eight();
+     unchanged_line_nine();
+     unchanged_line_ten();
+ }
+diff --git a/assets/logo.bin b/assets/logo.bin
+index 3333333..4444444 100644
+Binary files a/assets/logo.bin and b/assets/logo.bin differ
+diff --git a/generated/huge.rs b/generated/huge.rs
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/generated/huge.rs
+@@ -0,0 +1,8 @@
++// generated file
++pub const GENERATED: &str = "kept";
++pub const NOISE_1: &str = "noise";
++pub const NOISE_2: &str = "noise";
++pub const NOISE_3: &str = "noise";
++pub const NOISE_4: &str = "noise";
++pub const NOISE_5: &str = "noise";
++pub const NOISE_6: &str = "noise";
+diff --git a/obsolete.txt b/obsolete.txt
+deleted file mode 100644
+index 6666666..0000000
+--- a/obsolete.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-remove me
+-remove me too
+-boring deletion context
+-final deletion

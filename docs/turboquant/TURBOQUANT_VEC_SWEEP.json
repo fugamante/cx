@@ -1,0 +1,45 @@
+{
+  "contract_version": "turboquant-vec-sweep.v1",
+  "runs": [
+    {
+      "bits": 4,
+      "passes": 2,
+      "decode_tps_mean": 13.6,
+      "wall_ms_mean": 9137.5,
+      "raw_ratio_mean": 1.97,
+      "details": {
+        "smoke": false,
+        "context_fill": true,
+        "retrieval": false,
+        "instruct": true
+      }
+    },
+    {
+      "bits": 6,
+      "passes": 3,
+      "decode_tps_mean": 14.48,
+      "wall_ms_mean": 12780.0,
+      "raw_ratio_mean": 3.79,
+      "details": {
+        "smoke": false,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    },
+    {
+      "bits": 8,
+      "passes": 4,
+      "decode_tps_mean": 14.0,
+      "wall_ms_mean": 31415.0,
+      "raw_ratio_mean": 6.23,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    }
+  ],
+  "decision": "target_bits6_smoke_fix"
+}

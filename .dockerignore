@@ -1,0 +1,7 @@
+.git
+.cx
+.codex
+target
+rust/cxrs/target
+node_modules
+.DS_Store

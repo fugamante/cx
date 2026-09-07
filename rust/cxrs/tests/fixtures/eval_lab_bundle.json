@@ -1,0 +1,90 @@
+{
+  "bundle_version": "cx-contract-bundle.v1",
+  "profile": "eval-lab",
+  "contracts": {
+    "cx.diag": {
+      "contract_version": "diag.v1",
+      "required_keys": [
+        "contract_version",
+        "retry",
+        "concurrency"
+      ]
+    },
+    "cx.scheduler": {
+      "contract_version": "scheduler.v1",
+      "required_keys": [
+        "contract_version",
+        "retry",
+        "concurrency"
+      ]
+    },
+    "cx.optimize": {
+      "contract_version": "optimize.v1",
+      "required_keys": [
+        "contract_version",
+        "scoreboard"
+      ]
+    },
+    "cx.logs.stats": {
+      "contract_version": "telemetry.v1",
+      "required_keys": [
+        "contract_version",
+        "fields",
+        "contract_drift"
+      ]
+    },
+    "cx.task.check": {
+      "contract_version": "task-check.v1",
+      "required_keys": [
+        "contract_version",
+        "status_filter",
+        "selected",
+        "waves",
+        "blocked_total",
+        "can_run",
+        "recommended_mode"
+      ]
+    },
+    "cx.task.run_all": {
+      "contract_version": "task-run-all.v1",
+      "required_keys": [
+        "contract_version",
+        "status_filter",
+        "mode",
+        "task_readiness",
+        "preflight",
+        "scheduled",
+        "tasks"
+      ]
+    },
+    "cx.task.list": {
+      "contract_version": "task-list.v1",
+      "required_keys": [
+        "contract_version",
+        "status_filter",
+        "count",
+        "list_readiness",
+        "tasks"
+      ]
+    },
+    "cx.task.show": {
+      "contract_version": "task-show.v1",
+      "required_keys": [
+        "contract_version",
+        "id",
+        "status",
+        "latest_run",
+        "run_readiness"
+      ]
+    },
+    "cx.task.run": {
+      "contract_version": "task-run.v1",
+      "required_keys": [
+        "contract_version",
+        "task_id",
+        "status",
+        "execution_id"
+      ]
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "contract_version": "turboquant-phase2-validate.v1",
+  "binary": "llama-cli",
+  "model": "sha256-667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29",
+  "context_target": 8192,
+  "runs": [
+    {
+      "mode": "baseline",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 191.1,
+      "decode_tokens_per_sec": 54.4,
+      "wall_ms": 2800,
+      "quality_rule": "exact_OK",
+      "passed": true,
+      "response_text": "OK"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "smoke",
+      "prompt_file": "docs/turboquant/prompts/smoke.txt",
+      "context_target": 8192,
+      "predict_n": 8,
+      "prompt_tokens_per_sec": 178.8,
+      "decode_tokens_per_sec": 1.6,
+      "wall_ms": 3110,
+      "quality_rule": "exact_OK",
+      "passed": true,
+      "response_text": "OK"
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 329.7,
+      "decode_tokens_per_sec": 15.1,
+      "wall_ms": 7610,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive contains 120 identical entries for a neutral project ledger entry for baseline context expansion."
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "context_fill",
+      "prompt_file": "docs/turboquant/prompts/context_fill.txt",
+      "context_target": 8192,
+      "predict_n": 64,
+      "prompt_tokens_per_sec": 229.0,
+      "decode_tokens_per_sec": 4.2,
+      "wall_ms": 13190,
+      "quality_rule": "non_empty_summary",
+      "passed": true,
+      "response_text": "The archive contains 120 identical entries for a neutral project ledger entry for baseline context expansion."
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 384.8,
+      "decode_tokens_per_sec": 8.3,
+      "wall_ms": 11150,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": true,
+      "response_text": "TURBO-314159"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "retrieval",
+      "prompt_file": "docs/turboquant/prompts/retrieval.txt",
+      "context_target": 8192,
+      "predict_n": 16,
+      "prompt_tokens_per_sec": 215.0,
+      "decode_tokens_per_sec": 1.8,
+      "wall_ms": 21250,
+      "quality_rule": "exact_TURBO-314159",
+      "passed": true,
+      "response_text": "TURBO-314159"
+    },
+    {
+      "mode": "baseline",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 476.8,
+      "decode_tokens_per_sec": 23.5,
+      "wall_ms": 6110,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}"
+    },
+    {
+      "mode": "turboquant",
+      "prompt_name": "instruct",
+      "prompt_file": "docs/turboquant/prompts/instruct.txt",
+      "context_target": 8192,
+      "predict_n": 48,
+      "prompt_tokens_per_sec": 252.1,
+      "decode_tokens_per_sec": 2.6,
+      "wall_ms": 18800,
+      "quality_rule": "exact_JSON_contract",
+      "passed": true,
+      "response_text": "{\"status\": \"ready\", \"focus\": \"turboquant-baseline\", \"next_step\": \"phase2-v-cache\"}"
+    }
+  ]
+}

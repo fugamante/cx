@@ -11,11 +11,15 @@ _CX_REPO_ROOT="$(cd "$_CX_LIB_DIR/.." && pwd)"
 _CX_BIN="$_CX_REPO_ROOT/bin/cx"
 
 cx() {
-  "$_CX_BIN" "$@"
+  CX_CLI_NAME=cx "$_CX_BIN" "$@"
 }
 
 xshelf() {
-  "$_CX_BIN" "$@"
+  CX_CLI_NAME=xshelf "$_CX_BIN" "$@"
+}
+
+xs() {
+  CX_CLI_NAME=xs "$_CX_BIN" "$@"
 }
 
 cxreload() {

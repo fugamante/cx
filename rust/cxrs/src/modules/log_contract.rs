@@ -1,4 +1,4 @@
-pub const REQUIRED_STRICT_FIELDS: [&str; 33] = [
+pub const REQUIRED_STRICT_FIELDS: [&str; 36] = [
     "execution_id",
     "timestamp",
     "command",
@@ -6,6 +6,9 @@ pub const REQUIRED_STRICT_FIELDS: [&str; 33] = [
     "adapter_type",
     "provider_transport",
     "provider_status",
+    "http_request_profile",
+    "http_provider_format",
+    "http_parser_mode",
     "capture_provider",
     "execution_mode",
     "duration_ms",

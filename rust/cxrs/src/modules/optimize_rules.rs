@@ -7,6 +7,7 @@ pub struct RecommendationInput<'a> {
     pub top_timeout_labels: &'a [(String, u64)],
     pub retry_rows_rate: Option<f64>,
     pub retry_recovery_rate: Option<f64>,
+    pub timing_coverage_min: Option<f64>,
 }
 
 pub fn push_latency_anomaly(anomalies: &mut Vec<String>, top_dur: &[(String, u64)], max_ms: u64) {
@@ -111,6 +112,7 @@ pub fn build_recommendations(input: RecommendationInput<'_>) -> Vec<String> {
         top_timeout_labels,
         retry_rows_rate,
         retry_recovery_rate,
+        timing_coverage_min,
     } = input;
     let mut recommendations: Vec<String> = Vec::new();
     if let Some((tool, avg_eff)) = top_eff.first() {
@@ -154,6 +156,14 @@ pub fn build_recommendations(input: RecommendationInput<'_>) -> Vec<String> {
     {
         recommendations.push(format!(
             "Retry recovery is low ({}%); tune timeout overrides per command label and split heavy objectives into smaller tasks.",
+            (rate * 100.0).round() as i64
+        ));
+    }
+    if let Some(rate) = timing_coverage_min
+        && rate < 0.80
+    {
+        recommendations.push(format!(
+            "Task timing attribution coverage is low ({}% min field coverage); ensure task rows carry retry attempt and queue/start/finish timestamps.",
             (rate * 100.0).round() as i64
         ));
     }

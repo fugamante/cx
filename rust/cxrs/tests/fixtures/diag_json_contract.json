@@ -6,6 +6,8 @@
     "mode",
     "backend",
     "active_model",
+    "backend_capabilities",
+    "adapter_rollout_policy",
     "capture_provider_config",
     "capture_provider_resolved",
     "capture_external_dependencies",
@@ -18,8 +20,13 @@
     "schema_registry_dir",
     "schema_registry_files",
     "scheduler",
+    "task_readiness",
+    "task_execution",
+    "phase7_metrics",
     "retry",
     "critical",
+    "concurrency",
+    "capture_prompt_profile_rollout",
     "scheduler_window_requested",
     "severity",
     "severity_reasons",
@@ -30,14 +37,140 @@
     "route",
     "reason"
   ],
+  "backend_capabilities_keys": [
+    "turboquant",
+    "runtime"
+  ],
+  "backend_capabilities_turboquant_keys": [
+    "cx_runtime_support",
+    "selected_backend_role",
+    "memory_metric_kind"
+  ],
+  "backend_capabilities_runtime_keys": [
+    "model_registry",
+    "model_aliases",
+    "local_model_path",
+    "resident_server",
+    "openai_compatible",
+    "anthropic_compatible",
+    "supports_batching",
+    "supports_tool_calling",
+    "supports_vlm",
+    "supports_embeddings",
+    "supports_reranking",
+    "cache_metric_kind",
+    "supports_persisted_kv_restore"
+  ],
   "scheduler_keys": [
     "window_runs",
     "queue_rows",
     "queue_ms_avg",
     "queue_ms_p95",
+    "rows_with_retry_attempt",
+    "rows_with_queue_started_at",
+    "rows_with_task_started_at",
+    "rows_with_task_finished_at",
     "workers_seen",
     "worker_distribution",
     "backend_distribution"
+  ],
+  "phase7_metrics_keys": [
+    "window_runs",
+    "actions_until_resolution",
+    "expensive_action_rate",
+    "repeat_diagnosis_rate",
+    "resume_reuse_rate",
+    "structured_action_success_rate"
+  ],
+  "task_readiness_keys": [
+    "status_filter",
+    "selected",
+    "waves",
+    "blocked_total",
+    "blocked_dependencies",
+    "blocked_resources",
+    "can_run",
+    "can_run_mixed",
+    "can_run_parallel",
+    "strict_plan_ok",
+    "strict_plan_reason",
+    "sequential_waves",
+    "parallel_waves",
+    "largest_parallel_wave",
+    "recommended_mode",
+    "recommended_reason",
+    "blocked"
+  ],
+  "task_execution_keys": [
+    "last_mode",
+    "halted_remaining",
+    "backend_fallback_rows",
+    "latest_wave_index",
+    "max_queue_wave_index",
+    "max_queue_wave_ms",
+    "concurrency",
+    "invariants",
+    "wave_pressure",
+    "advice",
+    "recommendations",
+    "next_action",
+    "recent_context",
+    "phase7_bias",
+    "reasoning_gate"
+  ],
+  "task_execution_phase7_bias_keys": [
+    "applied",
+    "reason",
+    "repeat_diagnosis_rate",
+    "resume_reuse_rate",
+    "resume_point"
+  ],
+  "task_execution_concurrency_keys": [
+    "worker_count",
+    "workers",
+    "max_retry_attempt",
+    "first_queue_started_at",
+    "first_task_started_at",
+    "last_task_finished_at"
+  ],
+  "task_execution_invariants_keys": [
+    "ok",
+    "status",
+    "issues",
+    "outcome_accounting_ok",
+    "failure_accounting_ok",
+    "critical_halt_ok",
+    "worker_summary_ok",
+    "timing_window_ok"
+  ],
+  "task_execution_recent_context_keys": [
+    "last_successful_action",
+    "last_failed_action",
+    "last_mode_used",
+    "repeated_failure_pattern",
+    "recommended_resume_point",
+    "resume_reuses_prior_action"
+  ],
+  "task_execution_reasoning_gate_keys": [
+    "mode",
+    "why",
+    "blockers"
+  ],
+  "task_execution_wave_pressure_keys": [
+    "kind",
+    "suggested_mode",
+    "latest_wave_index",
+    "max_queue_wave_index",
+    "max_queue_wave_ms"
+  ],
+  "task_execution_next_action_keys": [
+    "kind",
+    "command",
+    "reason",
+    "cost_class",
+    "reasoning_required",
+    "quality_risk",
+    "escalates_if"
   ],
   "retry_keys": [
     "window_runs",
@@ -57,5 +190,35 @@
     "halted_rows",
     "critical_errors_total",
     "runs_with_critical_errors"
+  ],
+  "concurrency_keys": [
+    "defaults",
+    "observed"
+  ],
+  "capture_prompt_profile_rollout_keys": [
+    "window_runs",
+    "rows_with_explicit_profile",
+    "shadow_narrow_configured_runs",
+    "shadow_narrow_applied_runs",
+    "shadow_narrow_fallback_runs",
+    "latest_execution_id",
+    "latest_timestamp",
+    "latest_command",
+    "latest_profile",
+    "latest_profile_applied",
+    "latest_reducer_kind",
+    "latest_fallback_reason",
+    "recommendation"
+  ],
+  "adapter_rollout_policy_keys": [
+    "default_transport",
+    "http_transport_opt_in",
+    "explicit_override_required_for_http",
+    "selected_adapter",
+    "selected_transport",
+    "selected_status",
+    "explicit_override_set",
+    "default_switch_guard",
+    "rollback_rule"
   ]
 }

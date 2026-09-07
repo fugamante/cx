@@ -290,7 +290,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
                     }
 
                     if spec.logging_enabled {
-                        let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
+                        let _ = crate::runlog::log_primary_run(crate::runlog::RunLogInput {
                             tool: &spec.command_name,
                             prompt: &last_schema_prompt_filtered,
                             prompt_raw: Some(&last_schema_prompt_raw),
@@ -329,7 +329,7 @@ pub fn execute_task(spec: TaskSpec) -> Result<ExecutionResult, String> {
     }
 
     if spec.logging_enabled {
-        let _ = crate::runlog::log_codex_run(crate::runlog::RunLogInput {
+        let _ = crate::runlog::log_primary_run(crate::runlog::RunLogInput {
             tool: &spec.command_name,
             prompt: &prompt,
             prompt_raw: Some(&prompt_raw),

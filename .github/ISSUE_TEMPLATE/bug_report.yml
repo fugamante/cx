@@ -50,7 +50,7 @@ body:
         bash:
         git:
         jq:
-        codex:
+        primary:
         ollama (if used):
         capture provider config:
         rustc/cargo:

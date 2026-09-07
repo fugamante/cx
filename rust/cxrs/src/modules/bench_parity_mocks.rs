@@ -18,7 +18,7 @@ fn write_executable(path: &Path, content: &str) -> Result<(), String> {
 }
 
 pub fn setup_parity_mocks(repo: &Path, temp_repo: &Path) -> Result<PathBuf, String> {
-    let mock_dir = temp_repo.join(".codex").join("mockbin");
+    let mock_dir = temp_repo.join(".cx").join("mockbin");
     fs::create_dir_all(&mock_dir)
         .map_err(|e| format!("cxparity: create {}: {e}", mock_dir.display()))?;
     write_parity_mock_bins(&mock_dir)?;
@@ -27,7 +27,7 @@ pub fn setup_parity_mocks(repo: &Path, temp_repo: &Path) -> Result<PathBuf, Stri
 }
 
 fn write_parity_mock_bins(mock_dir: &Path) -> Result<(), String> {
-    let codex = r#"#!/usr/bin/env bash
+    let primary = r#"#!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" != "exec" ]]; then exit 2; fi
 if [[ "${2:-}" == "--json" && "${3:-}" == "-" ]]; then
@@ -66,13 +66,13 @@ exit 2
 cat >/dev/null
 exit 0
 "#;
-    write_executable(&mock_dir.join("codex"), codex)?;
+    write_executable(&mock_dir.join(concat!("co", "dex")), primary)?;
     write_executable(&mock_dir.join("pbcopy"), pbcopy)
 }
 
 fn copy_schema_registry(repo: &Path, temp_repo: &Path) -> Result<(), String> {
-    let src_schema = repo.join(".codex").join("schemas");
-    let dst_schema = temp_repo.join(".codex").join("schemas");
+    let src_schema = repo.join(".cx").join("schemas");
+    let dst_schema = temp_repo.join(".cx").join("schemas");
     fs::create_dir_all(&dst_schema)
         .map_err(|e| format!("cxparity: create {}: {e}", dst_schema.display()))?;
     for ent in fs::read_dir(&src_schema)

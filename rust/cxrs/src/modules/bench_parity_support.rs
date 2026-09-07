@@ -133,7 +133,7 @@ pub fn print_bench_summary(
     } else {
         sum / (stats.durations.len() as u64)
     };
-    println!("== cxrs bench ==");
+    println!("== {} bench ==", crate::config::cli_app_name());
     println!("runs: {runs}");
     println!("command: {}", command.join(" "));
     println!("duration_ms avg/min/max: {avg}/{min}/{max}");

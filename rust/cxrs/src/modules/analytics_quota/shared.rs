@@ -64,20 +64,17 @@ pub(super) fn top_commands(rows: &[Value]) -> Vec<Value> {
             json!({
                 "command": cmd,
                 "runs": runs,
-                "avg_effective_tokens": if runs == 0 { 0 } else { tokens / runs },
-                "avg_duration_ms": if runs == 0 { 0 } else { duration_ms / runs }
+                "avg_effective_tokens": tokens.checked_div(runs).unwrap_or(0),
+                "avg_duration_ms": duration_ms.checked_div(runs).unwrap_or(0)
             })
         })
         .collect();
-    out.sort_by(|a, b| {
-        b.get("avg_effective_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .cmp(
-                &a.get("avg_effective_tokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-            )
+    out.sort_by_key(|row| {
+        std::cmp::Reverse(
+            row.get("avg_effective_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        )
     });
     out.truncate(5);
     out

@@ -1,3 +1,4 @@
+use crate::config::cli_app_name;
 use crate::error::{CxError, CxResult};
 use crate::log_contract::REQUIRED_STRICT_FIELDS;
 use crate::types::RunEntry;
@@ -275,10 +276,12 @@ fn maybe_warn_invalid_lines(log_file: &Path, invalid: usize, sample: Option<Stri
     if RUNS_PARSE_WARNED.swap(true, Ordering::SeqCst) {
         return;
     }
+    let cli = cli_app_name();
     crate::cx_eprintln!(
-        "cxrs: warning: skipped {} invalid JSON lines in {} (sample: {}). Run 'cx logs validate' for details.",
+        "XSHELF warning: skipped {} invalid JSON lines in {} (sample: {}). Run '{} logs validate' for details.",
         invalid,
         log_file.display(),
-        sample.unwrap_or_else(|| "n/a".to_string())
+        sample.unwrap_or_else(|| "n/a".to_string()),
+        cli
     );
 }

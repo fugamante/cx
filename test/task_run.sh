@@ -18,6 +18,6 @@ s2="$($ROOT/bin/cx task show "$t2" | jq -r '.status')"
 [[ "$s1" == "failed" || "$s1" == "complete" ]]
 [[ "$s2" == "failed" || "$s2" == "complete" ]]
 
-tail -n 5 .codex/cxlogs/runs.jsonl | jq -e 'select(.task_id!=null and .task_id!="")' >/dev/null
+tail -n 5 .cx/cxlogs/runs.jsonl | jq -s -e 'map(select(.task_id!=null and .task_id!="")) | length >= 1' >/dev/null
 
 echo "task_run_ok"

@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>XSHELF</title>
+    <link rel="stylesheet" href="./docs/manuals/02_web/apple.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="XSHELF home">
+        <span class="brand-mark">XS</span>
+        <span>XSHELF</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#pipeline">Pipeline</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#install">Install</a>
+        <a href="./docs/manuals/02_web/CX_MANUAL_MASTER.html" data-manual-link>Reference</a>
+      </nav>
+      <div class="header-actions">
+        <a class="header-action secondary" href="https://github.com/fugamante/XSHELF">GitHub repo</a>
+        <a class="header-action" href="./docs/manuals/02_web/CX_MANUAL_MASTER.html" data-manual-link>Open Reference</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="product-line">XSHELF</p>
+          <h1>Runtime for deterministic operator work.</h1>
+          <p class="lead">
+            XSHELF wraps repository commands with bounded capture, schema-checked
+            outputs, explicit execution policy, and replayable telemetry for
+            CI and local automation. Make LLM-assisted repo automation parseable,
+            bounded, and replayable.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="#install" data-try-action>Start verification</a>
+            <a class="button secondary" href="./docs/manuals/02_web/CX_MANUAL_MASTER.html" data-manual-link>Read reference</a>
+          </div>
+          <div class="mobile-link-row" aria-label="Secondary actions">
+            <a href="https://github.com/fugamante/XSHELF">GitHub repo</a>
+            <a href="./docs/manuals/02_web/CX_MANUAL_MASTER.html" data-manual-link>Reference</a>
+          </div>
+          <div class="safe-command" aria-label="Safe first command">
+            <span>Safe first command</span>
+            <code data-safe-command>./bin/xshelf task check --json</code>
+            <button type="button" data-copy-safe>Copy</button>
+          </div>
+          <dl class="status-strip" aria-label="Runtime proof points">
+            <div>
+              <dt>Engine</dt>
+              <dd>Rust canonical</dd>
+            </div>
+            <div>
+              <dt>Output</dt>
+              <dd>JSON contracts</dd>
+            </div>
+            <div>
+              <dt>Failure</dt>
+              <dd>Replayable</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="terminal-stack">
+          <section class="quick-tabs terminal-tabs" aria-label="Runtime surfaces">
+            <button type="button" class="active" data-surface-tab="operator">Runtime check</button>
+            <button type="button" data-surface-tab="ci">CI gate</button>
+            <button type="button" data-surface-tab="local">Local model</button>
+            <button type="button" data-surface-tab="schema">Schema failure</button>
+          </section>
+
+          <div class="terminal-panel" aria-label="XSHELF terminal preview">
+            <div class="terminal-top">
+              <span data-terminal-title>runtime check</span>
+              <div class="terminal-tools">
+                <button type="button" class="copy-command" data-copy-terminal>Copy</button>
+                <div class="window-dots" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+            </div>
+            <pre><code data-terminal-code>$ ./bin/xshelf task check --json
+{
+  "contract_version": "task-check.v1",
+  "can_run": true,
+  "recommended_mode": "sequential",
+  "selected": 0
+}</code></pre>
+            <div class="terminal-footer" aria-live="polite">
+              <span data-terminal-caption>Capture -&gt; Budget -&gt; Validate -&gt; Telemetry</span>
+              <span class="live-dot">ready</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-band" aria-label="Contract proof">
+        <article data-proof-key="readiness">
+          <span>task-check.v1</span>
+          <strong>Readiness is a parseable contract</strong>
+        </article>
+        <article data-proof-key="events">
+          <span>task-events.v1</span>
+          <strong>Progress stream stays off stdout</strong>
+        </article>
+        <article data-proof-key="backend">
+          <span>model registry</span>
+          <strong>Backend selection stays explicit</strong>
+        </article>
+        <article data-proof-key="quarantine">
+          <span>quarantine</span>
+          <strong>Invalid output gets a replay handle</strong>
+        </article>
+      </section>
+
+      <section id="pipeline" class="section-block">
+        <div class="section-head">
+          <span class="section-index">01</span>
+          <div>
+            <h2>Predictable Command Flow</h2>
+            <p>
+              XSHELF constrains system output before it reaches a model and
+              records enough evidence for operators to explain what happened.
+            </p>
+          </div>
+        </div>
+        <div class="pipeline-grid">
+          <article>
+            <span>Capture</span>
+            <p>Collect command output and reduce it inside the runtime boundary.</p>
+          </article>
+          <article>
+            <span>Budget</span>
+            <p>Apply explicit character and line limits before prompt assembly.</p>
+          </article>
+          <article>
+            <span>Validate</span>
+            <p>Check structured output against stable JSON contracts.</p>
+          </article>
+          <article>
+            <span>Replay</span>
+            <p>Quarantine failures and preserve telemetry for later inspection.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="capabilities" class="section-block">
+        <div class="section-head">
+          <span class="section-index">02</span>
+          <div>
+            <h2>Operator Surfaces</h2>
+            <p>
+              The runtime exposes state, policy, tasks, and telemetry through
+              commands that are meant to be read by both people and automation.
+            </p>
+          </div>
+        </div>
+        <div class="card-grid">
+          <article class="card">
+            <h3>Runtime state</h3>
+            <p>Inspect backend, budgets, logs, transport policy, and model configuration.</p>
+            <code>./bin/xshelf core --json</code>
+          </article>
+          <article class="card">
+            <h3>Task graph</h3>
+            <p>Fan out objectives, run bounded workers, and emit parseable progress events.</p>
+            <code>./bin/xshelf task check --json</code>
+          </article>
+          <article class="card">
+            <h3>Policy</h3>
+            <p>Make execution boundaries and unsafe command decisions explicit.</p>
+            <code>./bin/xshelf policy show --json</code>
+          </article>
+          <article class="card">
+            <h3>Telemetry</h3>
+            <p>Validate logs, inspect traces, and spot schema or budget drift.</p>
+            <code>./bin/xshelf logs validate --fix=false</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="compare-band" aria-label="Why XSHELF differs">
+        <div>
+          <h2>Built for automation boundaries.</h2>
+          <p>
+            XSHELF does not treat model output as a transcript to skim. It treats
+            command execution, structured result validation, and failure evidence
+            as runtime contracts.
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Loose agent flow</th>
+              <th scope="col">XSHELF flow</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Unbounded context</td>
+              <td>Budgeted capture</td>
+            </tr>
+            <tr>
+              <td>Text-first result</td>
+              <td>Schema-first result</td>
+            </tr>
+            <tr>
+              <td>Failure is ambiguous</td>
+              <td>Failure is quarantined</td>
+            </tr>
+            <tr>
+              <td>Progress logs break parsers</td>
+              <td>Events stream separately from final JSON</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="install" class="section-block">
+        <div class="section-head">
+          <span class="section-index">03</span>
+          <div>
+            <h2>Install and Verify</h2>
+            <p>
+              Start with the selected workflow's read-only checks. Run backend
+              execution only after readiness and health checks pass.
+            </p>
+          </div>
+        </div>
+        <div class="steps" data-install-steps>
+          <article data-step-card>
+            <span>1</span>
+            <h3 data-step-title>Inspect runtime</h3>
+            <pre><code data-step-code>./bin/xshelf version
+./bin/xshelf task check --json
+./bin/xshelf core --json</code></pre>
+          </article>
+          <article data-step-card>
+            <span>2</span>
+            <h3 data-step-title>Check health</h3>
+            <pre><code data-step-code>./bin/xshelf llm check
+./bin/xshelf doctor
+./bin/xshelf health</code></pre>
+          </article>
+          <article data-step-card>
+            <span>3</span>
+            <h3 data-step-title>Run safely</h3>
+            <pre><code data-step-code>./bin/xshelf cxo git status</code></pre>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>XSHELF is independent open-source runtime tooling.</span>
+      <span><a href="./docs/manuals/02_web/index.html">Manual index</a></span>
+    </footer>
+    <script>
+      (() => {
+        const surfaces = {
+          operator: {
+            title: "runtime check",
+            safeCommand: "./bin/xshelf task check --json",
+            proof: "readiness",
+            status: ["Rust canonical", "JSON contracts", "Replayable"],
+            caption: "Capture -> Budget -> Validate -> Telemetry",
+            terminal: `$ ./bin/xshelf task check --json
+{
+  "contract_version": "task-check.v1",
+  "can_run": true,
+  "recommended_mode": "sequential",
+  "selected": 0
+}`,
+            steps: [
+              ["Inspect runtime", "./bin/xshelf version\n./bin/xshelf task check --json\n./bin/xshelf core --json\n./bin/xshelf diag --json --window 20"],
+              ["Check health", "./bin/xshelf llm check\n./bin/xshelf doctor\n./bin/xshelf health"],
+              ["Run safely", "./bin/xshelf cxo git status"],
+            ],
+          },
+          ci: {
+            title: "ci gate",
+            safeCommand: "./bin/xshelf task run-all --status pending --events-jsonl --json",
+            proof: "events",
+            status: ["Parseable stdout", "Explicit policy", "Guarded checks"],
+            caption: "Plan -> Gate -> Execute -> Validate",
+            terminal: `$ ./bin/xshelf task run-all --status pending --events-jsonl --json
+{
+  "contract_version": "task-run-all.v1",
+  "summary": "parseable",
+  "events_stream": "stderr",
+  "can_execute": true
+}`,
+            steps: [
+              ["Gate contracts", "./bin/xshelf task check --json | jq .\n./bin/xshelf policy show --json | jq ."],
+              ["Run bounded tasks", "./bin/xshelf task run-all --status pending --mode mixed\n./bin/xshelf task events --limit 20 --json"],
+              ["Validate logs", "./bin/xshelf logs validate --fix=false\n./bin/xshelf telemetry 50 --json | jq ."],
+            ],
+          },
+          local: {
+            title: "local model",
+            safeCommand: "./bin/xshelf llm check",
+            proof: "backend",
+            status: ["Backend visible", "Model explicit", "Smoke checked"],
+            caption: "Select -> Inspect -> Smoke -> Route",
+            terminal: `$ ./bin/xshelf llm models inspect local_mlx --json
+{
+  "backend": "mlx",
+  "model": "$MLX_MODEL_ID",
+  "transport": "process",
+  "status": "configured"
+}`,
+            steps: [
+              ["Inspect backend", "./bin/xshelf llm show\n./bin/xshelf llm models list --json | jq ."],
+              ["Select model", "./bin/xshelf llm use ollama llama3.1\n./bin/xshelf llm check"],
+              ["Smoke route", "./bin/xshelf llm smoke \"Respond with OK only.\"\n./bin/xshelf cxo git status"],
+            ],
+          },
+          schema: {
+            title: "schema failure",
+            safeCommand: "./bin/xshelf quarantine list",
+            proof: "quarantine",
+            status: ["Failure handled", "Replay handle", "Stdout guarded"],
+            caption: "Validate -> Quarantine -> Replay -> Repair",
+            terminal: `$ ./bin/xshelf diffsum-staged | jq .
+schema validation failed
+quarantine_id: q_20260528_143012
+raw_response: .cx/quarantine/q_20260528_143012.json
+
+$ ./bin/xshelf replay q_20260528_143012`,
+            steps: [
+              ["Validate schema", "./bin/xshelf commitjson | jq .\n./bin/xshelf diffsum-staged | jq ."],
+              ["Inspect failure", "./bin/xshelf quarantine list\n./bin/xshelf quarantine show <id>"],
+              ["Replay safely", "./bin/xshelf replay <id>\n./bin/xshelf logs validate --fix=false"],
+            ],
+          },
+        };
+
+        const tabs = [...document.querySelectorAll("[data-surface-tab]")];
+        const terminal = document.querySelector("[data-terminal-code]");
+        const terminalTitle = document.querySelector("[data-terminal-title]");
+        const caption = document.querySelector("[data-terminal-caption]");
+        const statusValues = [...document.querySelectorAll(".status-strip dd")];
+        const stepCards = [...document.querySelectorAll("[data-step-card]")];
+        const proofCards = [...document.querySelectorAll("[data-proof-key]")];
+        const copyButton = document.querySelector("[data-copy-terminal]");
+        const safeCommand = document.querySelector("[data-safe-command]");
+        const safeCopy = document.querySelector("[data-copy-safe]");
+        const tryAction = document.querySelector("[data-try-action]");
+        const manualLinks = [...document.querySelectorAll("[data-manual-link]")];
+        let currentSurface = "operator";
+
+        function activate(name) {
+          const surface = surfaces[name] || surfaces.operator;
+          tabs.forEach((tab) => {
+            const selected = tab.dataset.surfaceTab === name;
+            tab.classList.toggle("active", selected);
+            tab.setAttribute("aria-pressed", String(selected));
+          });
+          currentSurface = name;
+          terminalTitle.textContent = surface.title;
+          terminal.textContent = surface.terminal;
+          caption.textContent = surface.caption;
+          safeCommand.textContent = surface.safeCommand;
+          proofCards.forEach((card) => {
+            const active = card.dataset.proofKey === surface.proof;
+            card.classList.toggle("active", active);
+          });
+          statusValues.forEach((node, index) => {
+            node.textContent = surface.status[index];
+          });
+          stepCards.forEach((card, index) => {
+            const step = surface.steps[index];
+            card.querySelector("[data-step-title]").textContent = step[0];
+            card.querySelector("[data-step-code]").textContent = step[1];
+          });
+          copyButton.textContent = "Copy";
+          safeCopy.textContent = "Copy";
+        }
+
+        tabs.forEach((tab) => {
+          tab.setAttribute("aria-pressed", String(tab.classList.contains("active")));
+          tab.addEventListener("click", () => activate(tab.dataset.surfaceTab));
+        });
+        activate(currentSurface);
+
+        async function copyText(text) {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+              return true;
+            }
+          } catch (_error) {
+            /* Fall back below for local file previews and older browsers. */
+          }
+
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            return document.execCommand("copy");
+          } catch (_error) {
+            return false;
+          } finally {
+            textarea.remove();
+          }
+        }
+
+        copyButton.addEventListener("click", async () => {
+          copyButton.textContent = (await copyText(terminal.textContent)) ? "Copied" : "Select text";
+        });
+
+        safeCopy.addEventListener("click", async () => {
+          safeCopy.textContent = (await copyText(safeCommand.textContent)) ? "Copied" : "Select";
+        });
+
+        tryAction.addEventListener("click", (event) => {
+          event.preventDefault();
+          const install = document.querySelector("#install");
+          activate(currentSurface);
+          install.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+
+        manualLinks.forEach((link) => {
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            window.location.assign(new URL(link.getAttribute("href"), window.location.href).href);
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

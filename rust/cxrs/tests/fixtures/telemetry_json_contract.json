@@ -6,15 +6,108 @@
     "required_fields",
     "severity",
     "strict_violations",
+    "phase7_metrics",
+    "backend_capabilities",
+    "adapter_rollout_policy",
+    "task_execution",
     "fields",
     "contract_drift",
+    "capture_prompt_telemetry",
     "retry_telemetry",
     "critical_telemetry",
+    "timing_telemetry",
     "http_mode_stats"
   ],
   "contract_drift_keys": [
     "new_keys_second_half",
     "missing_keys_second_half"
+  ],
+  "backend_capabilities_keys": [
+    "turboquant"
+  ],
+  "backend_capabilities_turboquant_keys": [
+    "cx_runtime_support",
+    "selected_backend_role",
+    "memory_metric_kind"
+  ],
+  "phase7_metrics_keys": [
+    "window_runs",
+    "actions_until_resolution",
+    "expensive_action_rate",
+    "repeat_diagnosis_rate",
+    "resume_reuse_rate",
+    "structured_action_success_rate"
+  ],
+  "task_execution_keys": [
+    "last_mode",
+    "halted_remaining",
+    "backend_fallback_rows",
+    "latest_wave_index",
+    "max_queue_wave_index",
+    "max_queue_wave_ms",
+    "concurrency",
+    "invariants",
+    "wave_pressure",
+    "advice",
+    "recommendations",
+    "next_action",
+    "recent_context",
+    "phase7_bias",
+    "reasoning_gate"
+  ],
+  "task_execution_phase7_bias_keys": [
+    "applied",
+    "reason",
+    "repeat_diagnosis_rate",
+    "resume_reuse_rate",
+    "resume_point"
+  ],
+  "task_execution_concurrency_keys": [
+    "worker_count",
+    "workers",
+    "max_retry_attempt",
+    "first_queue_started_at",
+    "first_task_started_at",
+    "last_task_finished_at"
+  ],
+  "task_execution_invariants_keys": [
+    "ok",
+    "status",
+    "issues",
+    "outcome_accounting_ok",
+    "failure_accounting_ok",
+    "critical_halt_ok",
+    "worker_summary_ok",
+    "timing_window_ok"
+  ],
+  "task_execution_recent_context_keys": [
+    "last_successful_action",
+    "last_failed_action",
+    "last_mode_used",
+    "repeated_failure_pattern",
+    "recommended_resume_point",
+    "resume_reuses_prior_action"
+  ],
+  "task_execution_reasoning_gate_keys": [
+    "mode",
+    "why",
+    "blockers"
+  ],
+  "task_execution_wave_pressure_keys": [
+    "kind",
+    "suggested_mode",
+    "latest_wave_index",
+    "max_queue_wave_index",
+    "max_queue_wave_ms"
+  ],
+  "task_execution_next_action_keys": [
+    "kind",
+    "command",
+    "reason",
+    "cost_class",
+    "reasoning_required",
+    "quality_risk",
+    "escalates_if"
   ],
   "retry_keys": [
     "rows_with_retry_metadata",
@@ -26,12 +119,39 @@
     "tasks_retry_recovery_rate",
     "attempt_histogram"
   ],
+  "capture_prompt_keys": [
+    "rows_with_explicit_profile",
+    "shadow_narrow_configured_runs",
+    "shadow_narrow_applied_runs",
+    "shadow_narrow_fallback_runs",
+    "applied_reducer_kinds",
+    "fallback_reasons"
+  ],
+  "capture_prompt_reducer_item_keys": [
+    "reducer_kind",
+    "runs"
+  ],
+  "capture_prompt_fallback_item_keys": [
+    "reason",
+    "runs"
+  ],
   "critical_keys": [
     "summary_rows",
     "halt_enabled_rows",
     "halted_rows",
     "critical_errors_total",
     "runs_with_critical_errors"
+  ],
+  "timing_keys": [
+    "task_rows",
+    "rows_with_worker_id",
+    "rows_with_queue_ms",
+    "rows_with_wave_index",
+    "rows_with_wave_mode",
+    "rows_with_wave_size",
+    "rows_with_queue_started_at",
+    "rows_with_task_started_at",
+    "rows_with_task_finished_at"
   ],
   "http_mode_item_keys": [
     "format",
@@ -42,5 +162,16 @@
     "schema_invalid",
     "timed_out",
     "policy_blocked"
+  ],
+  "adapter_rollout_policy_keys": [
+    "default_transport",
+    "http_transport_opt_in",
+    "explicit_override_required_for_http",
+    "selected_adapter",
+    "selected_transport",
+    "selected_status",
+    "explicit_override_set",
+    "default_switch_guard",
+    "rollback_rule"
   ]
 }

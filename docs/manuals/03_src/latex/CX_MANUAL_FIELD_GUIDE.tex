@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \input{docs/manuals/03_src/latex/_preamble.tex}
 
-\title{CX Manual (Field Guide)}
+\title{XSHELF Manual (Field Guide)}
 \author{}
 \date{Last updated: 2026-02-22}
 
@@ -15,12 +15,12 @@ It’s written for the moment you’re stuck, skeptical, or trying to keep costs
 
 \section{First Checks (30 Seconds)}
 \begin{lstlisting}[style=cx]
-./bin/cx version
-./bin/cx diag
-./bin/cx where version diffsum-staged task optimize
+./bin/xshelf version
+./bin/xshelf diag
+./bin/xshelf where version diffsum-staged task optimize
 \end{lstlisting}
 
-If \texttt{execution\_path} is not Rust, you are on fallback and should expect reduced guarantees.
+If \texttt{execution\_path} does not report Rust, you are on fallback and should expect reduced guarantees.
 
 \section{Capture and Context (The Budget Is the Product)}
 \subsection*{Symptoms}
@@ -38,8 +38,8 @@ If \texttt{execution\_path} is not Rust, you are on fallback and should expect r
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
-./bin/cx chunk < some_big_output.txt
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/xshelf cxo git status
+./bin/xshelf chunk < some_big_output.txt
 \end{lstlisting}
 
 \section{Schemas (Determinism You Can Audit)}
@@ -47,20 +47,20 @@ CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
 \begin{itemize}
   \item Prompt requests JSON-only output.
   \item Output parses as JSON.
-  \item Output validates against \texttt{.codex/schemas/<name>.schema.json}.
+  \item Output validates against \texttt{.cx/schemas/<name>.schema.json}.
   \item Failure triggers quarantine + non-zero exit.
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-./bin/cx schema list
-./bin/cx commitjson | jq .
-./bin/cx diffsum-staged | jq .
+./bin/xshelf schema list
+./bin/xshelf commitjson | jq .
+./bin/xshelf diffsum-staged | jq .
 \end{lstlisting}
 
 \subsection*{If It Fails}
 \begin{lstlisting}[style=cx]
-./bin/cx quarantine list
-./bin/cx replay <quarantine_id>
+./bin/xshelf quarantine list
+./bin/xshelf replay <quarantine_id>
 \end{lstlisting}
 
 \section{Safety (You Are Not Your Shell History)}
@@ -72,24 +72,24 @@ CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
 \end{itemize}
 
 \begin{lstlisting}[style=cx]
-./bin/cx policy show
-./bin/cx policy check "sudo rm -rf /"
+./bin/xshelf policy show
+./bin/xshelf policy check "sudo rm -rf /"
 \end{lstlisting}
 
 \section{Tasks (Parallel-Ready, Single-Worker Today)}
 Use tasks when the objective is bigger than one bounded prompt.
 
 \begin{lstlisting}[style=cx]
-./bin/cx task add "Tighten schema errors" --role implementer
-./bin/cx task fanout "Ship release note improvements" --from staged-diff
-./bin/cx task run-all --status pending
+./bin/xshelf task add "Tighten schema errors" --role implementer
+./bin/xshelf task fanout "Ship release note improvements" --from staged-diff
+./bin/xshelf task run-all --status pending
 \end{lstlisting}
 
 \section{Telemetry and Logs (Trust, but Verify)}
 \begin{lstlisting}[style=cx]
-./bin/cx logs validate --fix=false
-./bin/cx metrics 50
-./bin/cx trace
+./bin/xshelf logs validate --fix=false
+./bin/xshelf metrics 50
+./bin/xshelf trace
 \end{lstlisting}
 
 \subsection*{Interpretation Cheatsheet}
@@ -101,8 +101,8 @@ Use tasks when the objective is bigger than one bounded prompt.
 
 \section{Optimize (Make It Cheaper, Faster, Safer)}
 \begin{lstlisting}[style=cx]
-./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .
+./bin/xshelf optimize 200
+./bin/xshelf optimize 200 --json | jq .
 \end{lstlisting}
 
 \end{document}

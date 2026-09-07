@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use crate::config::cli_app_name;
 use crate::contract_versions::ACTIONS_JSON_CONTRACT_VERSION;
 use crate::optimize_report::{
     OptimizeArgs, build_optimize_actions, optimize_report, should_fail_strict,
@@ -116,6 +117,20 @@ fn print_retry_health(sb: &Value) {
     println!("retry_attempt_histogram: {hist}");
 }
 
+fn print_timing_attribution(sb: &Value) {
+    let Some(tc) = sb.get("timing_attribution_coverage") else {
+        println!("timing_attribution_coverage: n/a");
+        return;
+    };
+    let task_rows = tc.get("task_rows").and_then(Value::as_u64).unwrap_or(0);
+    let min_rate = tc
+        .get("min_coverage_rate")
+        .and_then(Value::as_f64)
+        .map(|v| format!("{}%", (v * 100.0).round() as i64))
+        .unwrap_or_else(|| "n/a".to_string());
+    println!("timing_attribution_coverage: min={min_rate}, task_rows={task_rows}");
+}
+
 fn print_timeout_frequency(sb: &Value) {
     let Some(tf) = sb.get("timeout_frequency") else {
         println!("timeout_frequency: n/a");
@@ -196,6 +211,7 @@ fn print_scoreboard(sb: &Value) {
     }
     print_timeout_frequency(sb);
     print_retry_health(sb);
+    print_timing_attribution(sb);
     print_capture_compression(sb);
 }
 
@@ -217,7 +233,7 @@ pub fn print_optimize(args: OptimizeArgs) -> i32 {
     let report = match optimize_report(n) {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs optimize: {e}");
+            crate::cx_eprintln!("{} optimize: {e}", cli_app_name());
             return 1;
         }
     };
@@ -241,7 +257,7 @@ pub fn print_optimize(args: OptimizeArgs) -> i32 {
         };
     }
 
-    println!("== cxrs optimize (last {n} runs) ==");
+    println!("== {} optimize (last {n} runs) ==", cli_app_name());
     let sb = report
         .get("scoreboard")
         .cloned()

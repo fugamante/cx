@@ -1,0 +1,46 @@
+{
+  "phase": "phase3b",
+  "branch": "cx/tq-mlx-followon",
+  "status": "closed",
+  "baseline": "mlx_portable_go",
+  "goal": "convert the closed MLX comparative result into a XSHELF-facing capability and metric plan",
+  "steps": [
+    {
+      "id": "mlx_scope",
+      "status": "complete",
+      "goal": "freeze the evidence branch and open a clean follow-on scope"
+    },
+    {
+      "id": "mlx_metric_contract",
+      "status": "complete",
+      "goal": "define the normalized XSHELF-facing memory and runtime fields across llama.cpp and MLX"
+    },
+    {
+      "id": "mlx_capability_contract",
+      "status": "complete",
+      "goal": "define what MLX should mean at the XSHELF backend-capability layer"
+    },
+    {
+      "id": "mlx_decision_gate",
+      "status": "complete",
+      "goal": "decide whether MLX stays comparative-only or advances to a codec-bearing experiment"
+    },
+    {
+      "id": "mlx_roadmap",
+      "status": "complete",
+      "goal": "record the chosen next step in roadmap and TurboQuant docs"
+    }
+  ],
+  "decision": "mlx_comparative_only",
+  "references": [
+    "docs/turboquant/TURBOQUANT_MLX.md",
+    "docs/turboquant/TURBOQUANT_MLX_CLOSE.json",
+    "docs/turboquant/TURBOQUANT_MLX_DECIDE.json",
+    "docs/turboquant/TURBOQUANT_MLX_HARDEN.md",
+    "docs/turboquant/TURBOQUANT_MLX_PLAN.json",
+    "docs/turboquant/TURBOQUANT_METRIC.md",
+    "docs/turboquant/TURBOQUANT_CAP_MLX.md",
+    "docs/turboquant/TURBOQUANT_MLX_COMPARE.json",
+    "docs/turboquant/TURBOQUANT_PHASE3_CLOSE.json"
+  ]
+}

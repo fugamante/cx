@@ -1,4 +1,5 @@
 use crate::cmdctx::CmdCtx;
+use crate::config::cli_app_name;
 use crate::config::{DEFAULT_OPTIMIZE_WINDOW, DEFAULT_QUARANTINE_LIST, DEFAULT_RUN_WINDOW};
 use crate::error::{EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, format_error, print_usage_error};
 
@@ -93,7 +94,8 @@ fn handle_prompt(app_name: &str, args: &[String], deps: &NativeDeps) -> i32 {
 
 fn handle_cx(args: &[String], deps: &NativeDeps) -> i32 {
     if args.len() < 3 {
-        return print_usage_error("cx", "cx <command> [args...]");
+        let app_name = cli_app_name();
+        return print_usage_error("cx", &format!("{app_name} <command> [args...]"));
     }
     if (deps.is_compat_name)(&args[2]) {
         (deps.cmd_cx_compat)(&args[2..])
@@ -154,14 +156,16 @@ fn dispatch_meta_commands(
             EXIT_OK
         }
         "version" | "-V" | "--version" => {
-            (deps.print_version)();
+            (deps.print_version)(&args[2..]);
             EXIT_OK
         }
+        "contracts" => (deps.cmd_contracts)(&args[2..]),
         "schema" => (deps.cmd_schema)(&args[2..]),
         "logs" => (deps.cmd_logs)(&args[2..]),
         "telemetry" => handle_telemetry(args, deps),
         "ci" => (deps.cmd_ci)(&args[2..]),
-        "core" => (deps.cmd_core)(),
+        "core" => (deps.cmd_core)(&args[2..]),
+        "mode" => (deps.cmd_mode)(&args[2..]),
         "task" => (deps.cmd_task)(&args[2..]),
         "where" => (deps.cmd_where)(&args[2..]),
         "routes" => (deps.cmd_routes)(&args[2..]),
@@ -174,6 +178,7 @@ fn dispatch_meta_commands(
         "llm" => (deps.cmd_llm)(&args[2..]),
         "policy" => (deps.cmd_policy)(&args[2..]),
         "broker" => (deps.cmd_broker)(&args[2..]),
+        "launch" => (deps.cmd_launch)(&args[2..]),
         _ => return None,
     };
     Some(out)
@@ -264,7 +269,7 @@ fn dispatch_structured_commands(
 }
 
 pub fn handler(ctx: &CmdCtx, args: &[String], deps: &NativeDeps) -> i32 {
-    let app_name = ctx.app_name;
+    let app_name = &ctx.app_name;
     if args.len() < 2 {
         (deps.print_help)();
         return EXIT_USAGE;

@@ -1,0 +1,41 @@
+{
+  "contract_version": "turboquant-proto.v1",
+  "phase": "phase2",
+  "backend": {
+    "name": "llama.cpp",
+    "target_ref": "a1cfb64"
+  },
+  "prototype": {
+    "name": "tq_v0",
+    "scope": "v_only",
+    "read_mode": "dequant_on_read",
+    "group_size": 64,
+    "codebook_bits": 8,
+    "scale_type": "fp16",
+    "payload_type": "u8",
+    "rotation": {
+      "enabled": false,
+      "hook": "attn_inp_v_rot"
+    }
+  },
+  "touchpoints": {
+    "kv_ctor": "src/llama-kv-cache.cpp:79",
+    "v_write": "src/llama-kv-cache.cpp:1219",
+    "v_read": "src/llama-kv-cache.cpp:1152",
+    "v_idxs_build": "src/llama-kv-cache.cpp:1285",
+    "v_idxs_set": "src/llama-kv-cache.cpp:1358",
+    "v_rot_build": "src/llama-kv-cache.cpp:1322",
+    "v_rot_set": "src/llama-kv-cache.cpp:1669",
+    "graph_store_read": "src/llama-graph.cpp:2106",
+    "model_wiring": "src/llama-model.cpp:8385",
+    "cli_cache_type_v": "common/arg.cpp:2010"
+  },
+  "fallback_rules": [
+    "unsupported_device",
+    "unsupported_v_trans_layout",
+    "unsupported_tensor_type",
+    "group_size_mismatch",
+    "allocation_failure",
+    "metadata_corruption"
+  ]
+}

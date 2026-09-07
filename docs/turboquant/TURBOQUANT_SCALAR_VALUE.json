@@ -1,0 +1,27 @@
+{
+  "contract_version": "turboquant-scalar-value.v1",
+  "ctx": 8192,
+  "snapshot_replay": true,
+  "projection": {
+    "passes": 4,
+    "total": 4,
+    "mean_baseline_decode_tps": 32.4,
+    "mean_turboquant_decode_tps": 2.73,
+    "mean_baseline_wall_ms": 7642.5,
+    "mean_turboquant_wall_ms": 17022.5,
+    "mean_raw_ratio": 26.56,
+    "mean_bytes_saved_pct": 73.44
+  },
+  "grouped_scalar": {
+    "passes": 4,
+    "total": 4,
+    "mean_baseline_decode_tps": 35.65,
+    "mean_turboquant_decode_tps": 2.73,
+    "mean_baseline_wall_ms": 7647.5,
+    "mean_turboquant_wall_ms": 17020,
+    "mean_raw_ratio": 26.56,
+    "mean_bytes_saved_pct": 73.44
+  },
+  "decision": "scalar_not_worth_it_yet",
+  "reason": "Both viable scalar modes cut V-cache bytes to 26.56% of raw on the validated host path, but decode throughput collapses from baseline to ~2.7 t/s and wall time roughly triples. No current scalar mode justifies production-complexity follow-through."
+}

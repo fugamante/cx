@@ -1,0 +1,63 @@
+{
+  "phase": "phase7",
+  "status": "milestone_complete",
+  "title": "budget_aware_orchestration",
+  "goal": "optimize action selection and reasoning cost inside XSHELF without allowing quality drift",
+  "constraints": [
+    "preserve schema determinism",
+    "preserve policy gates and quarantine behavior",
+    "prefer cheapest sufficient path, not cheapest path",
+    "keep escalation logic explicit and typed"
+  ],
+  "slices": [
+    {
+      "id": "p7_contract",
+      "status": "done",
+      "goal": "add typed cost and quality metadata to next-action and action surfaces"
+    },
+    {
+      "id": "p7_gate",
+      "status": "done",
+      "goal": "introduce explicit reasoning-gate policy that chooses between structured action, cheap diagnosis, and deep reasoning"
+    },
+    {
+      "id": "p7_context",
+      "status": "done",
+      "goal": "persist and surface compact recent execution context so unchanged state does not trigger re-derivation"
+    },
+    {
+      "id": "p7_metrics",
+      "status": "done",
+      "goal": "add measurable efficiency and reuse metrics for budget-aware orchestration"
+    },
+    {
+      "id": "p7_bias",
+      "status": "done",
+      "goal": "make metric-driven recommendation bias explicit and typed on execution surfaces"
+    },
+    {
+      "id": "p7_action_order",
+      "status": "done",
+      "goal": "apply severity-preserving, cost-aware ordering to higher-level action surfaces"
+    }
+  ],
+  "initial_contract_fields": [
+    "next_action.cost_class",
+    "next_action.reasoning_required",
+    "next_action.quality_risk",
+    "next_action.escalates_if"
+  ],
+  "references": [
+    "docs/orchestration/PHASE_VI_EXECUTION_GUIDANCE.md",
+    "docs/project/ROADMAP.md",
+    "docs/turboquant/TURBOQUANT_SPIKE.md"
+  ],
+  "milestone_summary": [
+    "typed cost and quality metadata is present on next_action surfaces",
+    "reasoning gate is explicit on execution and preflight paths",
+    "recent context is persisted and reused instead of re-derived",
+    "phase7 metrics are exposed on machine-facing and text diagnostics",
+    "metric-driven bias is visible and explainable on task_execution",
+    "action surfaces now preserve severity while preferring lower-cost sufficient paths"
+  ]
+}

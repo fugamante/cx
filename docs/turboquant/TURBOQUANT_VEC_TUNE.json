@@ -1,0 +1,34 @@
+{
+  "contract_version": "turboquant-vec-tune.v1",
+  "variants": [
+    {
+      "label": "bits6_bypass256",
+      "bits": 6,
+      "passes": 4,
+      "decode_tps_mean": 17.68,
+      "wall_ms_mean": 12655.0,
+      "raw_ratio_mean": 3.12,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    },
+    {
+      "label": "bits8_ceiling",
+      "bits": 8,
+      "passes": 4,
+      "decode_tps_mean": 14.0,
+      "wall_ms_mean": 31415.0,
+      "raw_ratio_mean": 6.23,
+      "details": {
+        "smoke": true,
+        "context_fill": true,
+        "retrieval": true,
+        "instruct": true
+      }
+    }
+  ],
+  "decision": "prefer_bits6_bypass256"
+}

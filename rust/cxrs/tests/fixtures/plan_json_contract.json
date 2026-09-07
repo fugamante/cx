@@ -1,0 +1,27 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "status_filter",
+    "requested_mode",
+    "strict_plan",
+    "strict_plan_ok",
+    "strict_plan_reason",
+    "can_execute",
+    "wave_count",
+    "parallel_task_count",
+    "sequential_task_count",
+    "blocked_count",
+    "selected",
+    "waves",
+    "blocked"
+  ],
+  "wave_keys": [
+    "index",
+    "mode",
+    "task_ids"
+  ],
+  "blocked_keys": [
+    "id",
+    "reason"
+  ]
+}

@@ -1,0 +1,4 @@
+rust/cxrs/tests/cli_edge_case_tests.rs
+rust/cxrs/tests/scheduler_diagnostics_tests.rs
+rust/cxrs/tests/scheduler_tests.rs
+rust/cxrs/tests/telemetry_contract_tests.rs

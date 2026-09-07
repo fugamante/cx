@@ -1,7 +1,11 @@
+use crate::config::cli_app_name;
 use crate::contract_versions::TELEMETRY_JSON_CONTRACT_VERSION;
+use crate::doctor::{exec_diag_value, latest_run_all_sum, latest_wave_sum, phase7_metrics_value};
+use crate::json_mode::resolve_json_mode;
 use crate::log_contract::REQUIRED_STRICT_FIELDS;
 use crate::logs::load_values;
 use crate::paths::resolve_log_file;
+use crate::provider_adapter::{adapter_policy_value, selected_tq_caps};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -16,12 +20,16 @@ struct StatsArgs {
 
 fn parse_stats_args(app_name: &str, args: &[String]) -> Result<StatsArgs, i32> {
     let mut n = 200usize;
-    let mut json_out = false;
+    let mut json_out: Option<bool> = None;
     let mut strict = false;
     let mut severity = false;
     for a in args.iter().skip(1) {
         if a == "--json" {
-            json_out = true;
+            json_out = Some(true);
+            continue;
+        }
+        if a == "--text" {
+            json_out = Some(false);
             continue;
         }
         if a == "--strict" {
@@ -36,7 +44,7 @@ fn parse_stats_args(app_name: &str, args: &[String]) -> Result<StatsArgs, i32> {
             Ok(v) if v > 0 => n = v,
             _ => {
                 crate::cx_eprintln!(
-                    "Usage: {app_name} logs stats [N] [--json] [--strict] [--severity]"
+                    "Usage: {app_name} logs stats [N] [--json|--text] [--strict] [--severity]"
                 );
                 return Err(2);
             }
@@ -44,7 +52,7 @@ fn parse_stats_args(app_name: &str, args: &[String]) -> Result<StatsArgs, i32> {
     }
     Ok(StatsArgs {
         n,
-        json_out,
+        json_out: resolve_json_mode(json_out, false),
         strict,
         severity,
     })
@@ -107,9 +115,21 @@ struct StatsComputed {
     missing_in_second: Vec<String>,
     severity: &'static str,
     normalization: NormalizationStats,
+    capture_prompt: CapturePromptStats,
     retry: RetryStats,
     critical: CriticalStats,
+    timing: TimingStats,
     http_mode_stats: Vec<HttpModeStat>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct CapturePromptStats {
+    rows_with_explicit_profile: usize,
+    shadow_narrow_configured_runs: usize,
+    shadow_narrow_applied_runs: usize,
+    shadow_narrow_fallback_runs: usize,
+    applied_reducer_kinds: BTreeMap<String, usize>,
+    fallback_reasons: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -131,6 +151,19 @@ struct CriticalStats {
     halted_rows: usize,
     critical_errors_total: u64,
     runs_with_critical_errors: usize,
+}
+
+#[derive(Debug, Default, Clone)]
+struct TimingStats {
+    rows_with_worker_id: usize,
+    rows_with_queue_ms: usize,
+    rows_with_wave_index: usize,
+    rows_with_wave_mode: usize,
+    rows_with_wave_size: usize,
+    rows_with_queue_started_at: usize,
+    rows_with_task_started_at: usize,
+    rows_with_task_finished_at: usize,
+    task_rows: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -189,8 +222,10 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second.len(),
     );
     let normalization = compute_normalization_stats(rows);
+    let capture_prompt = compute_prompt_stats(rows);
     let retry = compute_retry_stats(rows);
     let critical = compute_critical_stats(rows);
+    let timing = compute_timing_stats(rows);
     let http_mode_stats = compute_http_mode_stats(rows);
     StatsComputed {
         lines,
@@ -199,8 +234,10 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         missing_in_second,
         severity,
         normalization,
+        capture_prompt,
         retry,
         critical,
+        timing,
         http_mode_stats,
     }
 }
@@ -234,6 +271,123 @@ fn compute_normalization_stats(rows: &[Value]) -> NormalizationStats {
         legacy_rows,
         migrated_legacy_rows,
     }
+}
+
+fn compute_prompt_stats(rows: &[Value]) -> CapturePromptStats {
+    let mut out = CapturePromptStats::default();
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        let profile = obj
+            .get("capture_prompt_profile")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(profile) = profile else {
+            continue;
+        };
+        out.rows_with_explicit_profile += 1;
+        if profile != "shadow_narrow" {
+            continue;
+        }
+        out.shadow_narrow_configured_runs += 1;
+        let applied = obj
+            .get("capture_prompt_profile_applied")
+            .and_then(Value::as_bool)
+            == Some(true);
+        if applied {
+            out.shadow_narrow_applied_runs += 1;
+            if let Some(kind) = obj
+                .get("capture_prompt_reducer_kind")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                *out.applied_reducer_kinds
+                    .entry(kind.to_string())
+                    .or_insert(0) += 1;
+            }
+            continue;
+        }
+        out.shadow_narrow_fallback_runs += 1;
+        if let Some(reason) = obj
+            .get("capture_prompt_fallback_reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            *out.fallback_reasons.entry(reason.to_string()).or_insert(0) += 1;
+        }
+    }
+    out
+}
+
+fn compute_timing_stats(rows: &[Value]) -> TimingStats {
+    let mut out = TimingStats::default();
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        let has_task = obj
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty());
+        if has_task {
+            out.task_rows += 1;
+        }
+        if obj
+            .get("worker_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        {
+            out.rows_with_worker_id += 1;
+        }
+        if obj.get("queue_ms").and_then(Value::as_u64).is_some() {
+            out.rows_with_queue_ms += 1;
+        }
+        if obj.get("wave_index").and_then(Value::as_u64).is_some() {
+            out.rows_with_wave_index += 1;
+        }
+        if obj
+            .get("wave_mode")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        {
+            out.rows_with_wave_mode += 1;
+        }
+        if obj.get("wave_size").and_then(Value::as_u64).is_some() {
+            out.rows_with_wave_size += 1;
+        }
+        if obj
+            .get("queue_started_at")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        {
+            out.rows_with_queue_started_at += 1;
+        }
+        if obj
+            .get("task_started_at")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        {
+            out.rows_with_task_started_at += 1;
+        }
+        if obj
+            .get("task_finished_at")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty())
+        {
+            out.rows_with_task_finished_at += 1;
+        }
+    }
+    out
 }
 
 fn compute_http_mode_stats(rows: &[Value]) -> Vec<HttpModeStat> {
@@ -434,6 +588,47 @@ fn print_stats_human(
     if severity_only {
         return;
     }
+    println!("capture_prompt_telemetry:");
+    println!(
+        "- rows_with_explicit_profile: {}",
+        stats.capture_prompt.rows_with_explicit_profile
+    );
+    println!(
+        "- shadow_narrow_configured_runs: {}",
+        stats.capture_prompt.shadow_narrow_configured_runs
+    );
+    println!(
+        "- shadow_narrow_applied_runs: {}",
+        stats.capture_prompt.shadow_narrow_applied_runs
+    );
+    println!(
+        "- shadow_narrow_fallback_runs: {}",
+        stats.capture_prompt.shadow_narrow_fallback_runs
+    );
+    let applied_kinds = if stats.capture_prompt.applied_reducer_kinds.is_empty() {
+        "<none>".to_string()
+    } else {
+        stats
+            .capture_prompt
+            .applied_reducer_kinds
+            .iter()
+            .map(|(kind, count)| format!("{kind}:{count}"))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    println!("- applied_reducer_kinds: {}", applied_kinds);
+    let fallback_reasons = if stats.capture_prompt.fallback_reasons.is_empty() {
+        "<none>".to_string()
+    } else {
+        stats
+            .capture_prompt
+            .fallback_reasons
+            .iter()
+            .map(|(reason, count)| format!("{reason}:{count}"))
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+    println!("- fallback_reasons: {}", fallback_reasons);
     println!("retry_telemetry:");
     println!(
         "- rows_with_retry_metadata: {}",
@@ -480,6 +675,37 @@ fn print_stats_human(
     println!(
         "- runs_with_critical_errors: {}",
         stats.critical.runs_with_critical_errors
+    );
+    println!("timing_telemetry:");
+    println!("- task_rows: {}", stats.timing.task_rows);
+    println!(
+        "- rows_with_worker_id: {}",
+        stats.timing.rows_with_worker_id
+    );
+    println!("- rows_with_queue_ms: {}", stats.timing.rows_with_queue_ms);
+    println!(
+        "- rows_with_wave_index: {}",
+        stats.timing.rows_with_wave_index
+    );
+    println!(
+        "- rows_with_wave_mode: {}",
+        stats.timing.rows_with_wave_mode
+    );
+    println!(
+        "- rows_with_wave_size: {}",
+        stats.timing.rows_with_wave_size
+    );
+    println!(
+        "- rows_with_queue_started_at: {}",
+        stats.timing.rows_with_queue_started_at
+    );
+    println!(
+        "- rows_with_task_started_at: {}",
+        stats.timing.rows_with_task_started_at
+    );
+    println!(
+        "- rows_with_task_finished_at: {}",
+        stats.timing.rows_with_task_finished_at
     );
     println!("http_mode_stats:");
     if stats.http_mode_stats.is_empty() {
@@ -540,6 +766,12 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
             })
         })
         .collect();
+    let experiment_caps = selected_tq_caps();
+    let latest_run = latest_run_all_sum();
+    let latest_wave = latest_wave_sum();
+    let task_execution = exec_diag_value(latest_run.as_ref(), latest_wave.as_ref());
+    let phase7_metrics = phase7_metrics_value(20);
+    let adapter_rollout_policy = adapter_policy_value();
     let payload = json!({
         "contract_version": TELEMETRY_JSON_CONTRACT_VERSION,
         "log_file": log_file.display().to_string(),
@@ -557,10 +789,38 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
                 "none"
             }
         },
+        "backend_capabilities": {
+            "turboquant": {
+                "cx_runtime_support": experiment_caps.turboquant_runtime_support,
+                "selected_backend_role": experiment_caps.turboquant_backend_role,
+                "memory_metric_kind": experiment_caps.turboquant_metric_kind,
+            }
+        },
+        "adapter_rollout_policy": adapter_rollout_policy,
+        "task_execution": task_execution,
+        "phase7_metrics": phase7_metrics,
         "fields": fields,
         "contract_drift": {
             "new_keys_second_half": stats.new_in_second,
             "missing_keys_second_half": stats.missing_in_second
+        },
+        "capture_prompt_telemetry": {
+            "rows_with_explicit_profile": stats.capture_prompt.rows_with_explicit_profile,
+            "shadow_narrow_configured_runs": stats.capture_prompt.shadow_narrow_configured_runs,
+            "shadow_narrow_applied_runs": stats.capture_prompt.shadow_narrow_applied_runs,
+            "shadow_narrow_fallback_runs": stats.capture_prompt.shadow_narrow_fallback_runs,
+            "applied_reducer_kinds": stats.capture_prompt.applied_reducer_kinds.iter().map(|(reducer_kind, runs)| {
+                json!({
+                    "reducer_kind": reducer_kind,
+                    "runs": runs
+                })
+            }).collect::<Vec<Value>>(),
+            "fallback_reasons": stats.capture_prompt.fallback_reasons.iter().map(|(reason, runs)| {
+                json!({
+                    "reason": reason,
+                    "runs": runs
+                })
+            }).collect::<Vec<Value>>()
         },
         "retry_telemetry": {
             "rows_with_retry_metadata": stats.retry.rows_with_retry_metadata,
@@ -578,6 +838,17 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
             "halted_rows": stats.critical.halted_rows,
             "critical_errors_total": stats.critical.critical_errors_total,
             "runs_with_critical_errors": stats.critical.runs_with_critical_errors
+        },
+        "timing_telemetry": {
+            "task_rows": stats.timing.task_rows,
+            "rows_with_worker_id": stats.timing.rows_with_worker_id,
+            "rows_with_queue_ms": stats.timing.rows_with_queue_ms,
+            "rows_with_wave_index": stats.timing.rows_with_wave_index,
+            "rows_with_wave_mode": stats.timing.rows_with_wave_mode,
+            "rows_with_wave_size": stats.timing.rows_with_wave_size,
+            "rows_with_queue_started_at": stats.timing.rows_with_queue_started_at,
+            "rows_with_task_started_at": stats.timing.rows_with_task_started_at,
+            "rows_with_task_finished_at": stats.timing.rows_with_task_finished_at
         },
         "http_mode_stats": stats.http_mode_stats.iter().map(|m| {
             let success_rate = if m.runs == 0 {
@@ -603,7 +874,7 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
             0
         }
         Err(e) => {
-            crate::cx_eprintln!("cxrs logs stats: failed to render json: {e}");
+            crate::cx_eprintln!("{} logs stats: failed to render json: {e}", cli_app_name());
             1
         }
     }
@@ -645,4 +916,31 @@ pub fn handle_stats(app_name: &str, args: &[String]) -> i32 {
         return 1;
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalization_mixed_rows() {
+        let mut modern = serde_json::Map::new();
+        for field in REQUIRED_STRICT_FIELDS {
+            modern.insert(field.to_string(), Value::Null);
+        }
+        modern.insert("execution_mode".to_string(), json!("lean"));
+        let mut migrated = modern.clone();
+        migrated.insert("execution_mode".to_string(), json!("legacy_migrated"));
+        let rows = vec![
+            json!(modern),
+            json!(migrated),
+            json!({"command": "cx"}),
+            Value::Null,
+        ];
+        let stats = compute_stats(&rows);
+        assert_eq!(stats.normalization.modern_rows, 2);
+        assert_eq!(stats.normalization.legacy_rows, 1);
+        assert_eq!(stats.normalization.migrated_legacy_rows, 1);
+        assert_eq!(stats.capture_prompt.rows_with_explicit_profile, 0);
+    }
 }

@@ -1,0 +1,30 @@
+{
+  "contract_version": "turboquant-scalar-compare.v1",
+  "ctx": 8192,
+  "snapshot_replay": true,
+  "winner": "projection",
+  "reason": "projection and grouped scalar both pass correctness gates, but projection has materially better average decode throughput; residual scalar fails correctness gates",
+  "modes": {
+    "projection": {
+      "passes": 4,
+      "total": 4,
+      "mean_decode_tps": 16.05,
+      "mean_prompt_tps": 344.88,
+      "mean_wall_ms": 7757.5
+    },
+    "grouped_scalar": {
+      "passes": 4,
+      "total": 4,
+      "mean_decode_tps": 2.55,
+      "mean_prompt_tps": 218.72,
+      "mean_wall_ms": 14087.5
+    },
+    "residual_scalar": {
+      "passes": 1,
+      "total": 4,
+      "mean_decode_tps": 5.15,
+      "mean_prompt_tps": 191.1,
+      "mean_wall_ms": 15350
+    }
+  }
+}

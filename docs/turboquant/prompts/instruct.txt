@@ -1,0 +1,134 @@
+Follow the output contract exactly.
+
+Contract:
+- Output JSON only.
+- Do not use markdown fences.
+- Do not add any text before or after the JSON object.
+- Keys must be in this order: status, focus, next_step.
+- status must be "ready".
+- focus must be "turboquant-baseline".
+- next_step must be "phase2-v-cache".
+
+Reference context.
+Archive line 001: neutral project ledger entry for baseline context expansion.
+Archive line 002: neutral project ledger entry for baseline context expansion.
+Archive line 003: neutral project ledger entry for baseline context expansion.
+Archive line 004: neutral project ledger entry for baseline context expansion.
+Archive line 005: neutral project ledger entry for baseline context expansion.
+Archive line 006: neutral project ledger entry for baseline context expansion.
+Archive line 007: neutral project ledger entry for baseline context expansion.
+Archive line 008: neutral project ledger entry for baseline context expansion.
+Archive line 009: neutral project ledger entry for baseline context expansion.
+Archive line 010: neutral project ledger entry for baseline context expansion.
+Archive line 011: neutral project ledger entry for baseline context expansion.
+Archive line 012: neutral project ledger entry for baseline context expansion.
+Archive line 013: neutral project ledger entry for baseline context expansion.
+Archive line 014: neutral project ledger entry for baseline context expansion.
+Archive line 015: neutral project ledger entry for baseline context expansion.
+Archive line 016: neutral project ledger entry for baseline context expansion.
+Archive line 017: neutral project ledger entry for baseline context expansion.
+Archive line 018: neutral project ledger entry for baseline context expansion.
+Archive line 019: neutral project ledger entry for baseline context expansion.
+Archive line 020: neutral project ledger entry for baseline context expansion.
+Archive line 021: neutral project ledger entry for baseline context expansion.
+Archive line 022: neutral project ledger entry for baseline context expansion.
+Archive line 023: neutral project ledger entry for baseline context expansion.
+Archive line 024: neutral project ledger entry for baseline context expansion.
+Archive line 025: neutral project ledger entry for baseline context expansion.
+Archive line 026: neutral project ledger entry for baseline context expansion.
+Archive line 027: neutral project ledger entry for baseline context expansion.
+Archive line 028: neutral project ledger entry for baseline context expansion.
+Archive line 029: neutral project ledger entry for baseline context expansion.
+Archive line 030: neutral project ledger entry for baseline context expansion.
+Archive line 031: neutral project ledger entry for baseline context expansion.
+Archive line 032: neutral project ledger entry for baseline context expansion.
+Archive line 033: neutral project ledger entry for baseline context expansion.
+Archive line 034: neutral project ledger entry for baseline context expansion.
+Archive line 035: neutral project ledger entry for baseline context expansion.
+Archive line 036: neutral project ledger entry for baseline context expansion.
+Archive line 037: neutral project ledger entry for baseline context expansion.
+Archive line 038: neutral project ledger entry for baseline context expansion.
+Archive line 039: neutral project ledger entry for baseline context expansion.
+Archive line 040: neutral project ledger entry for baseline context expansion.
+Archive line 041: neutral project ledger entry for baseline context expansion.
+Archive line 042: neutral project ledger entry for baseline context expansion.
+Archive line 043: neutral project ledger entry for baseline context expansion.
+Archive line 044: neutral project ledger entry for baseline context expansion.
+Archive line 045: neutral project ledger entry for baseline context expansion.
+Archive line 046: neutral project ledger entry for baseline context expansion.
+Archive line 047: neutral project ledger entry for baseline context expansion.
+Archive line 048: neutral project ledger entry for baseline context expansion.
+Archive line 049: neutral project ledger entry for baseline context expansion.
+Archive line 050: neutral project ledger entry for baseline context expansion.
+Archive line 051: neutral project ledger entry for baseline context expansion.
+Archive line 052: neutral project ledger entry for baseline context expansion.
+Archive line 053: neutral project ledger entry for baseline context expansion.
+Archive line 054: neutral project ledger entry for baseline context expansion.
+Archive line 055: neutral project ledger entry for baseline context expansion.
+Archive line 056: neutral project ledger entry for baseline context expansion.
+Archive line 057: neutral project ledger entry for baseline context expansion.
+Archive line 058: neutral project ledger entry for baseline context expansion.
+Archive line 059: neutral project ledger entry for baseline context expansion.
+Archive line 060: neutral project ledger entry for baseline context expansion.
+Archive line 061: neutral project ledger entry for baseline context expansion.
+Archive line 062: neutral project ledger entry for baseline context expansion.
+Archive line 063: neutral project ledger entry for baseline context expansion.
+Archive line 064: neutral project ledger entry for baseline context expansion.
+Archive line 065: neutral project ledger entry for baseline context expansion.
+Archive line 066: neutral project ledger entry for baseline context expansion.
+Archive line 067: neutral project ledger entry for baseline context expansion.
+Archive line 068: neutral project ledger entry for baseline context expansion.
+Archive line 069: neutral project ledger entry for baseline context expansion.
+Archive line 070: neutral project ledger entry for baseline context expansion.
+Archive line 071: neutral project ledger entry for baseline context expansion.
+Archive line 072: neutral project ledger entry for baseline context expansion.
+Archive line 073: neutral project ledger entry for baseline context expansion.
+Archive line 074: neutral project ledger entry for baseline context expansion.
+Archive line 075: neutral project ledger entry for baseline context expansion.
+Archive line 076: neutral project ledger entry for baseline context expansion.
+Archive line 077: neutral project ledger entry for baseline context expansion.
+Archive line 078: neutral project ledger entry for baseline context expansion.
+Archive line 079: neutral project ledger entry for baseline context expansion.
+Archive line 080: neutral project ledger entry for baseline context expansion.
+Archive line 081: neutral project ledger entry for baseline context expansion.
+Archive line 082: neutral project ledger entry for baseline context expansion.
+Archive line 083: neutral project ledger entry for baseline context expansion.
+Archive line 084: neutral project ledger entry for baseline context expansion.
+Archive line 085: neutral project ledger entry for baseline context expansion.
+Archive line 086: neutral project ledger entry for baseline context expansion.
+Archive line 087: neutral project ledger entry for baseline context expansion.
+Archive line 088: neutral project ledger entry for baseline context expansion.
+Archive line 089: neutral project ledger entry for baseline context expansion.
+Archive line 090: neutral project ledger entry for baseline context expansion.
+Archive line 091: neutral project ledger entry for baseline context expansion.
+Archive line 092: neutral project ledger entry for baseline context expansion.
+Archive line 093: neutral project ledger entry for baseline context expansion.
+Archive line 094: neutral project ledger entry for baseline context expansion.
+Archive line 095: neutral project ledger entry for baseline context expansion.
+Archive line 096: neutral project ledger entry for baseline context expansion.
+Archive line 097: neutral project ledger entry for baseline context expansion.
+Archive line 098: neutral project ledger entry for baseline context expansion.
+Archive line 099: neutral project ledger entry for baseline context expansion.
+Archive line 100: neutral project ledger entry for baseline context expansion.
+Archive line 101: neutral project ledger entry for baseline context expansion.
+Archive line 102: neutral project ledger entry for baseline context expansion.
+Archive line 103: neutral project ledger entry for baseline context expansion.
+Archive line 104: neutral project ledger entry for baseline context expansion.
+Archive line 105: neutral project ledger entry for baseline context expansion.
+Archive line 106: neutral project ledger entry for baseline context expansion.
+Archive line 107: neutral project ledger entry for baseline context expansion.
+Archive line 108: neutral project ledger entry for baseline context expansion.
+Archive line 109: neutral project ledger entry for baseline context expansion.
+Archive line 110: neutral project ledger entry for baseline context expansion.
+Archive line 111: neutral project ledger entry for baseline context expansion.
+Archive line 112: neutral project ledger entry for baseline context expansion.
+Archive line 113: neutral project ledger entry for baseline context expansion.
+Archive line 114: neutral project ledger entry for baseline context expansion.
+Archive line 115: neutral project ledger entry for baseline context expansion.
+Archive line 116: neutral project ledger entry for baseline context expansion.
+Archive line 117: neutral project ledger entry for baseline context expansion.
+Archive line 118: neutral project ledger entry for baseline context expansion.
+Archive line 119: neutral project ledger entry for baseline context expansion.
+Archive line 120: neutral project ledger entry for baseline context expansion.
+
+Return the final JSON object now.

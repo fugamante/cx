@@ -7,8 +7,8 @@ use crate::llm::effective_input_tokens;
 use crate::logs::{append_jsonl, validate_execution_log_row};
 use crate::paths::{repo_root, resolve_log_file, resolve_schema_fail_log_file};
 use crate::provider_adapter::{
-    selected_adapter_name, selected_http_parser_mode_opt, selected_http_provider_format_opt,
-    selected_provider_status, selected_provider_transport,
+    http_profile_opt, selected_adapter_name, selected_http_parser_mode_opt,
+    selected_http_provider_format_opt, selected_provider_status, selected_provider_transport,
 };
 use crate::quarantine::quarantine_store_with_attempts;
 use crate::runtime::{llm_backend, llm_model};
@@ -49,6 +49,23 @@ pub struct TaskRunAllSummaryLogInput<'a> {
     pub retryable_failures: u64,
     pub non_retryable_failures: u64,
     pub critical_errors: u64,
+    pub halted_remaining: u64,
+    pub backend_fallback_rows: u64,
+    pub backend_fallbacks: Option<String>,
+    pub wave_pressure_kind: Option<&'a str>,
+    pub wave_pressure_suggested_mode: Option<&'a str>,
+    pub latest_wave_index: Option<u64>,
+    pub max_queue_wave_index: Option<u64>,
+    pub max_queue_wave_ms: Option<u64>,
+    pub worker_count: Option<u64>,
+    pub workers: Option<&'a str>,
+    pub max_retry_attempt: Option<u32>,
+    pub first_queue_started_at: Option<&'a str>,
+    pub first_task_started_at: Option<&'a str>,
+    pub last_task_finished_at: Option<&'a str>,
+    pub invocation_command: Option<&'a str>,
+    pub failure_pattern: Option<&'a str>,
+    pub recommended_resume_point: Option<&'a str>,
     pub duration_ms: u64,
 }
 
@@ -91,6 +108,15 @@ fn base_execution_log(
     let backend = llm_backend();
     let model = llm_model();
     let adapter_type = selected_adapter_name().to_string();
+    let execution_lane = env::var("CX_EXECUTION_LANE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| Some("host".to_string()));
+    let execution_lane_detail = env::var("CX_EXECUTION_LANE_DETAIL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let model_opt = if model.is_empty() {
         None
     } else {
@@ -105,7 +131,7 @@ fn base_execution_log(
             "ollama_selected".to_string()
         }
     } else {
-        "codex_selected".to_string()
+        "primary_selected".to_string()
     };
     let replica_index = env::var("CX_TASK_REPLICA_INDEX")
         .ok()
@@ -131,6 +157,28 @@ fn base_execution_log(
     let queue_ms = env::var("CX_TASK_QUEUE_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
+    let wave_index = env::var("CX_TASK_WAVE_INDEX")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    let wave_mode = env::var("CX_TASK_WAVE_MODE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let wave_size = env::var("CX_TASK_WAVE_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    let queue_started_at = env::var("CX_TASK_QUEUE_STARTED_AT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let task_started_at = env::var("CX_TASK_STARTED_AT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let task_finished_at = env::var("CX_TASK_FINISHED_AT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let retry_attempt = env::var("CX_TASK_RETRY_ATTEMPT")
         .ok()
         .and_then(|v| v.parse::<u32>().ok());
@@ -160,6 +208,9 @@ fn base_execution_log(
         adapter_type: Some(adapter_type),
         provider_transport: Some(selected_provider_transport().to_string()),
         provider_status: selected_provider_status().map(str::to_string),
+        execution_lane,
+        execution_lane_detail,
+        http_request_profile: http_profile_opt().map(str::to_string),
         http_provider_format: selected_http_provider_format_opt().map(str::to_string),
         http_parser_mode: selected_http_parser_mode_opt().map(str::to_string),
         backend_selected: Some(backend_selected),
@@ -173,6 +224,12 @@ fn base_execution_log(
         converge_winner,
         converge_votes,
         queue_ms,
+        wave_index,
+        wave_mode,
+        wave_size,
+        queue_started_at,
+        task_started_at,
+        task_finished_at,
         retry_attempt,
         retry_max,
         retry_reason,
@@ -203,7 +260,7 @@ fn finalize_and_append_run(run_log: &std::path::Path, row: ExecutionLog) -> Resu
     append_jsonl(run_log, &value)
 }
 
-pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
+pub fn log_primary_run(input: RunLogInput<'_>) -> Result<(), String> {
     let run_log = resolve_log_file().ok_or_else(|| "unable to resolve run log file".to_string())?;
     let (cwd, root, scope) = cwd_scope_root();
 
@@ -245,6 +302,10 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.prompt_len_raw = Some(raw_prompt.chars().count() as u64);
     row.prompt_len_filtered = Some(filtered_prompt.chars().count() as u64);
     row.prompt_filter_applied = Some(raw_prompt != filtered_prompt);
+    row.capture_prompt_profile = cap.capture_prompt_profile.clone();
+    row.capture_prompt_profile_applied = cap.capture_prompt_profile_applied;
+    row.capture_prompt_reducer_kind = cap.capture_prompt_reducer_kind.clone();
+    row.capture_prompt_fallback_reason = cap.capture_prompt_fallback_reason.clone();
     row.schema_prompt_sha256 = input.schema_prompt.map(sha256_hex);
     row.schema_sha256 = input.schema_raw.map(sha256_hex);
     row.schema_attempt = input.schema_attempt;
@@ -254,6 +315,9 @@ pub fn log_codex_run(input: RunLogInput<'_>) -> Result<(), String> {
     row.prompt_preview = Some(prompt_preview(filtered_prompt, 180));
     row.policy_blocked = input.policy_blocked;
     row.policy_reason = input.policy_reason.map(|s| s.to_string());
+    if row.task_id.is_some() && row.task_finished_at.is_none() {
+        row.task_finished_at = Some(utc_now_iso());
+    }
 
     finalize_and_append_run(&run_log, row)
 }
@@ -275,6 +339,24 @@ pub fn log_task_run_all_summary(input: TaskRunAllSummaryLogInput<'_>) -> Result<
     row.run_all_retryable_failures = Some(input.retryable_failures);
     row.run_all_non_retryable_failures = Some(input.non_retryable_failures);
     row.run_all_critical_errors = Some(input.critical_errors);
+    row.run_all_halted_remaining = Some(input.halted_remaining);
+    row.run_all_backend_fallback_rows = Some(input.backend_fallback_rows);
+    row.run_all_backend_fallbacks = input.backend_fallbacks.map(|s| s.to_string());
+    row.run_all_wave_pressure_kind = input.wave_pressure_kind.map(|s| s.to_string());
+    row.run_all_wave_pressure_suggested_mode =
+        input.wave_pressure_suggested_mode.map(|s| s.to_string());
+    row.run_all_latest_wave_index = input.latest_wave_index;
+    row.run_all_max_queue_wave_index = input.max_queue_wave_index;
+    row.run_all_max_queue_wave_ms = input.max_queue_wave_ms;
+    row.run_all_worker_count = input.worker_count;
+    row.run_all_workers = input.workers.map(|s| s.to_string());
+    row.run_all_max_retry_attempt = input.max_retry_attempt;
+    row.run_all_first_queue_started_at = input.first_queue_started_at.map(|s| s.to_string());
+    row.run_all_first_task_started_at = input.first_task_started_at.map(|s| s.to_string());
+    row.run_all_last_task_finished_at = input.last_task_finished_at.map(|s| s.to_string());
+    row.run_all_invocation_command = input.invocation_command.map(|s| s.to_string());
+    row.run_all_failure_pattern = input.failure_pattern.map(|s| s.to_string());
+    row.run_all_recommended_resume_point = input.recommended_resume_point.map(|s| s.to_string());
     finalize_and_append_run(&run_log, row)
 }
 

@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \input{docs/manuals/03_src/latex/_preamble.tex}
 
-\title{CX Manual (Operator Playbook)}
+\title{XSHELF Manual (Operator Playbook)}
 \author{}
 \date{Last updated: 2026-02-22}
 
@@ -14,76 +14,76 @@ This playbook is a set of reproducible procedures. It is intentionally low-prose
 
 \section{P0: Confirm Runtime Path}
 \begin{lstlisting}[style=cx]
-./bin/cx version
-./bin/cx where version
+./bin/xshelf version
+./bin/xshelf where version
 \end{lstlisting}
 
 \section{P1: Confirm Schemas Exist}
 \begin{lstlisting}[style=cx]
-./bin/cx schema list
-ls .codex/schemas
+./bin/xshelf schema list
+ls .cx/schemas
 \end{lstlisting}
 
 \section{P2: Validate Structured Output (Schema Commands)}
 \subsection*{Commit JSON}
 \begin{lstlisting}[style=cx]
-./bin/cx commitjson | jq .
+./bin/xshelf commitjson | jq .
 \end{lstlisting}
 
 \subsection*{Diff Summary}
 \begin{lstlisting}[style=cx]
-./bin/cx diffsum-staged | jq .
+./bin/xshelf diffsum-staged | jq .
 \end{lstlisting}
 
 \subsection*{Next Commands}
 \begin{lstlisting}[style=cx]
-./bin/cx next git status | jq .
+./bin/xshelf next git status | jq .
 \end{lstlisting}
 
 \section{P3: Budget Stress Test}
 \begin{lstlisting}[style=cx]
-CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/cx cxo git status
-./bin/cx budget
-./bin/cx trace
+CX_CONTEXT_BUDGET_CHARS=2000 CX_CONTEXT_BUDGET_LINES=40 ./bin/xshelf cxo git status
+./bin/xshelf budget
+./bin/xshelf trace
 \end{lstlisting}
 
 \section{P4: Quarantine and Replay (Failure Procedure)}
 \begin{lstlisting}[style=cx]
-./bin/cx quarantine list
-./bin/cx quarantine show <id>
-./bin/cx replay <id>
+./bin/xshelf quarantine list
+./bin/xshelf quarantine show <id>
+./bin/xshelf replay <id>
 \end{lstlisting}
 
 \section{P5: Safety Gate (Before Any Execution)}
 \begin{lstlisting}[style=cx]
-./bin/cx policy show
-./bin/cx policy check "<candidate command>"
+./bin/xshelf policy show
+./bin/xshelf policy check "<candidate command>"
 \end{lstlisting}
 
 \section{P6: Task Graph (Orchestration)}
 \subsection*{Create and Execute}
 \begin{lstlisting}[style=cx]
-./bin/cx task add "Objective: harden capture clipping" --role implementer
-./bin/cx task list --status pending
-./bin/cx task run-all --status pending
+./bin/xshelf task add "Objective: harden capture clipping" --role implementer
+./bin/xshelf task list --status pending
+./bin/xshelf task run-all --status pending
 \end{lstlisting}
 
 \subsection*{Fan-out}
 \begin{lstlisting}[style=cx]
-./bin/cx task fanout "Objective: refactor logging" --from staged-diff
-./bin/cx task list --status pending
+./bin/xshelf task fanout "Objective: refactor logging" --from staged-diff
+./bin/xshelf task list --status pending
 \end{lstlisting}
 
 \section{P7: Telemetry Contract Validation}
 \begin{lstlisting}[style=cx]
-./bin/cx logs validate --fix=false
-tail -n 1 .codex/cxlogs/runs.jsonl | jq .
+./bin/xshelf logs validate --fix=false
+tail -n 1 .cx/cxlogs/runs.jsonl | jq .
 \end{lstlisting}
 
 \section{P8: Self-Optimization}
 \begin{lstlisting}[style=cx]
-./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .
+./bin/xshelf optimize 200
+./bin/xshelf optimize 200 --json | jq .
 \end{lstlisting}
 
 \end{document}

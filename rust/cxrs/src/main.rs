@@ -27,6 +27,8 @@ mod compat_cmd;
 mod config;
 #[path = "modules/contract_versions.rs"]
 mod contract_versions;
+#[path = "modules/contracts_cmd.rs"]
+mod contracts_cmd;
 #[path = "modules/diagnostics.rs"]
 mod diagnostics;
 #[path = "modules/doctor.rs"]
@@ -43,8 +45,14 @@ mod execution_logging;
 mod help;
 #[path = "modules/introspect.rs"]
 mod introspect;
+#[path = "modules/json_mode.rs"]
+mod json_mode;
+#[path = "modules/launch.rs"]
+mod launch;
 #[path = "modules/llm.rs"]
 mod llm;
+#[path = "modules/local_models.rs"]
+mod local_models;
 #[path = "modules/log_contract.rs"]
 mod log_contract;
 #[path = "modules/logs.rs"]
@@ -53,6 +61,8 @@ mod logs;
 mod logs_stats;
 #[path = "modules/logview.rs"]
 mod logview;
+#[path = "modules/mode_cmd.rs"]
+mod mode_cmd;
 #[path = "modules/native_cmd.rs"]
 mod native_cmd;
 #[path = "modules/optimize.rs"]
@@ -101,6 +111,8 @@ mod structured_fixrun;
 mod structured_replay;
 #[path = "modules/task_cmds.rs"]
 mod task_cmds;
+#[path = "modules/task_events.rs"]
+mod task_events;
 #[path = "modules/taskrun.rs"]
 mod taskrun;
 #[path = "modules/tasks.rs"]

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
+use crate::config::cli_app_name;
 use crate::logs::load_runs;
 use crate::paths::resolve_log_file;
 
 type ToolTokenMap = HashMap<String, (u64, u64)>;
 
 fn print_roles() -> i32 {
-    println!("== cxrs roles ==");
+    println!("== {} roles ==", cli_app_name());
     println!("architect   Define approach, boundaries, and tradeoffs.");
     println!("implementer Apply focused code changes with minimal blast radius.");
     println!("reviewer    Validate regressions, risks, and missing tests.");
@@ -39,7 +40,7 @@ fn role_header(role: &str) -> Option<&'static str> {
 pub fn cmd_roles(role: Option<&str>) -> i32 {
     if let Some(r) = role {
         let Some(header) = role_header(r) else {
-            crate::cx_eprintln!("cxrs roles: unknown role '{r}'");
+            crate::cx_eprintln!("{} roles: unknown role '{r}'", cli_app_name());
             return 2;
         };
         println!("{header}");
@@ -51,7 +52,10 @@ pub fn cmd_roles(role: Option<&str>) -> i32 {
 pub fn cmd_prompt(mode: &str, request: &str) -> i32 {
     let valid = ["implement", "fix", "test", "doc", "ops"];
     if !valid.contains(&mode) {
-        crate::cx_eprintln!("cxrs prompt: invalid mode '{mode}' (use implement|fix|test|doc|ops)");
+        crate::cx_eprintln!(
+            "{} prompt: invalid mode '{mode}' (use implement|fix|test|doc|ops)",
+            cli_app_name()
+        );
         return 2;
     }
     let mode_goal = match mode {
@@ -62,7 +66,7 @@ pub fn cmd_prompt(mode: &str, request: &str) -> i32 {
         "ops" => "Perform operational changes safely, with rollback and observability guidance.",
         _ => "",
     };
-    println!("You are working on the \"cx\" toolchain.");
+    println!("You are working on the XSHELF toolchain.");
     println!();
     println!("Context:");
     println!("- Repo canonical implementation is the source of truth.");
@@ -120,7 +124,7 @@ pub fn cmd_fanout(objective: &str) -> i32 {
         ),
         ("doc", "Update operator docs and examples for new behavior."),
     ];
-    println!("== cxrs fanout ==");
+    println!("== {} fanout ==", cli_app_name());
     println!("objective: {objective}");
     println!();
     for (idx, (role, task)) in tasks.iter().enumerate() {
@@ -140,7 +144,7 @@ pub fn cmd_promptlint(n: usize) -> i32 {
         Err(code) => return code,
     };
     if runs.is_empty() {
-        println!("== cxrs promptlint (last {n} runs) ==");
+        println!("== {} promptlint (last {n} runs) ==", cli_app_name());
         println!("No runs found.");
         println!("log_file: {}", log_file.display());
         return 0;
@@ -151,7 +155,7 @@ pub fn cmd_promptlint(n: usize) -> i32 {
     let drift_rows = prompt_drift_rows(&runs, &tool_eff);
     let poor_cache = poor_cache_rows(&tool_cache);
 
-    println!("== cxrs promptlint (last {n} runs) ==");
+    println!("== {} promptlint (last {n} runs) ==", cli_app_name());
     println!("Top token-heavy tools (avg effective_input_tokens):");
     if top_eff.is_empty() {
         println!("- n/a");
@@ -188,14 +192,14 @@ fn load_promptlint_runs(
     n: usize,
 ) -> Result<(std::path::PathBuf, Vec<crate::types::RunEntry>), i32> {
     let Some(log_file) = resolve_log_file() else {
-        crate::cx_eprintln!("cxrs: unable to resolve log file");
+        crate::cx_eprintln!("{}: unable to resolve log file", cli_app_name());
         return Err(1);
     };
     if !log_file.exists() {
         return Ok((log_file, Vec::new()));
     }
     let runs = load_runs(&log_file, n).map_err(|e| {
-        crate::cx_eprintln!("cxrs promptlint: {e}");
+        crate::cx_eprintln!("{} promptlint: {e}", cli_app_name());
         1
     })?;
     Ok((log_file, runs))
@@ -222,9 +226,9 @@ fn collect_promptlint_maps(runs: &[crate::types::RunEntry]) -> (ToolTokenMap, To
 fn top_effective_rows(tool_eff: &ToolTokenMap) -> Vec<(String, u64)> {
     let mut rows: Vec<(String, u64)> = tool_eff
         .iter()
-        .map(|(tool, (sum, count))| (tool.clone(), if *count == 0 { 0 } else { sum / count }))
+        .map(|(tool, (sum, count))| (tool.clone(), sum.checked_div(*count).unwrap_or(0)))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.1));
     rows.truncate(5);
     rows
 }
@@ -248,7 +252,7 @@ fn prompt_drift_rows(
             drift_rows.push((tool, s_avg as i64 - f_avg as i64, f_avg, s_avg));
         }
     }
-    drift_rows.sort_by(|a, b| b.1.cmp(&a.1));
+    drift_rows.sort_by_key(|row| std::cmp::Reverse(row.1));
     drift_rows.truncate(5);
     drift_rows
 }
@@ -279,7 +283,7 @@ fn poor_cache_rows(tool_cache: &ToolTokenMap) -> Vec<(String, u64)> {
             }
         })
         .collect();
-    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    rows.sort_by_key(|row| row.1);
     rows.truncate(5);
     rows
 }

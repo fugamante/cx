@@ -15,8 +15,282 @@ Notes:
 ## [Unreleased]
 
 ### Added
+- Bound task objective/context prompt text with `CX_TASK_OBJECTIVE_MAX_CHARS`,
+  `CX_TASK_OBJECTIVE_MAX_LINES`, `CX_TASK_CONTEXT_MAX_CHARS`, and
+  `CX_TASK_CONTEXT_MAX_LINES`. Defaults derive from the configured capture budget;
+  positive overrides are accepted and invalid or zero overrides use defaults.
+- Human task-run progress is written to stderr; set `CX_TASK_RUN_ALL_PROGRESS=0`
+  or `false` to disable it. Sequential `--json` retains its structured result path.
+- Additive `normalization` diagnostics in `logs stats --json` and `telemetry --json`
+  count rows with all required fields, rows missing fields, and rows whose execution
+  mode starts with `legacy`. Migrated rows can also count as modern; presence does
+  not imply value validity. Existing keys and contract versions remain unchanged.
+- Repository governance:
+  - added `branch-protection-audit` workflow for solo-maintainer mode.
+  - added `scripts/branch_protection_audit.py` to restore required PR reviews once a non-owner write collaborator exists.
+  - documented required `BRANCH_PROTECTION_TOKEN` setup in `docs/project/BRANCH_PROTECTION_AUDIT.md`.
+  - added release-cadence staleness gate to `rust/cxrs/tools/release_check.py` with CI enforcement in `cxrs-compat`.
+  - cadence gate now fails when `VERSION` is older than 14 days unless pull requests carry explicit `release-exception` label.
+  - refreshed `VERSION` to `2026.06.03` so the cadence gate reflects current active branch state.
+  - aligned maintainer docs/checklists with the active local guardrail path (`rust/cxrs/scripts/guardrails.sh`, Rust line/integration guardrails, and `release_check.py` cadence validation).
+  - added focused Python unit coverage for `rust/cxrs/tools/release_check.py` and wired it into local guardrails plus `cxrs-compat` CI so release-cadence enforcement is validated before it blocks merges.
+  - `rust/cxrs/scripts/guardrails.sh` now runs `tools/release_check.py --max-version-age-days 14` directly, so the default local maintainer path catches stale `VERSION` metadata before CI.
+  - `scripts/compat_local.sh --quick` now runs the same release metadata unit tests and cadence check, so local compatibility reports fail before CI when `VERSION` is stale or release metadata drifts.
+  - added containerized compat bootstrap via `Dockerfile`, `.dockerignore`, and `scripts/compat_docker.sh` so maintainers can run the existing `scripts/compat_local.sh` contract inside Docker on a bind-mounted repo.
+  - added `scripts/compat_docker.sh --smoke` as a faster Linux-hosted report path that checks release metadata and core runtime compatibility without running the full quick suite.
+  - added `scripts/compat_docker.sh --ci` as a local Linux core guardrail subset that runs the core `cxrs-compat` guardrails and shell regression suite inside Docker.
+  - added `scripts/mock_codex_jsonl.sh` so the Docker CI guardrail shell suite can validate CLI routing without requiring a locally installed Codex backend in the container.
+  - documented `--smoke` prerequisites and its preflight-only boundary so maintainers do not mistake it for `--quick`, `--full`, or release-signoff validation.
+  - documented the preference to use host-native `compat_local --quick` for the normal compat bar and Docker `--smoke` only for cheaper Linux-hosted preflight checks.
+  - documented first-run Docker warm-cache expectations plus rebuild/prune guidance for stale image or bind-mounted cache state.
+  - added `docs/project/DOCKER_STRATEGY.md` to order the Docker follow-on work as maintainer parity, CI parity, opt-in task sandboxing, provider sidecars, and cache/distribution.
+  - added the first opt-in project task sandbox slice: repo-scoped `task sandbox` config in `.cx/state.json`, Docker-backed inner execution for `task run` / `task run-all`, and additive `execution_lane` provenance in run logs and `task show`.
+  - added `task sandbox check --json` readiness diagnostics so Docker task sandbox users can verify Docker availability, configured image availability, writable `.cx/` state, and `xshelf`/`cx` entrypoint availability before relying on the container lane.
+  - added Docker CI guardrail report metadata for intentional local-vs-GitHub deltas and documented local-build-only/prebuilt-image and provider-sidecar decision boundaries.
+  - added `docs/providers/LOCAL_PROVIDER_SIDECARS.md` and fixture-backed resident probe coverage for the local OpenAI-compatible MLX HTTP sidecar contract before adding Docker Compose/service orchestration.
+  - added explicit Docker compat image selection through `compat_docker.sh --image <tag>` / `CX_COMPAT_IMAGE=<tag>` with pull policy `never` and image provenance in JSON reports while preserving local-build default behavior.
+  - reconciled roadmap and Docker strategy status language with the landed compatibility floors, and added `docs/project/RELEASE_READINESS.md` to summarize current release-candidate validation boundaries.
+  - refreshed the root README landing flow with a source-backed first-output path and aligned the public website's `task-check.v1` sample to the same current contract shape.
+  - reformatted the root README validation section into goal-based checks, Docker compatibility notes, and release-confidence guidance.
+  - expanded `contracts export --profile full` coverage for the declared compatibility surfaces (`broker benchmark`, `policy show`, `task run-plan`, `llm verify`, and `llm resident`) and added contract producer/fixture files to the command-surface docs gate.
+  - tightened the release-cadence boundary check so `VERSION` older than the limit by even a few seconds now fails instead of slipping through until the next full day rollover.
+  - widened the command-surface changelog gate so `bin/xshelf`, `bin/xs`, and their install/uninstall wrappers are treated like `bin/cx` for release-note enforcement.
+  - hardened the command-surface docs gate so command entrypoint changes now require synchronized updates to `CHANGELOG.md`, `README.md`, and `docs/project/XSHELF_RENAME_MIGRATION.md`.
+- Phase VIII local model substrate:
+  - added repo-scoped local model registry at `.cx/local_models.json`.
+  - added `xshelf llm models list|add|inspect|remove` with deterministic JSON/text output shapes.
+  - completed alias-resolution slice:
+    - `llm use <ollama|llamacpp|mlx> <alias-or-id>` now canonicalizes registry tokens for the selected backend.
+    - runtime execution resolves backend-scoped aliases/IDs to `resolved_model` while preserving direct model strings.
+    - `llm show` now prints alias and resolved model fields when a registry token is active.
+    - task model overrides can use backend-scoped aliases without changing direct-string behavior.
+    - `llm use` stores resolved backend model strings in state when aliases/IDs are supplied.
+    - backend-scoped alias resolution no longer falls through when another backend reuses the same alias.
+    - ambiguous `llm models inspect/remove <alias>` selectors now fail with backend-scoped ID guidance instead of picking the first sorted match.
+    - command-style `task run` objectives now apply `--model` overrides through the effective backend path, including auto backend selection.
+  - completed inspection/accounting slice:
+    - `llm models inspect <alias-or-id>` now emits typed cheap accounting status for local/cache paths in text and JSON output.
+    - default inspect mode performs cheap path checks only and avoids recursive disk scans.
+    - explicit `--disk-usage` enables recursive directory-size accounting for local/cache paths.
+    - missing local paths remain non-fatal and are surfaced as explicit inspect status fields.
+    - inspect now surfaces registry `last_used_at` / `last_smoke_status` fields in text mode when present.
+  - completed capability envelope slice:
+    - added typed `backend_capabilities.runtime` envelope with explicit nullable lanes for registry/alias/path, resident-server, compatibility, batching/tooling, multimodal, embedding, reranking, cache metric kind, and persisted-KV-restore support.
+    - exposed runtime capability envelope on `core --json`, `version --json`, `diag --json`, and `scheduler --json` while preserving additive JSON contracts.
+    - added backend capability mapping coverage for `mlx`, `llamacpp`, `ollama`, and `http-curl` profile variants.
+  - completed MLX verification slice:
+    - added `llm verify mlx` with `--profile smoke|benchmark` and JSON contract `llm-verify.v1`.
+    - verify resolves model input through local registry aliases before execution and reports both input and resolved model metadata.
+    - benchmark profile emits typed correctness/runtime and memory envelope fields aligned to TurboQuant metric naming (`cache_metric_kind=cache_nbytes`, `cache_metric_unit=bytes`, `peak_memory_gb_max`).
+    - registry-backed local model metadata now refreshes `last_used_at` on successful local smoke/verify runs and `last_smoke_status` on MLX smoke verification.
+    - alias/id-backed MLX registry `preferred_args` are now active on process-backed `cxo` execution and `llm verify mlx --profile smoke`; `CX_MLX_ARGS` remains the final override layer and the benchmark harness stays explicit about not reinterpreting those CLI args.
+  - completed resident-server opt-in slice:
+    - added `llm resident show|probe-models` with JSON contract `llm-resident.v1`.
+    - `probe-models` now probes `/v1/models` through the existing `http-curl` adapter boundary only on the explicit local-MLX resident path (`CX_LLM_BACKEND=mlx`, `CX_HTTP_REQUEST_PROFILE=openai_json`, local provider URL).
+    - `llm resident show --json` now includes additive machine-readable boundary eligibility/reason fields for the resident path.
+    - runtime capability mapping now marks `resident_server=true` only on that explicit local-MLX boundary; process adapters and remote OpenAI-compatible endpoints remain explicit `false`.
+  - closed the planned Phase VIII slice set after local resident probe validation through `llm-resident.v1`.
+- Phase X token-compression planning corpus:
+  - added planning spec: `docs/orchestration/PHASE_X_TOKEN_COMPRESSION_LAYER.md`.
+  - added work queue: `docs/orchestration/PHASE_X_WORK.json`.
+  - roadmap now tracks Phase X as active implementation with explicit non-goals for generic storage/assembly compression paths.
+  - completed Slice 1 by documenting reducer acceptance gates, fixture manifest fields, and initial recall-focused fixture classes.
+  - completed Slice 2 by adding private reducer metadata behind the existing capture reducer while preserving the string-only reducer API.
+  - completed Slice 3 by strengthening test-output reduction with fixture-backed recall gates for failing tests, assertion context, final summaries, and repeated warning collapse.
+  - completed Slice 4 by strengthening diff reduction with fixture-backed recall gates for file modes, rename/copy markers, binary markers, hunk headers, changed lines, and touched paths.
+  - completed Slice 5 by adding an internal budget-aware section assembler with priority ordering, omission records, and high-uncertainty fallback behavior.
+  - closed the planned Phase X slice set while preserving normal command capture and public telemetry contracts.
+- Phase XI token-compression runtime wiring:
+  - added planning spec: `docs/orchestration/PHASE_XI_TOKEN_COMPRESSION_RUNTIME_WIRING.md`.
+  - added work queue: `docs/orchestration/PHASE_XI_WORK.json`.
+  - completed Slice 1 by documenting the shadow-first rollout contract, acceptance gates, rollback rule, and public-surface boundaries.
+  - completed Slice 2 with a private `CX_CAPTURE_ASSEMBLY_SHADOW=1` path that builds and discards a typed assembly candidate without changing returned capture output or public telemetry.
+  - completed Slice 3 with an explicit `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` opt-in that uses typed assembly only for the fixture-backed `test_output` and `git_diff` reducer classes, with legacy fallback when assembly would omit command/status or output evidence.
+  - completed Slice 4 with fixture-backed shadow measurement gates for test-output and diff corpora, covering bounded omissions, critical-span recall, replay-style evidence retention, and size deltas without changing runtime defaults.
+  - completed Slice 5 by recording the rollout decision to keep runtime wiring opt-in only, preserve the default `run -> reduce -> clip` path, and defer broader reducer expansion and public omission surfaces to later additive contract work.
+  - added additive `capture_prompt_telemetry` on `telemetry --json` / `logs stats --json`, plus nullable run-log fields for explicit prompt-profile runs (`capture_prompt_profile`, applied flag, reducer kind, fallback reason).
+  - added additive `optimize --json` capture-prompt rollout guidance via `scoreboard.capture_prompt_profile_rollout`, recommendations, and a follow-up action when explicit `shadow_narrow` runs are falling back or never applying.
+  - added additive `diag --json` capture-prompt rollout guidance via `capture_prompt_profile_rollout`, including latest explicit-profile fallback context and a follow-up action when the latest `shadow_narrow` run fell back or never applied.
+- XSHELF command migration:
+  - README quick-start and common command examples now lead with `bin/xshelf`.
+  - added `bin/xs` as a supported short alias for `xshelf`.
+  - added `bin/xs-install` and `bin/xs-uninstall` wrappers.
+  - added `bin/xshelf-install` and `bin/xshelf-uninstall` wrappers.
+  - install flow now publishes `xshelf.1`, `xs.1`, and `cx.1` man-page entries.
+  - added `docs/project/XSHELF_RENAME_MIGRATION.md` to lock the staged compatibility migration policy.
+  - top-level help/task-help/usage error text now follows the invoked command name (`xshelf`, `xs`, or `cx`).
+- HTTP adapter hardening:
+  - optional host allowlist gate via `CX_HTTP_ALLOWED_HOSTS` (CSV).
+  - optional TLS pinning hook via `CX_HTTP_TLS_PINNEDPUBKEY` (curl `--pinnedpubkey`).
+  - `cx version` / `cx core` now expose `http_allowed_hosts` and `http_tls_pinning`.
+- HTTP adapter request-profile expansion:
+  - added `CX_HTTP_REQUEST_PROFILE=openai_json` on the existing `http-curl` adapter boundary.
+  - added `CX_HTTP_PROVIDER_MODEL` for OpenAI-compatible JSON request bodies.
+  - runtime logs now record `http_request_profile` alongside HTTP transport/parser fields.
+  - added end-to-end reliability and telemetry coverage for the OpenAI-compatible HTTP JSON profile.
+- HTTP adapter TLS trust configuration:
+  - added `CX_HTTP_CA_BUNDLE` on the existing `http-curl` boundary.
+  - runtime diagnostics now expose whether a custom CA bundle is configured.
+- HTTP adapter mTLS configuration:
+  - added `CX_HTTP_CLIENT_CERT` and `CX_HTTP_CLIENT_KEY` on the existing `http-curl` boundary.
+  - runtime diagnostics now expose whether client cert and key are configured.
+- HTTP adapter TLS posture and redirect controls:
+  - added a compact `http_tls_posture` diagnostics object on `core` / `version`.
+  - added `CX_HTTP_TLS_MIN_VERSION` for explicit TLS version floor control.
+  - added `CX_HTTP_FOLLOW_REDIRECTS` and `CX_HTTP_MAX_REDIRECTS` for explicit redirect policy control.
+- HTTP adapter auth profiles:
+  - `bearer` remains the default profile on the existing `http-curl` boundary.
+  - added `basic` auth profile via `CX_HTTP_AUTH_USERNAME` / `CX_HTTP_AUTH_PASSWORD`.
+  - added explicit custom-header auth profile via `CX_HTTP_AUTH_HEADER` and `CX_HTTP_AUTH_VALUE`.
+  - `core` / `version` now expose auth mode and header name without exposing secret values.
+- HTTP adapter secret sources:
+  - added `CX_HTTP_PROVIDER_TOKEN_FILE`, `CX_HTTP_AUTH_VALUE_FILE`, and `CX_HTTP_AUTH_PASSWORD_FILE`.
+  - `core` / `version` now expose auth secret source without exposing secret values.
+  - Unix secret files are rejected when group/world readable or writable.
+- Task runner UX:
+  - `task run-all` adds `--summary text|json` for deterministic operator summaries without enabling full `--json` mode.
+  - text summaries now include compact failure reason counts and failed task IDs.
+  - `task run-all --events-jsonl` emits additive `task-events.v1` progress events to stderr and `.codex/cxlogs/task_events.jsonl` while preserving stdout contracts.
+  - added `task events [--limit N] [--json|--jsonl] [--follow]` to read persisted task event streams.
+- Diagnostics severity/actions:
+  - `diag` / `scheduler` now classify low timing-attribution coverage (`timing_coverage_low`) and emit an explicit corrective action in `--actions` mode.
+- HTTP adapter TLS enforcement:
+  - `http-curl` now validates `CX_HTTP_PROVIDER_URL` with HTTPS-by-default policy.
+  - new toggles:
+    - `CX_HTTP_REQUIRE_HTTPS` (default `1`)
+    - `CX_HTTP_ALLOW_LOCAL_HTTP` (default `1`, loopback-only HTTP exception)
+  - `cx version` / `cx core` now print HTTP TLS policy toggles when `provider_transport=http`.
+  - added operator runbook: `docs/providers/HTTP_PROVIDER_TLS.md`.
+- Phase VI telemetry refinement:
+  - `diag --json` / `scheduler --json` now expose scheduler timing-attribution coverage keys:
+    - `rows_with_retry_attempt`
+    - `rows_with_queue_started_at`
+    - `rows_with_task_started_at`
+    - `rows_with_task_finished_at`
+  - text diagnostics now print matching `scheduler_*` counters for quick operator checks.
+  - `optimize --json` now includes `scoreboard.timing_attribution_coverage` and emits low-coverage anomalies/recommendations/actions.
+- Local compatibility suite (hosted-CI independent):
+  - added `scripts/compat_local.sh` at repo root with unified runner contract:
+    - `--quick|--full`
+    - `--json`
+    - `--out <path>` (default `.cx/compat/latest.json`)
+  - added `scripts/compat_all.sh` aggregate runner for multi-repo local checks:
+    - auto-discovers sibling `cx` and `cx-eval-lab` repos when present
+    - supports `--repo <path>` repeatable override
+    - emits aggregate JSON report (`.cx/compat/all_latest.json` by default)
+  - added wrapper `bin/cx-compat-local`.
+  - standardized report schema to align with `cx-eval-lab` local compat artifacts (`status`, `mode`, `summary`, `steps`, host/toolchain/git metadata).
+- Adaptive output-mode resolution and introspection:
+  - added auto selection layer for human vs agent contexts:
+    - CLI override remains highest precedence.
+    - then env (`CX_JSON_DEFAULT`), then state (`preferences.default_json_output`).
+    - if unset, optional auto mode (`CX_JSON_AUTO=1`) applies runtime signals (TTY + CI) before command defaults.
+  - added `cx mode` / `cx cxmode`:
+    - prints resolved output mode, source, reason, confidence, and runtime signals.
+    - supports JSON output via `--json` for machine introspection.
+  - added integration coverage in `mode_resolution_tests` for precedence order and signal-driven auto mode.
+  - added end-to-end guard test: `diag` emits JSON contract output when `CX_JSON_AUTO=1`.
+- Telemetry quality refinement:
+  - `logs stats` / `telemetry` now include `timing_telemetry` with:
+    - `task_rows`
+    - `rows_with_worker_id`
+    - `rows_with_queue_ms`
+    - `rows_with_queue_started_at`
+    - `rows_with_task_started_at`
+    - `rows_with_task_finished_at`
+  - telemetry fixture contract updated to include timing coverage keys.
+  - `diag --json` now includes `concurrency` with:
+    - `defaults` (run-all mode/backend pool/caps/workers/fairness/halt-on-critical baseline)
+    - `observed` (run-all row counts, mode distribution, latest mode, halt-on-critical rows)
+    to keep Phase VI scheduler controls visible in one diagnostics payload.
+  - `scheduler --json` now includes matching `concurrency` shape (`defaults` + `observed`) so operator/CI consumers can use a shared schema across diag/scheduler surfaces.
+- Planning/docs updates:
+  - finalized Provider Adapter Phase 6 rollout policy + merge checklist.
+  - aligned `docs/orchestration/PHASE_VII_BUDGET_AWARE_ORCHESTRATION.md` status with completed Phase VII milestone state.
+  - added Phase VI kickoff guidance in roadmap.
+  - added `docs/project/REPO_ROLE_CONTRACT.md` to formalize runtime-vs-operator repo boundaries and selective-upstream policy.
+  - added `docs/project/REPO_SYNC_PLAN.md` to track cross-repo phase execution (5A/5B/5C/5D) and ongoing promotion gates.
+  - documented `mode` resolution and `CX_JSON_AUTO` behavior in README.
+  - documented `diag/scheduler` top-level `concurrency` JSON fields (defaults + observed) and added examples in README telemetry section.
+  - added README `jq` one-liners to extract `diag/scheduler` `concurrency.defaults` and `concurrency.observed` for CI/operator checks.
+  - `cxrs-compat` CI now includes a command-surface gate that fails when command entrypoints are changed without corresponding docs/changelog updates.
+  - refined command-surface CI gate to require `CHANGELOG.md` whenever command entrypoint files change (README/docs updates remain optional but recommended).
+  - added workflow action pin guardrail in `cxrs-compat` to require third-party GitHub Actions to be pinned to full 40-character commit SHAs (`scripts/check_action_pins.sh`).
+  - `cxrs-compat` now captures and uploads failure artifacts (`rust_check`, `compat_check`, `shell_regression` logs) per OS job to speed up CI triage.
+  - `cxrs-compat` failure artifacts now include a compact `summary_<os>.txt` with error-pattern extracts and tail context for faster diagnosis.
+- Phase VI execution lane (explicit, non-default):
+  - `task run-all` now accepts `--mode parallel` (default remains `sequential`).
+  - added `--strict-plan` for `--mode parallel` to fail fast when plan waves indicate serialization constraints (dependencies/resource locks).
+  - added `--plan-json` dry-run payload for CI/operator gating (`task-run-plan.v1`) with `strict_plan_ok` and `can_execute`.
+  - enriched `--plan-json` payload with deterministic planning diagnostics:
+    - `strict_plan_reason`
+    - `wave_count`
+    - `parallel_task_count`
+    - `sequential_task_count`
+    - `blocked_count`
+  - added fixture-backed contract coverage for `task-run-plan.v1` to lock top-level/wave/blocked key stability.
+  - added fixture-backed contract coverage for `task-run-all.v1` top-level/task item keys.
+  - added `task run-all --dry-run`:
+    - emits `task-run-all.v1` execution envelope without executing/mutating tasks.
+    - supports deterministic `--json` preflight for CI/operator gating.
+  - task-linked run rows now include wave telemetry fields:
+    - `wave_index`
+    - `wave_mode`
+    - `wave_size`
+    for mixed/parallel scheduler observability.
+  - telemetry contract fixture now locks timing coverage for wave fields:
+    - `rows_with_wave_index`
+    - `rows_with_wave_mode`
+    - `rows_with_wave_size`
+  - added `cx task check` preflight command:
+    - non-mutating readiness report for blocked tasks/dependencies.
+    - strict-plan readiness signal with `--strict-plan` gate semantics.
+    - recommended run mode output for operator/CI routing decisions.
+  - added fixture-backed contract coverage for `task-check.v1`.
+  - added non-mutation test coverage for `task check` (no task status or run-log side effects).
+  - tightened `task-check` semantic assertions:
+    - `recommended_mode` constrained to `sequential|mixed|parallel`.
+    - `strict_plan_reason` must be null when `strict_plan_ok=true`, and non-empty when false.
+  - moved `task-check` semantic constraints into fixture data (`allowed_modes`, `strict_reason_rules`) for data-driven CI contract enforcement.
+  - parallel lane uses existing deterministic scheduler path behind explicit mode selection.
+  - added coverage:
+    - parser unit test for `--mode parallel`
+    - integration tests validating `parallel` lane execution behavior, strict-plan accept/reject paths, and plan-json dry runs.
+- Run-level scheduler timing telemetry refinement:
+  - run logs now include optional task timing timestamps:
+    - `queue_started_at`
+    - `task_started_at`
+    - `task_finished_at`
+  - mixed-mode worker subprocess path now emits queue/start timestamps via task env propagation.
+  - sequential retry path now emits start/queue timestamps through retry-env instrumentation.
+  - `scheduler_tests` now asserts these fields on task rows.
+- Task orchestration UX refinement:
+  - `cx task show <id>` now includes `latest_run` summary when run logs contain task-linked executions.
+  - summary includes execution id/time/tool/backend/mode/duration plus safety outcome flags.
+  - added integrated alias routing:
+    - `cx task show list`
+    - `cx task show list --status <...>`
+    - bare `cx task show` now routes to list view.
+  - `cx policy show --json` now emits machine-readable contract output (`policy-show.v1`) with rule list and override state for CI/operator checks.
+  - parity log invariant checks now require `policy_blocked` presence via shared `has_required_log_fields` contract helper.
+  - `cx help task` now includes practical `task run` and `task run-all` examples for mixed/parallel planning and dry-run preflight flows.
+  - reliability integration now explicitly validates `CX_TIMEOUT_GIT_SECS` precedence with git-labeled timeout diagnostics (`system command 'git' ... timed out after 1s`).
+  - test-suite fixture utilities now include a shared quarantine fixture writer (`write_quarantine_fixture`) to reduce replay/quarantine setup duplication.
+  - added native capture malformed-output reliability coverage (`native_capture_ok`) to ensure non-JSON/garbled command output does not break capture/logging execution flow.
+  - added replay contract coverage under `CX_SCHEMA_RELAXED=1` (`replay_relaxed_validates`) to lock behavior that replay remains schema-validated and quarantines/logs invalid JSON responses.
+  - added shared schema-failure assertion helper (`expect_schema_fail`) and refactored schema failure tests to remove duplicate quarantine/log verification blocks.
+- Task run-all machine output:
+  - added `cx task run-all ... --json` with `contract_version=task-run-all.v1`.
+  - payload includes aggregate counters plus per-task execution outcomes.
+- JSON output mode defaults:
+  - added shared JSON mode resolver precedence:
+    - `--json` / `--text` CLI override
+    - `CX_JSON_DEFAULT` env
+    - `.cx/state.json` at `preferences.default_json_output`
+    - command default fallback
+  - wired into `task run-all`, `diag`, `scheduler`, `optimize`, and `logs stats`/`telemetry`.
 - Provider quota catalog commands:
-  - added `cx quota catalog refresh` to seed `.codex/quota_catalog.json` from curated official-source references.
+  - added `cx quota catalog refresh` to seed `.cx/quota_catalog.json` from curated official-source references.
   - added `cx quota catalog show [--json]` for tier/source inspection.
   - added opt-in automatic refresh controls:
     - `cx quota catalog auto on --interval-hours N`
@@ -42,7 +316,7 @@ Notes:
   - supports configured totals via:
     - `CX_QUOTA_<BACKEND>_TOTAL_TOKENS`
     - `CX_QUOTA_TOTAL_TOKENS`
-    - `.codex/state.json` at `preferences.quota.<backend>_total_tokens`
+    - `.cx/state.json` at `preferences.quota.<backend>_total_tokens`
   - `ollama` is reported as `service_kind=local_unmetered`.
 - Lean-session behavior hardening:
   - `bin/cx-lean-session` no longer sets broker policy implicitly.
@@ -66,7 +340,7 @@ Notes:
     - `telemetry.v1`
     - `broker-benchmark.v1`
   - `--actions` payloads now include `actions_contract_version=actions.v1`.
-  - added compatibility policy doc: `docs/CONTRACT_COMPATIBILITY.md`.
+  - added compatibility policy doc: `docs/providers/CONTRACT_COMPATIBILITY.md`.
 - Broker strictness hardening:
   - `broker benchmark --severity` now accepts `warning` as alias to `warn`.
   - usage/help text updated to `warn|warning|critical`.
@@ -124,19 +398,19 @@ Notes:
   - aligned runtime introspection status output with typed provider status mapping.
   - expanded provider adapter tests for status normalization and mapping determinism.
 - Phase V kickoff docs:
-  - added `docs/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md` (execution spec).
-  - added `docs/PHASE_V_IMPLEMENTATION_BACKLOG.md` (ticketized backlog and validation checklist).
-  - linked Phase V docs from `docs/ROADMAP.md`.
+  - added `docs/orchestration/PHASE_V_PROVIDER_AGNOSTIC_ORCHESTRATION.md` (execution spec).
+  - added `docs/orchestration/PHASE_V_IMPLEMENTATION_BACKLOG.md` (ticketized backlog and validation checklist).
+  - linked Phase V docs from `docs/project/ROADMAP.md`.
 - Phase IV milestone status alignment:
-  - updated `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md` to mark Milestones A-D as completed.
-  - refreshed `docs/ROADMAP.md` to reflect post-Phase-IV priorities and Phase V preparation.
+  - updated `docs/orchestration/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md` to mark Milestones A-D as completed.
+  - refreshed `docs/project/ROADMAP.md` to reflect post-Phase-IV priorities and Phase V preparation.
 - Branding Phase 1 (non-breaking):
   - introduced `bin/xshelf` alias entrypoint delegating to canonical `bin/cx`.
   - updated top-level docs to `XSHELF (formerly CX)` while preserving all `cx` commands and `CX_*` environment compatibility.
   - added integration coverage for `bin/xshelf version`.
-- Provider adapter Phase 1 substrate (experimental branch `codex/provider-adapter-phase1`):
+- Provider adapter Phase 1 substrate (experimental branch `primary/provider-adapter-phase1`):
   - introduced `ProviderAdapter` interface under `rust/cxrs/src/modules/provider_adapter.rs`.
-  - added `CodexCliAdapter` and `OllamaCliAdapter` implementations.
+  - added `PrimaryProcessAdapter` and `OllamaCliAdapter` implementations.
   - execution core now resolves a provider adapter and routes plain/JSONL calls through the adapter contract (no behavior change intended).
   - added adapter-focused unit coverage for backend normalization and Ollama JSONL wrapping.
   - added centralized adapter invocation helpers for current backend selection.
@@ -146,7 +420,7 @@ Notes:
     - `provider_transport`
     - `provider_status`
   - strict log contract, migration, and integration assertions updated for the new fields.
-  - added adapter telemetry parity smoke tests covering codex and ollama run paths.
+  - added adapter telemetry parity smoke tests covering primary and ollama run paths.
   - added mock-adapter integration tests for schema success and schema-failure quarantine paths without provider binaries.
   - provider capability surface added (`jsonl_native`, `schema_strict`, `transport`) and exposed in `cxversion`/`cxcore`.
   - added `CX_PROVIDER_ADAPTER=http-stub` fail-fast path for future HTTP transport work:
@@ -178,7 +452,7 @@ Notes:
     - `cxdiffsum`
     - `cxfix_run`
   - `logs validate` and `ci validate` now default to legacy-compatible validation (strict contract still available with `--strict`).
-  - added structured-command parity coverage for `next` between `codex-cli` and `mock` adapters.
+  - added structured-command parity coverage for `next` between `primary-cli` and `mock` adapters.
 - `broker benchmark` strict severity tiers for CI policies:
   - new flag: `--severity warn|critical` (default `critical`).
   - violation classification:
@@ -198,7 +472,7 @@ Notes:
   - added integration coverage to validate `broker benchmark --json` top-level and summary item key contract.
   - added CI gate step `Broker Benchmark Contract Gate` in `.github/workflows/cxrs-compat.yml`.
 - `broker benchmark` command for local backend telemetry comparison:
-  - `cx broker benchmark [--backend codex|ollama]... [--window N] [--json]`
+  - `cx broker benchmark [--backend primary|ollama]... [--window N] [--json]`
   - computes per-backend run count, average duration, p95 duration, average effective input tokens, and average output tokens from `runs.jsonl`.
   - supports deterministic machine-readable output for operator/CI tooling.
 - integration test coverage for broker benchmark JSON output and metric aggregation.
@@ -291,9 +565,9 @@ Notes:
   - high-load mixed-mode least-loaded fairness stress test validating backend spread, worker spread, and queue telemetry under cap pressure.
   - explicit mixed-mode failure path test for zero-available backend pools (`task run-all` returns non-zero with clear scheduler error).
 - Phase IV broker + mixed routing controls:
-  - `cx broker set --policy latency|quality|cost|balanced` persisted to `.codex/state.json`.
+  - `cx broker set --policy latency|quality|cost|balanced` persisted to `.cx/state.json`.
   - `cx task run-all --mode mixed` now accepts:
-    - `--backend-pool codex,ollama`
+    - `--backend-pool primary,ollama`
     - `--backend-cap backend=limit`
     - `--max-workers N` (planner metadata; single-worker execution remains current behavior)
   - deterministic backend selection per scheduled task using task backend preference + broker policy fallback.
@@ -325,10 +599,10 @@ Notes:
   - score factors: success status, execution id presence, and error-size penalty.
   - deterministic tie-break: lowest replica index.
 - mixed-mode scheduler reliability coverage expanded:
-  - backend cap enforcement test for codex-limited worker scheduling.
+  - backend cap enforcement test for primary-limited worker scheduling.
   - dependency-wave ordering test with queue telemetry assertions.
-  - balanced backend-pool fairness test (codex + ollama) to ensure no backend starvation.
-  - queue growth stress test under strict backend cap (`codex=1`) validating deferred-task `queue_ms`.
+  - balanced backend-pool fairness test (primary + ollama) to ensure no backend starvation.
+  - queue growth stress test under strict backend cap (`primary=1`) validating deferred-task `queue_ms`.
 - `cxdiag` scheduler diagnostics section:
   - reports recent-window queue telemetry (`scheduler_queue_ms_avg`, `scheduler_queue_ms_p95`),
   - worker distribution (`scheduler_workers_seen`, `scheduler_worker_distribution`),
@@ -467,8 +741,8 @@ Notes:
   - expanded failure-matrix coverage:
     - missing schema file in partial registry scenarios
     - corrupted quarantine record handling (`quarantine show`)
-    - unwritable `.codex/quarantine` error surfacing during schema failure handling
-    - unwritable `.codex/cxlogs` resilience (command execution remains functional)
+    - unwritable `.cx/quarantine` error surfacing during schema failure handling
+    - unwritable `.cx/cxlogs` resilience (command execution remains functional)
     - timeout override end-to-end coverage for `CX_TIMEOUT_LLM_SECS`, `CX_TIMEOUT_GIT_SECS`, and `CX_TIMEOUT_SHELL_SECS`
   - expanded Ollama backend coverage:
     - unset/set model transition enforcement with persisted state verification
@@ -524,7 +798,7 @@ Notes:
   - added policy tests for `/usr` vs `/usr/local` behavior, repo-root writes, and symlink escape scenarios
 - Expanded `cxparity` overlap coverage and invariants:
   - widened shared-command matrix from a minimal subset to include `cx`, `cxj`, `cxol`, `cxcopy`, `cxnext`, `cxdiffsum_staged`, `cxcommitmsg`, and `cxcommitjson`
-  - added deterministic local parity mocks (`codex` + clipboard backend) so parity runs are stable and backend-independent
+  - added deterministic local parity mocks (`primary` + clipboard backend) so parity runs are stable and backend-independent
   - parity temp repos now receive schema registry fixtures, enabling structured-command checks without ambient machine state
   - tightened parity log invariant checks via required-field validation (`schema_enforced`, `duration_ms` included)
 - Replaced string-parsed timeout telemetry with structured timeout propagation:
@@ -599,6 +873,7 @@ Notes:
 - CI now runs dedicated reliability suite job step (`cargo test --test reliability_integration`).
 
 ### Fixed
+- Repository root resolution now ignores inherited Git hook environment variables when resolving from the current working directory.
 - Reduced fragile parsing and error suppression in run-log and schema paths via explicit error propagation and quarantining (`2600d21`, `4106410`, `3390c14`).
 - Improved deterministic schema-path reliability by consolidating schema helpers and validators (`c1072e6`, `1380d5c`).
 

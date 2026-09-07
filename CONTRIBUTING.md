@@ -9,26 +9,79 @@
 ## Branding and Command Stability
 
 - Project branding is `XSHELF (formerly CX)`.
-- Canonical command surface remains `cx` unless an explicit migration phase is approved.
+- Canonical user-facing command spelling is `xshelf`.
+- `xs` is an allowed short alias where brevity helps and ambiguity stays low.
+- `cx` remains a supported compatibility alias during migration.
 - Preserve `CX_*` environment variable compatibility by default.
-- Do not replace existing `cx` examples in user-facing docs without a scoped migration plan.
+- Keep `cx` examples where compatibility context matters.
+- Rename policy is defined in `docs/project/XSHELF_RENAME_MIGRATION.md`.
 
 ## Start Here
 
-- New contributor issue list: `docs/GOOD_FIRST_ISSUES.md`
-- Contributor walkthrough: `docs/CONTRIBUTOR_WALKTHROUGH.md`
-- Roadmap: `docs/ROADMAP.md`
-- Release cadence: `docs/RELEASE_CADENCE.md`
+- New contributor issue list: `docs/contributing/GOOD_FIRST_ISSUES.md`
+- Contributor walkthrough: `docs/contributing/CONTRIBUTOR_WALKTHROUGH.md`
+- Roadmap: `docs/project/ROADMAP.md`
+- Release cadence: `docs/project/RELEASE_CADENCE.md`
 
 ## Development Setup
 
 ```bash
 cd rust/cxrs
+./scripts/guardrails.sh
+./scripts/check_rs_max_lines.sh 600 "$(pwd)/../.."
+./scripts/check_integration_guardrails.sh "$(pwd)/../.." 500
 cargo fmt
 cargo check
 cargo test --tests -- --test-threads=1
-python3 tools/quality_gate.py --max-raw-eprintln 0
+python3 tools/quality_gate.py --max-file-lines 100000 --max-fn-lines 100000 --max-raw-eprintln 0
+cd ../..
+./scripts/compat_docker.sh --smoke
+./scripts/compat_docker.sh --ci
+./scripts/compat_docker.sh --quick
 ```
+
+`./scripts/guardrails.sh` includes the release-cadence gate
+(`tools/release_check.py --repo-root ../.. --max-version-age-days 14`) and its
+Python unit tests so the default local path matches `cxrs-compat` CI.
+Use `./scripts/compat_docker.sh --smoke` for a faster Linux-hosted bind-mounted
+signal before paying for the full quick compat suite.
+Smoke prerequisites:
+- Docker daemon available locally.
+- local image build/cache usable from `Dockerfile`.
+- repo bind-mounted read-write so `.cx/compat/` cache state can be written.
+- expect the first run to pay image-build and Cargo-cache warmup cost; reruns
+  should be materially faster unless `--rebuild` is used.
+- if the image or cache state looks stale, prefer `./scripts/compat_docker.sh --rebuild ...`
+  and prune unused Docker builder/image state before retrying.
+The default image is `xshelf-compat:local`. `--image <tag>` or
+`CX_COMPAT_IMAGE=<tag>` is an explicit trust/latency tradeoff for already
+available images; Docker compat never pulls remote images by default, and a
+missing override tag fails unless `--rebuild` is used to build the repo
+Dockerfile into that tag.
+Do not treat `--smoke` as a release or compat signoff step; use `--quick` or
+`--full` for that bar.
+Use `./scripts/compat_docker.sh --ci` when you want the local Linux core
+guardrail subset before pushing; inspect `ci_parity.intentional_deltas` in the
+JSON report for workflow-only gates it does not reproduce.
+Use `./scripts/compat_docker.sh --rebuild --full` when you need a Linux-hosted
+compat pass without changing the host-native `scripts/compat_local.sh` contract.
+
+Project task sandboxing is also opt-in and repo-scoped:
+
+```bash
+./bin/xshelf task sandbox set-image xshelf-compat:local
+./bin/xshelf task sandbox enable
+./bin/xshelf task sandbox show --json
+./bin/xshelf task sandbox check --json
+```
+
+`task run` and `task run-all` will then launch the inner task inside the
+configured Docker image on the bind-mounted repo while preserving `.cx/` state
+and additive execution-lane provenance. The image must provide `xshelf`/`cx`
+on `PATH` or a repo-local `./bin/xshelf` / `./bin/cx` entrypoint. Treat
+`task sandbox check --json` as the readiness gate before relying on the
+container lane; it verifies Docker, the configured image, writable `.cx/`
+state, and the entrypoint contract.
 
 ## Pull Request Requirements
 
@@ -36,9 +89,29 @@ python3 tools/quality_gate.py --max-raw-eprintln 0
 - Preserve stdout pipeline behavior; diagnostics go to stderr.
 - Do not introduce startup side effects.
 - Update `README.md`/`CHANGELOG.md` when behavior or contracts change.
+- When command entrypoints or command-facing Rust routing/help surfaces change, update `README.md`, `CHANGELOG.md`, and `docs/project/XSHELF_RENAME_MIGRATION.md` together.
+- Keep release cadence current: CI fails when `VERSION` is older than 14 days unless the PR is explicitly labeled `release-exception`.
+- Keep Rust/file/integration guardrails green locally before push: `./scripts/guardrails.sh`, `./scripts/check_rs_max_lines.sh`, and `./scripts/check_integration_guardrails.sh`.
+- Keep third-party GitHub Actions pinned to full 40-character commit SHAs; validate with `./scripts/check_action_pins.sh .`.
 
 ## Commit Guidance
 
 - Keep commits focused and reviewable.
 - Prefer small mechanical refactors before functional changes.
 - Add migration notes when changing log/schema contracts.
+
+## Branch Naming
+
+- Use `primary/<short-scope>` for local feature branches.
+- Prefer short scope slugs over phase-sentence names.
+- Keep branch names within the same readability rule used elsewhere:
+  - max `3` segments
+  - concise snake_case or kebab-case scope
+- Good:
+  - `primary/session-pairing`
+  - `primary/contract-bundle`
+  - `primary/provider-adapter`
+- Avoid:
+  - `primary/session-token-pairing-integration`
+  - `primary/add-phase-vi-execution-guidance-surface`
+- Do not rename already-published shared `cx/*` branches casually; shorten new work by default.

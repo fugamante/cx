@@ -65,6 +65,9 @@ fn schema_failure_writes_quarantine_and_logs() {
     env::set_current_dir(dir.path()).expect("cd temp");
     let _ = Command::new("git")
         .args(["init"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("git init");
 
@@ -91,13 +94,13 @@ fn read_last_json_line(path: &std::path::Path, label: &str) -> Value {
 
 fn assert_quarantine_and_logs(root: &std::path::Path, qid: &str) {
     let qfile = root
-        .join(".codex")
+        .join(".cx")
         .join("quarantine")
         .join(format!("{qid}.json"));
     assert!(qfile.exists());
 
     let sf_log = root
-        .join(".codex")
+        .join(".cx")
         .join("cxlogs")
         .join("schema_failures.jsonl");
     let last_sf = read_last_json_line(&sf_log, "read schema fail log");
@@ -106,7 +109,7 @@ fn assert_quarantine_and_logs(root: &std::path::Path, qid: &str) {
         Some(qid)
     );
 
-    let runs_log = root.join(".codex").join("cxlogs").join("runs.jsonl");
+    let runs_log = root.join(".cx").join("cxlogs").join("runs.jsonl");
     let last_run = read_last_json_line(&runs_log, "read runs");
     assert_eq!(
         last_run.get("quarantine_id").and_then(Value::as_str),

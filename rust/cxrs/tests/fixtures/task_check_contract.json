@@ -1,0 +1,36 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "status_filter",
+    "selected",
+    "waves",
+    "blocked_total",
+    "blocked_dependencies",
+    "blocked_resources",
+    "can_run",
+    "can_run_mixed",
+    "can_run_parallel",
+    "strict_plan",
+    "strict_plan_ok",
+    "strict_plan_reason",
+    "sequential_waves",
+    "parallel_waves",
+    "largest_parallel_wave",
+    "recommended_mode",
+    "recommended_reason",
+    "blocked"
+  ],
+  "blocked_keys": [
+    "id",
+    "reason"
+  ],
+  "allowed_modes": [
+    "sequential",
+    "mixed",
+    "parallel"
+  ],
+  "strict_reason_rules": {
+    "null_when_ok": true,
+    "non_empty_when_not_ok": true
+  }
+}

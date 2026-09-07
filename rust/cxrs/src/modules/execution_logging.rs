@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::llm::LlmRunError;
-use crate::runlog::{RunLogInput, log_codex_run};
+use crate::runlog::{RunLogInput, log_primary_run};
 use crate::types::{CaptureStats, TaskSpec, UsageStats};
 
 pub(crate) struct LogExecutionErrorInput<'a> {
@@ -40,7 +40,7 @@ pub(crate) fn log_execution_error(input: LogExecutionErrorInput<'_>) {
     let timed_out = err.timeout.is_some();
     let timeout_secs = err.timeout.as_ref().map(|v| v.timeout_secs);
     let command_label = err.timeout.as_ref().map(|v| v.label.as_str());
-    let _ = log_codex_run(RunLogInput {
+    let _ = log_primary_run(RunLogInput {
         tool: &spec.command_name,
         prompt,
         prompt_raw: Some(prompt_raw),

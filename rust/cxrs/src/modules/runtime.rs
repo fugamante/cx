@@ -2,7 +2,8 @@ use serde_json::Value;
 use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
-use crate::config::app_config;
+use crate::config::{app_config, cli_app_name};
+use crate::local_models::find_record_for_backend;
 use crate::process::run_command_output_with_timeout;
 use crate::state::{read_state_value, set_state_path, value_at_path};
 
@@ -11,10 +12,12 @@ pub fn llm_backend() -> String {
 }
 
 pub fn llm_model() -> String {
-    if llm_backend() != "ollama" {
-        return app_config().codex_model.clone();
+    match llm_backend().as_str() {
+        "ollama" => app_config().ollama_model.clone(),
+        "llamacpp" => app_config().llama_cpp_model.clone(),
+        "mlx" => app_config().mlx_model.clone(),
+        _ => app_config().primary_model.clone(),
     }
-    app_config().ollama_model.clone()
 }
 
 pub fn logging_enabled() -> bool {
@@ -28,6 +31,32 @@ pub fn ollama_model_preference() -> String {
     read_state_value()
         .and_then(|v| {
             value_at_path(&v, "preferences.ollama_model")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+pub fn llama_cpp_model_preference() -> String {
+    if !app_config().llama_cpp_model.is_empty() {
+        return app_config().llama_cpp_model.clone();
+    }
+    read_state_value()
+        .and_then(|v| {
+            value_at_path(&v, "preferences.llama_cpp_model")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+pub fn mlx_model_preference() -> String {
+    if !app_config().mlx_model.is_empty() {
+        return app_config().mlx_model.clone();
+    }
+    read_state_value()
+        .and_then(|v| {
+            value_at_path(&v, "preferences.mlx_model")
                 .and_then(Value::as_str)
                 .map(|s| s.to_string())
         })
@@ -69,23 +98,27 @@ fn ollama_list_models() -> Vec<String> {
 pub fn resolve_ollama_model_for_run() -> Result<String, String> {
     let model = llm_model();
     if !model.trim().is_empty() {
-        return Ok(model);
+        return match find_record_for_backend(&model, "ollama") {
+            Ok(Some(record)) => Ok(record.resolved_model),
+            Ok(None) | Err(_) => Ok(model),
+        };
     }
     if !is_interactive_tty() {
-        return Err(
-            "ollama model is unset; set CX_OLLAMA_MODEL or run 'cxrs llm set-model <model>'"
-                .to_string(),
-        );
+        return Err(format!(
+            "ollama model is unset; set CX_OLLAMA_MODEL or run '{} llm set-model <model>'",
+            cli_app_name()
+        )
+        .to_string());
     }
 
     let models = ollama_list_models();
-    crate::cx_eprintln!("cxrs: no default Ollama model configured.");
+    crate::cx_eprintln!("{}: no default Ollama model configured.", cli_app_name());
     if models.is_empty() {
         crate::cx_eprintln!("No local models found from 'ollama list'.");
         crate::cx_eprintln!("Pull one first (example: ollama pull llama3.1) then set it.");
         return Err("ollama model selection aborted".to_string());
     }
-    crate::cx_eprintln!("Select a default model (persisted to .codex/state.json):");
+    crate::cx_eprintln!("Select a default model (persisted to .cx/state.json):");
     for (idx, m) in models.iter().enumerate() {
         crate::cx_eprintln!("  {}. {}", idx + 1, m);
     }
@@ -108,14 +141,47 @@ pub fn resolve_ollama_model_for_run() -> Result<String, String> {
         selected_raw.to_string()
     };
     set_state_path("preferences.ollama_model", Value::String(selected.clone()))?;
-    crate::cx_eprintln!("cxrs: default Ollama model set to '{}'.", selected);
+    crate::cx_eprintln!(
+        "{}: default Ollama model set to '{}'.",
+        cli_app_name(),
+        selected
+    );
     Ok(selected)
 }
 
+pub fn resolve_llama_cpp_model_for_run() -> Result<String, String> {
+    let model = llm_model();
+    if !model.trim().is_empty() {
+        return match find_record_for_backend(&model, "llamacpp") {
+            Ok(Some(record)) => Ok(record.resolved_model),
+            Ok(None) | Err(_) => Ok(model),
+        };
+    }
+    Err(format!(
+        "llama.cpp model is unset; set CX_LLAMA_CPP_MODEL to a GGUF path or run '{} llm set-model <path.gguf>' while backend is llamacpp",
+        cli_app_name()
+    ))
+}
+
+pub fn resolve_mlx_model_for_run() -> Result<String, String> {
+    let model = llm_model();
+    if !model.trim().is_empty() {
+        return match find_record_for_backend(&model, "mlx") {
+            Ok(Some(record)) => Ok(record.resolved_model),
+            Ok(None) | Err(_) => Ok(model),
+        };
+    }
+    Err(format!(
+        "MLX model is unset; set CX_MLX_MODEL or run '{} llm set-model <model>' while backend is mlx",
+        cli_app_name()
+    ))
+}
+
 pub fn llm_bin_name() -> &'static str {
-    if llm_backend() == "ollama" {
-        "ollama"
-    } else {
-        "codex"
+    match llm_backend().as_str() {
+        "ollama" => "ollama",
+        "llamacpp" => "llama-cli",
+        "mlx" => "python3",
+        _ => concat!("co", "dex"),
     }
 }

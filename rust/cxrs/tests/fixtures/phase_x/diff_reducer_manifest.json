@@ -1,0 +1,38 @@
+{
+  "fixture_id": "git_diff_mixed_structural_markers",
+  "command": ["git", "diff"],
+  "exit_status": 0,
+  "profile": "balanced",
+  "input_path": "rust/cxrs/tests/fixtures/phase_x/git_diff_mixed.txt",
+  "expected_reducer_kind": "git_diff",
+  "required_spans": [
+    "diff --git a/src/old_name.rs b/src/new_name.rs",
+    "similarity index 88%",
+    "rename from src/old_name.rs",
+    "rename to src/new_name.rs",
+    "@@ -1,6 +1,6 @@",
+    "-    println!(\"old path\");",
+    "+    println!(\"new path\");",
+    "diff --git a/assets/logo.bin b/assets/logo.bin",
+    "Binary files a/assets/logo.bin and b/assets/logo.bin differ",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/generated/huge.rs",
+    "+pub const GENERATED: &str = \"kept\";",
+    "deleted file mode 100644",
+    "+++ /dev/null",
+    "-final deletion"
+  ],
+  "optional_spans": [
+    "index 1111111..2222222 100644",
+    "index 3333333..4444444 100644"
+  ],
+  "forbidden_spans": [
+    "    unchanged_line_one();",
+    "    unchanged_line_two();"
+  ],
+  "expected_lossiness_level": "semantic_extract",
+  "max_uncertainty": "low",
+  "min_reduction_ratio": 0.1,
+  "notes": "Fixture proves diff headers, hunk headers, changed lines, rename markers, binary markers, file modes, and touched paths remain visible."
+}

@@ -239,7 +239,7 @@ pub fn cmd_next(command: &[String], execute_task: ExecuteTaskFn) -> i32 {
     let commands = match parse_commands_array(&schema_value.to_string()) {
         Ok(v) => v,
         Err(reason) => {
-            crate::cx_eprintln!("cxrs next: {reason}");
+            crate::cx_eprintln!("{}", format_error("next", &reason));
             return EXIT_RUNTIME;
         }
     };

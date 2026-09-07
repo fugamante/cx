@@ -2,6 +2,9 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::contract_versions::OPTIMIZE_JSON_CONTRACT_VERSION;
+use crate::diagnostics::sort_actions_by_phase7;
+use crate::doctor::{exec_action_value, exec_diag_value, latest_run_all_sum, latest_wave_sum};
+use crate::json_mode::resolve_json_mode;
 use crate::logs::load_runs;
 use crate::optimize_rules::{
     RecommendationInput, build_recommendations, push_cache_anomaly, push_clip_anomaly,
@@ -9,6 +12,7 @@ use crate::optimize_rules::{
     push_token_anomaly,
 };
 use crate::paths::resolve_log_file;
+use crate::provider_adapter::selected_tq_caps;
 use crate::types::RunEntry;
 
 pub type OptimizeArgs = (usize, bool, bool, bool, Option<String>);
@@ -38,7 +42,7 @@ fn severity_rank(level: &str) -> i32 {
 
 pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<OptimizeArgs, String> {
     let mut n = default_n;
-    let mut json_out = false;
+    let mut json_out: Option<bool> = None;
     let mut actions = false;
     let mut strict = false;
     let mut severity_floor: Option<String> = None;
@@ -46,7 +50,11 @@ pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<Optimize
     while i < args.len() {
         match args[i].as_str() {
             "--json" => {
-                json_out = true;
+                json_out = Some(true);
+                i += 1;
+            }
+            "--text" => {
+                json_out = Some(false);
                 i += 1;
             }
             "--actions" => {
@@ -79,7 +87,13 @@ pub fn parse_optimize_args(args: &[String], default_n: usize) -> Result<Optimize
             }
         }
     }
-    Ok((n, json_out, actions, strict, severity_floor))
+    Ok((
+        n,
+        resolve_json_mode(json_out, false),
+        actions,
+        strict,
+        severity_floor,
+    ))
 }
 
 fn empty_report(n: usize, log_file: &std::path::Path) -> Value {
@@ -113,6 +127,17 @@ struct Agg {
     retry_task_timeout_seen: HashMap<String, bool>,
     retry_task_recovered: HashMap<String, bool>,
     retry_attempt_histogram: HashMap<u64, u64>,
+    timing_task_rows: u64,
+    timing_with_retry_attempt: u64,
+    timing_with_queue_started_at: u64,
+    timing_with_task_started_at: u64,
+    timing_with_task_finished_at: u64,
+    capture_prompt_rows_with_profile: u64,
+    capture_prompt_shadow_narrow_configured: u64,
+    capture_prompt_shadow_narrow_applied: u64,
+    capture_prompt_shadow_narrow_fallback: u64,
+    capture_prompt_applied_reducer_kinds: HashMap<String, u64>,
+    capture_prompt_fallback_reasons: HashMap<String, u64>,
 }
 
 impl Agg {
@@ -142,6 +167,38 @@ impl Agg {
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
             *self.timeout_labels.entry(label).or_insert(0) += 1;
+        }
+        let is_task_row = r
+            .task_id
+            .as_ref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false);
+        if is_task_row {
+            self.timing_task_rows += 1;
+            if r.retry_attempt.is_some() {
+                self.timing_with_retry_attempt += 1;
+            }
+            if r.queue_started_at
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+            {
+                self.timing_with_queue_started_at += 1;
+            }
+            if r.task_started_at
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+            {
+                self.timing_with_task_started_at += 1;
+            }
+            if r.task_finished_at
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+            {
+                self.timing_with_task_finished_at += 1;
+            }
         }
         if let Some(attempt) = r.retry_attempt.map(u64::from) {
             *self.retry_attempt_histogram.entry(attempt).or_insert(0) += 1;
@@ -186,6 +243,44 @@ impl Agg {
             entry.2 += r.system_output_len_clipped.unwrap_or(0);
             entry.3 += 1;
         }
+        if let Some(profile) = r
+            .capture_prompt_profile
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            self.capture_prompt_rows_with_profile += 1;
+            if profile == "shadow_narrow" {
+                self.capture_prompt_shadow_narrow_configured += 1;
+                if r.capture_prompt_profile_applied == Some(true) {
+                    self.capture_prompt_shadow_narrow_applied += 1;
+                    if let Some(kind) = r
+                        .capture_prompt_reducer_kind
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        *self
+                            .capture_prompt_applied_reducer_kinds
+                            .entry(kind.to_string())
+                            .or_insert(0) += 1;
+                    }
+                } else {
+                    self.capture_prompt_shadow_narrow_fallback += 1;
+                    if let Some(reason) = r
+                        .capture_prompt_fallback_reason
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        *self
+                            .capture_prompt_fallback_reasons
+                            .entry(reason.to_string())
+                            .or_insert(0) += 1;
+                    }
+                }
+            }
+        }
         self.sum_in += r.input_tokens.unwrap_or(0);
         self.sum_cached += r.cached_input_tokens.unwrap_or(0);
     }
@@ -194,9 +289,9 @@ impl Agg {
 fn top_avg(map: HashMap<String, (u64, u64)>) -> Vec<(String, u64)> {
     let mut rows: Vec<(String, u64)> = map
         .into_iter()
-        .map(|(tool, (sum, count))| (tool, if count == 0 { 0 } else { sum / count }))
+        .map(|(tool, (sum, count))| (tool, sum.checked_div(count).unwrap_or(0)))
         .collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.1));
     rows.truncate(5);
     rows
 }
@@ -261,6 +356,7 @@ struct AnomalyInput<'a> {
     timeout_freq: Option<f64>,
     retry_rows_rate: Option<f64>,
     retry_recovery_rate: Option<f64>,
+    timing_coverage_min: Option<f64>,
 }
 
 fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
@@ -276,6 +372,7 @@ fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
         timeout_freq,
         retry_rows_rate,
         retry_recovery_rate,
+        timing_coverage_min,
     } = input;
     let mut anomalies: Vec<String> = Vec::new();
     push_latency_anomaly(&mut anomalies, top_dur, max_ms);
@@ -285,6 +382,14 @@ fn build_anomalies(input: AnomalyInput<'_>) -> Vec<String> {
     push_clip_anomaly(&mut anomalies, clip_freq);
     push_timeout_anomaly(&mut anomalies, timeout_freq);
     push_retry_anomaly(&mut anomalies, retry_rows_rate, retry_recovery_rate);
+    if let Some(min_cov) = timing_coverage_min
+        && min_cov < 0.80
+    {
+        anomalies.push(format!(
+            "Timing attribution coverage is low: min_field_coverage={}%",
+            (min_cov * 100.0).round() as i64
+        ));
+    }
     anomalies
 }
 
@@ -305,6 +410,15 @@ struct Derived {
     retry_tasks_with_timeout: u64,
     retry_tasks_recovered: u64,
     retry_attempt_histogram: Vec<(u64, u64)>,
+    timing_retry_attempt_rate: Option<f64>,
+    timing_queue_started_at_rate: Option<f64>,
+    timing_task_started_at_rate: Option<f64>,
+    timing_task_finished_at_rate: Option<f64>,
+    timing_min_coverage_rate: Option<f64>,
+    capture_prompt_applied_reducer_kinds: Vec<(String, u64)>,
+    capture_prompt_fallback_reasons: Vec<(String, u64)>,
+    capture_prompt_shadow_narrow_applied_rate: Option<f64>,
+    capture_prompt_shadow_narrow_fallback_rate: Option<f64>,
 }
 
 fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
@@ -312,7 +426,7 @@ fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
     let top_dur = top_avg(agg.tool_dur.clone());
     let mut top_timeout_labels: Vec<(String, u64)> =
         agg.timeout_labels.clone().into_iter().collect();
-    top_timeout_labels.sort_by(|a, b| b.1.cmp(&a.1));
+    top_timeout_labels.sort_by_key(|row| std::cmp::Reverse(row.1));
     top_timeout_labels.truncate(5);
     let cache_all = (agg.sum_in > 0).then_some(agg.sum_cached as f64 / agg.sum_in as f64);
     let (first_cache, second_cache) = cache_halves(runs);
@@ -339,8 +453,47 @@ fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
         .then_some(retry_tasks_recovered as f64 / retry_tasks_with_timeout as f64);
     let mut retry_attempt_histogram: Vec<(u64, u64)> =
         agg.retry_attempt_histogram.clone().into_iter().collect();
-    retry_attempt_histogram.sort_by(|a, b| a.0.cmp(&b.0));
+    retry_attempt_histogram.sort_by_key(|row| row.0);
+    let timing_retry_attempt_rate = (agg.timing_task_rows > 0)
+        .then_some(agg.timing_with_retry_attempt as f64 / agg.timing_task_rows as f64);
+    let timing_queue_started_at_rate = (agg.timing_task_rows > 0)
+        .then_some(agg.timing_with_queue_started_at as f64 / agg.timing_task_rows as f64);
+    let timing_task_started_at_rate = (agg.timing_task_rows > 0)
+        .then_some(agg.timing_with_task_started_at as f64 / agg.timing_task_rows as f64);
+    let timing_task_finished_at_rate = (agg.timing_task_rows > 0)
+        .then_some(agg.timing_with_task_finished_at as f64 / agg.timing_task_rows as f64);
+    let timing_min_coverage_rate = [
+        timing_retry_attempt_rate,
+        timing_queue_started_at_rate,
+        timing_task_started_at_rate,
+        timing_task_finished_at_rate,
+    ]
+    .into_iter()
+    .flatten()
+    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let compression = compression_rows(agg.provider_stats.clone());
+    let mut capture_prompt_applied_reducer_kinds: Vec<(String, u64)> = agg
+        .capture_prompt_applied_reducer_kinds
+        .clone()
+        .into_iter()
+        .collect();
+    capture_prompt_applied_reducer_kinds.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut capture_prompt_fallback_reasons: Vec<(String, u64)> = agg
+        .capture_prompt_fallback_reasons
+        .clone()
+        .into_iter()
+        .collect();
+    capture_prompt_fallback_reasons.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let capture_prompt_shadow_narrow_applied_rate =
+        (agg.capture_prompt_shadow_narrow_configured > 0).then_some(
+            agg.capture_prompt_shadow_narrow_applied as f64
+                / agg.capture_prompt_shadow_narrow_configured as f64,
+        );
+    let capture_prompt_shadow_narrow_fallback_rate =
+        (agg.capture_prompt_shadow_narrow_configured > 0).then_some(
+            agg.capture_prompt_shadow_narrow_fallback as f64
+                / agg.capture_prompt_shadow_narrow_configured as f64,
+        );
     (
         agg,
         Derived {
@@ -360,6 +513,15 @@ fn derive_metrics(runs: &[RunEntry], agg: Agg) -> (Agg, Derived) {
             retry_tasks_with_timeout,
             retry_tasks_recovered,
             retry_attempt_histogram,
+            timing_retry_attempt_rate,
+            timing_queue_started_at_rate,
+            timing_task_started_at_rate,
+            timing_task_finished_at_rate,
+            timing_min_coverage_rate,
+            capture_prompt_applied_reducer_kinds,
+            capture_prompt_fallback_reasons,
+            capture_prompt_shadow_narrow_applied_rate,
+            capture_prompt_shadow_narrow_fallback_rate,
         },
     )
 }
@@ -408,7 +570,29 @@ fn build_scoreboard(total: u64, agg: &Agg, d: &Derived) -> Value {
             "tasks_recovery_rate": d.retry_tasks_recovery_rate,
             "attempt_histogram": d.retry_attempt_histogram
         },
+        "timing_attribution_coverage": {
+            "task_rows": agg.timing_task_rows,
+            "rows_with_retry_attempt": agg.timing_with_retry_attempt,
+            "rows_with_queue_started_at": agg.timing_with_queue_started_at,
+            "rows_with_task_started_at": agg.timing_with_task_started_at,
+            "rows_with_task_finished_at": agg.timing_with_task_finished_at,
+            "retry_attempt_rate": d.timing_retry_attempt_rate,
+            "queue_started_at_rate": d.timing_queue_started_at_rate,
+            "task_started_at_rate": d.timing_task_started_at_rate,
+            "task_finished_at_rate": d.timing_task_finished_at_rate,
+            "min_coverage_rate": d.timing_min_coverage_rate
+        },
         "capture_provider_compression": d.compression,
+        "capture_prompt_profile_rollout": {
+            "rows_with_explicit_profile": agg.capture_prompt_rows_with_profile,
+            "shadow_narrow_configured_runs": agg.capture_prompt_shadow_narrow_configured,
+            "shadow_narrow_applied_runs": agg.capture_prompt_shadow_narrow_applied,
+            "shadow_narrow_fallback_runs": agg.capture_prompt_shadow_narrow_fallback,
+            "shadow_narrow_applied_rate": d.capture_prompt_shadow_narrow_applied_rate,
+            "shadow_narrow_fallback_rate": d.capture_prompt_shadow_narrow_fallback_rate,
+            "applied_reducer_kinds": d.capture_prompt_applied_reducer_kinds,
+            "fallback_reasons": d.capture_prompt_fallback_reasons
+        },
         "budget_clipping_frequency": {
             "captured_runs": agg.clipped_total,
             "clipped_runs": agg.clipped_count,
@@ -425,10 +609,18 @@ fn build_full_report(
     recommendations: Vec<String>,
     log_file: &std::path::Path,
 ) -> Value {
+    let experiment_caps = selected_tq_caps();
     json!({
         "contract_version": OPTIMIZE_JSON_CONTRACT_VERSION,
         "window": n,
         "runs": total,
+        "backend_capabilities": {
+            "turboquant": {
+                "cx_runtime_support": experiment_caps.turboquant_runtime_support,
+                "selected_backend_role": experiment_caps.turboquant_backend_role,
+                "memory_metric_kind": experiment_caps.turboquant_metric_kind,
+            }
+        },
         "scoreboard": scoreboard,
         "anomalies": anomalies,
         "recommendations": recommendations,
@@ -438,6 +630,12 @@ fn build_full_report(
 
 pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
     let mut actions: Vec<Value> = Vec::new();
+    let latest_run = latest_run_all_sum();
+    let latest_wave = latest_wave_sum();
+    let task_execution = exec_diag_value(latest_run.as_ref(), latest_wave.as_ref());
+    if let Some(exec_action) = exec_action_value(&task_execution) {
+        actions.push(exec_action);
+    }
     let Some(scoreboard) = report.get("scoreboard") else {
         return actions;
     };
@@ -455,7 +653,7 @@ pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
                 "id": "latency_hotspot",
                 "severity": "warning",
                 "rationale": format!("Highest average duration is concentrated on {tool} ({dur}ms)."),
-                "command": "cx optimize 200 --json --actions"
+                "command": crate::config::command_with_cli("optimize 200 --json --actions")
             }));
         }
     }
@@ -469,7 +667,7 @@ pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
             "id": "schema_failure_frequency",
             "severity": if schema_rate > 0.05 { "critical" } else { "warning" },
             "rationale": format!("Schema failure rate detected at {}%.", (schema_rate * 100.0).round() as i64),
-            "command": "cx diag --json --strict --actions"
+            "command": crate::config::command_with_cli("diag --json --strict --actions")
         }));
     }
     let timeout_rate = scoreboard
@@ -482,7 +680,7 @@ pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
             "id": "timeout_frequency",
             "severity": "warning",
             "rationale": format!("Timeout frequency is elevated at {}% of runs.", (timeout_rate * 100.0).round() as i64),
-            "command": "cx logs stats 200 --json --strict"
+            "command": crate::config::command_with_cli("logs stats 200 --json --strict")
         }));
     }
     let clip_rate = scoreboard
@@ -495,7 +693,20 @@ pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
             "id": "budget_clipping_frequency",
             "severity": "warning",
             "rationale": format!("Budget clipping occurs in {}% of captured runs.", (clip_rate * 100.0).round() as i64),
-            "command": "cx budget"
+            "command": crate::config::command_with_cli("budget")
+        }));
+    }
+    let timing_cov = scoreboard
+        .get("timing_attribution_coverage")
+        .and_then(|v| v.get("min_coverage_rate"))
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+    if timing_cov < 0.80 {
+        actions.push(json!({
+            "id": "timing_attribution_coverage_low",
+            "severity": "warning",
+            "rationale": format!("Task timing attribution coverage is low at {}% minimum field population.", (timing_cov * 100.0).round() as i64),
+            "command": crate::config::command_with_cli("scheduler --json --window 200")
         }));
     }
     let cache_delta = scoreboard
@@ -508,8 +719,45 @@ pub fn build_optimize_actions(report: &Value) -> Vec<Value> {
             "id": "cache_hit_degradation",
             "severity": "warning",
             "rationale": format!("Cache hit trend regressed by {} percentage points.", (cache_delta * 100.0).round() as i64),
-            "command": "cx promptlint 200"
+            "command": crate::config::command_with_cli("promptlint 200")
         }));
+    }
+    let capture_prompt_rollout = scoreboard.get("capture_prompt_profile_rollout");
+    let capture_prompt_fallback_rate = capture_prompt_rollout
+        .and_then(|v| v.get("shadow_narrow_fallback_rate"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let capture_prompt_configured_runs = capture_prompt_rollout
+        .and_then(|v| v.get("shadow_narrow_configured_runs"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let capture_prompt_applied_runs = capture_prompt_rollout
+        .and_then(|v| v.get("shadow_narrow_applied_runs"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if capture_prompt_configured_runs > 0
+        && (capture_prompt_fallback_rate > 0.0 || capture_prompt_applied_runs == 0)
+    {
+        let rationale = if capture_prompt_applied_runs == 0 {
+            format!(
+                "shadow_narrow was configured for {} runs but never applied; review reducer eligibility and fallback reasons.",
+                capture_prompt_configured_runs
+            )
+        } else {
+            format!(
+                "shadow_narrow fell back in {}% of configured runs; inspect reducer mix and fallback reasons.",
+                (capture_prompt_fallback_rate * 100.0).round() as i64
+            )
+        };
+        actions.push(json!({
+            "id": "capture_prompt_rollout_followup",
+            "severity": "warning",
+            "rationale": rationale,
+            "command": crate::config::command_with_cli("telemetry 200 --json")
+        }));
+    }
+    if actions.len() > 1 {
+        sort_actions_by_phase7(&mut actions[1..]);
     }
     actions
 }
@@ -568,6 +816,7 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         timeout_freq: d.timeout_freq,
         retry_rows_rate: d.retry_rows_rate,
         retry_recovery_rate: d.retry_tasks_recovery_rate,
+        timing_coverage_min: d.timing_min_coverage_rate,
     });
     let recommendations = build_recommendations(RecommendationInput {
         top_eff: &d.top_eff,
@@ -578,7 +827,28 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         top_timeout_labels: &d.top_timeout_labels,
         retry_rows_rate: d.retry_rows_rate,
         retry_recovery_rate: d.retry_tasks_recovery_rate,
+        timing_coverage_min: d.timing_min_coverage_rate,
     });
+    let mut recommendations = recommendations;
+    if agg.capture_prompt_shadow_narrow_configured > 0 {
+        if agg.capture_prompt_shadow_narrow_applied == 0 {
+            recommendations.push(format!(
+                "shadow_narrow is configured but never applied across {} runs; inspect capture_prompt_telemetry before widening rollout.",
+                agg.capture_prompt_shadow_narrow_configured
+            ));
+        } else if agg.capture_prompt_shadow_narrow_fallback > 0 {
+            recommendations.push(format!(
+                "shadow_narrow fallback observed in {} of {} configured runs; review fallback reasons and reducer eligibility in capture_prompt_telemetry.",
+                agg.capture_prompt_shadow_narrow_fallback,
+                agg.capture_prompt_shadow_narrow_configured
+            ));
+        } else {
+            recommendations.push(format!(
+                "shadow_narrow applied cleanly across {} configured runs; use capture_prompt_profile_rollout to decide whether more reducer classes need fixture coverage.",
+                agg.capture_prompt_shadow_narrow_configured
+            ));
+        }
+    }
 
     let total = runs.len() as u64;
     let scoreboard = build_scoreboard(total, &agg, &d);
@@ -590,4 +860,55 @@ pub fn optimize_report(n: usize) -> Result<Value, String> {
         recommendations,
         &log_file,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_optimize_actions;
+    use serde_json::Value;
+    use serde_json::json;
+
+    #[test]
+    fn optimize_order_cov() {
+        let report = json!({
+            "scoreboard": {
+                "top_avg_duration_ms": [["cxo", 4200]],
+                "schema_failure_frequency": { "rate": 0.02 },
+                "timeout_frequency": { "rate": 0.06 },
+                "budget_clipping_frequency": { "rate": 0.0 },
+                "timing_attribution_coverage": { "min_coverage_rate": 1.0 },
+                "cache_hit_trend": { "delta": 0.0 }
+            }
+        });
+        let actions = build_optimize_actions(&report);
+        let diag_idx = actions
+            .iter()
+            .position(|action| {
+                action.get("command").and_then(Value::as_str)
+                    == Some(
+                        crate::config::command_with_cli("diag --json --strict --actions").as_str(),
+                    )
+            })
+            .expect("diag action");
+        let logs_idx = actions
+            .iter()
+            .position(|action| {
+                action.get("command").and_then(Value::as_str)
+                    == Some(
+                        crate::config::command_with_cli("logs stats 200 --json --strict").as_str(),
+                    )
+            })
+            .expect("logs action");
+        let optimize_idx = actions
+            .iter()
+            .position(|action| {
+                action.get("command").and_then(Value::as_str)
+                    == Some(
+                        crate::config::command_with_cli("optimize 200 --json --actions").as_str(),
+                    )
+            })
+            .expect("optimize action");
+        assert!(diag_idx < logs_idx, "{actions:?}");
+        assert!(diag_idx < optimize_idx, "{actions:?}");
+    }
 }

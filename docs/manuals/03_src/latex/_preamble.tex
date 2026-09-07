@@ -1,8 +1,8 @@
-% Shared preamble for cx manuals (Apple-clean, print-friendly).
+% Shared preamble for XSHELF manuals (Apple-clean, print-friendly).
 % XeLaTeX recommended.
 \usepackage[margin=1in]{geometry}
 \usepackage{fontspec}
-\usepackage{microtype}
+\usepackage[nopatch=footnote]{microtype}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -50,7 +50,7 @@
 
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\textcolor{Subtle}{CX manual}}
+\lhead{\textcolor{Subtle}{XSHELF manual}}
 \rhead{\textcolor{Subtle}{\thepage}}
 \cfoot{}
 \setlength{\headheight}{14pt}

@@ -1,466 +1,363 @@
-# XSHELF (formerly CX)
+# XSHELF
 
-`cx` is a deterministic, Rust-first LLM dev runtime for repositories.
+XSHELF is deterministic runtime tooling for LLM-assisted repository work. It
+wraps repo commands so assistants and automation see bounded, inspectable
+evidence instead of an unstructured terminal transcript.
 
-Project naming note:
-- `XSHELF/CX` is an independent open-source project and is not affiliated with or endorsed by OpenAI.
+Use it when a free-form assistant loop is too loose for CI, repeatable task
+execution, or operator workflows that need stable JSON contracts. XSHELF
+captures command output, reduces context, enforces execution policy, validates
+structured responses, and keeps failures replayable.
 
-- Canonical execution engine: `rust/cxrs`
-- Canonical entrypoint: `bin/cx` (Rust-only dispatch)
-- Deterministic structured commands: schema-enforced JSON + quarantine/replay on failure
-- Unified execution pipeline: capture -> internal native reduction -> mandatory budgeting -> LLM -> validation -> logging
-- Repo-local state and telemetry under `.codex/` (logs, schemas, tasks, quarantine, state)
-- Built-in task graph and run orchestration (`task add/fanout/run/run-all`)
-- Safety layer for command execution boundaries and policy visibility (`policy show`)
-- Backend model: Codex by default, Ollama optional/user-selectable
+`CX` remains a supported compatibility command surface during the rename
+migration. `XSHELF/CX` is an independent open-source project and is not
+affiliated with or endorsed by OpenAI.
 
-## Runtime vs Development
+## First Useful Output
 
-For normal users, `CX` is a runtime tool, not a test harness.
-
-- Normal usage does not run the full Rust test suite.
-- Shell startup does not run tests.
-- Runtime verification is through `./bin/cx doctor` and `./bin/cx health`.
-- The full suite (`cargo test`, compat checks, guardrails, CI contract checks) is maintainer-only.
-
-This separation is intentional: end users should get the runtime, while contributors and CI carry the validation load.
-
-## Technical Exposé (Rust Refactor Snapshot)
-
-This branch is actively decomposing `cxrs` from a monolithic command file into focused modules while preserving CLI behavior and contracts.
-
-Current status:
-- quality gate clean: `file_violations=0`, `function_violations=0`
-- test suite passing in serial mode (`cargo test -q -- --test-threads=1`)
-- command modules now consistently split into handler + internal helpers for lower coupling and easier review
-
-Current refactor highlights:
-
-- `src/app/mod.rs` remains the orchestrator/dispatcher (reduced substantially from initial monolith size)
-- centralized runtime configuration in `src/modules/config.rs` (`AppConfig` loaded once at startup)
-- command families extracted into dedicated modules:
-  - `src/modules/introspect.rs` (`version`, `core`)
-  - `src/modules/runtime_controls.rs` (`log-on/off`, `alert-*`, `capture-status`)
-  - `src/modules/agentcmds.rs` (`cx/cxj/cxo/cxol/cxcopy/fix`)
-  - `src/modules/logview.rs` (`budget`, `log-tail`)
-  - `src/modules/analytics.rs` (`metrics/profile/trace/alert/worklog`)
-  - `src/modules/diagnostics.rs` (`diag`, helpers)
-  - `src/modules/routing.rs` (`where`, `routes`, provenance helpers`)
-  - `src/modules/prompting.rs` (`prompt/roles/fanout/promptlint`)
-  - `src/modules/optimize.rs` (`optimize`)
-  - `src/modules/doctor.rs` (`doctor`, `health`)
-  - `src/modules/schema_ops.rs` (`schema list`, `ci validate`)
-  - `src/modules/settings_cmds.rs` (`state *`, `llm *`)
-  - `src/modules/structured_cmds.rs` (`next`, `fix-run`, `diffsum*`, `commitjson`, `commitmsg`, `replay`)
-  - `src/modules/task_cmds.rs` (`task add/list/show/claim/complete/fail/fanout/run/run-all`)
-- consolidated LLM command path in `src/modules/agentcmds.rs` via shared `execute_llm_command(..., LlmMode)`
-
-Design intent:
-- keep command UX stable while shrinking coupling and improving testability
-- make error paths explicit and quarantine-backed
-- keep Rust as authoritative behavior for capture, schema, policy, and telemetry contracts
-
-## Configuration Contract
-
-`cxrs` now snapshots core environment configuration once at startup (`AppConfig`) and reuses it across modules.
-
-Primary fields:
-- budgets: `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`, `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
-- process timeout: `CX_CMD_TIMEOUT_SECS` (default `120`)
-- backend/model: `CX_LLM_BACKEND`, `CX_OLLAMA_MODEL`, `CX_MODEL`
-- execution mode: `CX_MODE`, `CX_SCHEMA_RELAXED`
-- operational toggles: `CXLOG_ENABLED`, `CXBENCH_LOG`, `CXBENCH_PASSTHRU`, `CXFIX_RUN`, `CXFIX_FORCE`, `CX_UNSAFE`
-
-Key defaults:
-- context chars: `12000`
-- context lines: `300`
-- run window defaults: `50`
-- optimize window default: `200`
-- quarantine list default: `20`
-
-## Architecture
-
-The runtime pipeline is unified in Rust:
-
-1. Capture system output
-2. Internal native reduction
-3. Mandatory context budgeting (chars + lines)
-4. LLM execution
-5. Schema validation (for structured commands)
-6. Quarantine on schema failure
-7. Append-only JSONL logging
-
-Structured commands are schema-enforced from `.codex/schemas/` and deterministic by default.
-
-## Repository Layout
-
-- `bin/cx` - single entrypoint, Rust-first dispatcher
-- `rust/cxrs/src/main.rs` - module entrypoint
-- `rust/cxrs/src/app/mod.rs` - command routing/orchestration
-- `rust/cxrs/src/modules/*.rs` - domain modules (capture, logging, schema, tasks, policy, diagnostics)
-- `cx.sh` - deprecated compatibility loader (sources `lib/cx.sh`)
-- `lib/cx.sh` - thin shell shim that delegates to `bin/cx`
-- `.codex/schemas/` - JSON schema registry
-- `.codex/cxlogs/` - run + schema failure logs (runtime)
-- `.codex/quarantine/` - invalid schema outputs (runtime)
-
-## Versioning
-
-`VERSION` is intentionally a single-line, machine-readable current version:
-
-- `2026.03.05`
-
-Human-readable release history lives in tags + changelog:
-
-- [`v2026.02.21`](https://github.com/fugamante/cx/releases/tag/v2026.02.21) - schema hardening + strict routing baseline
-- [`v2026.02.21-20260225T151634Z`](https://github.com/fugamante/cx/releases/tag/v2026.02.21-20260225T151634Z) - docs/manual snapshot milestone
-- current development head tracked in [`CHANGELOG.md`](CHANGELOG.md) under `Unreleased`
-- historical version definitions in [`VERSION_HISTORY.md`](VERSION_HISTORY.md)
-
-Quick checks:
+Start with read-only checks. These commands inspect the runtime without changing
+repository configuration.
 
 ```bash
-git tag --list --sort=creatordate
-cat VERSION
+./bin/xshelf version
+./bin/xshelf task check --json
+./bin/xshelf core --json
+./bin/xshelf diag --json --window 20
 ```
 
-## Requirements
-
-### Runtime (required)
-
-| Dependency | Minimum | Validated in this repo | Notes |
-|---|---:|---:|---|
-| OS | macOS or Linux | macOS (darwin) | Windows supported via WSL |
-| `bash` | 5.0+ | 5.3.9 | Shell wrappers/bootstrap |
-| `git` | 2.30+ | 2.53.0 | Repo detection, diff/log capture |
-| `jq` | 1.6+ | 1.8.1 | JSON processing and compatibility scripts |
-| `codex` CLI | 0.103.0+ | 0.103.0 | Default LLM backend |
-
-### Runtime (optional)
-
-| Dependency | Minimum | Validated in this repo | Notes |
-|---|---:|---:|---|
-| `ollama` | 0.17.0+ | 0.17.0 | Optional local LLM backend |
-
-### Development / CI
-
-| Dependency | Minimum | Validated in this repo | Notes |
-|---|---:|---:|---|
-| `rustc` | 1.93.1 | 1.93.1 | Canonical runtime is Rust |
-| `cargo` | 1.93.1 | 1.93.1 | Build/test |
-| `python3` | 3.10+ | 3.14.3 | Quality gate + helper scripts |
-| `make` | 3.81+ | 3.81 | Convenience targets (`make install`, compat checks) |
-
-### Rust crates
-
-Rust crate dependencies are pinned in `rust/cxrs/Cargo.lock` for reproducible builds.
-
-Development-only note:
-- The `Development / CI` dependencies are for contributors and release validation.
-- End users do not need to run `cargo test` or guardrail scripts to use `CX`.
-
-## Quick Start
-```bash
-cd <repo-root>
-./bin/cx version
-./bin/cx core
-./bin/cx cxo git status
-```
-
-Quick runtime verification:
-
-```bash
-./bin/cx doctor
-./bin/cx health
-```
-
-## Lean Daily Session
-
-Start a low-noise, quota-aware operator session:
-
-```bash
-cd <repo-root>
-./bin/cx-lean-session
-```
-
-Strict gate mode (non-zero exit on warning/critical actions):
-
-```bash
-cd <repo-root>
-./bin/cx-lean-session --strict
-```
-
-Note:
-- `cx-lean-session` does not change broker policy implicitly.
-- Set broker policy explicitly when needed:
-```bash
-./bin/cx broker set --policy quota_saver
-```
-- Optional dynamic quota guard:
-```bash
-./bin/cx quota guard on --warn-pct 25 --critical-pct 10 --auto-action none
-./bin/cx quota guard check 30 --json | jq .
-```
-- Set or clear known quota totals explicitly:
-```bash
-./bin/cx quota set codex 2000000
-./bin/cx quota unset codex
-```
-- Maintain a provider-source quota catalog (tier metadata + source URLs):
-```bash
-./bin/cx quota catalog refresh
-./bin/cx quota catalog show --json | jq .
-./bin/cx quota probe 30 --json | jq .
-```
-- Optional automatic catalog refresh (opt-in) with stale-age policy:
-```bash
-./bin/cx quota catalog auto on --interval-hours 168
-./bin/cx quota catalog refresh --if-stale --max-age-hours 168
-./bin/cx quota catalog auto show
-./bin/cx quota catalog auto off
-```
-
-## Backend Selection
-
-`cxrs` resolves backend/model using:
-
-1. CLI intent
-2. environment variables
-3. persisted state (`.codex/state.json`)
-4. default (`codex`)
-
-Examples:
-
-```bash
-./bin/cx llm show
-./bin/cx llm use codex
-./bin/cx llm use ollama llama3.1
-./bin/cx llm unset model
-```
-
-`llm use`/`llm set-*` now triggers an automatic quota probe notice to stderr.
-For local providers (`ollama`), CX reports a local-unmetered fallback notice when provider quota cannot be resolved.
-
-## Structured Commands
-
-Schema-enforced commands:
-
-- `commitjson`
-- `diffsum`
-- `diffsum-staged`
-- `next`
-- `fix-run`
-
-Schema registry inspection:
-
-```bash
-./bin/cx schema list
-./bin/cx schema list --json | jq .
-```
-
-Relaxed mode override (not default):
-
-```bash
-CX_SCHEMA_RELAXED=1 ./bin/cx next git status
-```
-
-## Logging + Quarantine
-
-Run log:
-
-- `.codex/cxlogs/runs.jsonl`
-
-Schema failure log:
-
-- `.codex/cxlogs/schema_failures.jsonl`
-
-Quarantine directory:
-
-- `.codex/quarantine/`
-
-Useful commands:
-
-```bash
-./bin/cx metrics 20
-./bin/cx trace
-./bin/cx quarantine list
-./bin/cx replay <quarantine_id>
-```
-
-Telemetry health:
-
-```bash
-./bin/cx logs stats 200
-./bin/cx logs stats 200 --json | jq .
-./bin/cx logs stats 200 --json | jq '.critical_telemetry'
-./bin/cx telemetry 50 --json | jq .
-./bin/cx telemetry 50 --json | jq '.critical_telemetry'
-./bin/cx diag --json --window 50 | jq .
-./bin/cx diag --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
-./bin/cx scheduler --json --window 50 | jq .
-./bin/cx scheduler --json --strict --window 50 | jq '.severity,.severity_reasons,.critical'
-./bin/cx optimize 200 --json | jq .
-./bin/cx quota probe 30 --json | jq .
-./bin/cx quota guard show
-./bin/cx quota guard check 30 --json | jq .
-```
-
-Retry-health JSON surfaces:
-- `diag --json`: top-level `retry`
-- `scheduler --json`: top-level `retry`
-- `optimize --json`: `scoreboard.retry_health`
-- contract markers: top-level `contract_version` on JSON diagnostics surfaces
-- actions markers: top-level `actions_contract_version` when `--actions` is used
-
-Contract policy:
-- [`docs/CONTRACT_COMPATIBILITY.md`](docs/CONTRACT_COMPATIBILITY.md)
-
-Expected JSON shape (key excerpts):
+The task check prints a stable JSON contract. Values depend on the local task
+queue, but the shape should look like this:
 
 ```json
 {
-  "diag": {
-    "scheduler": { "window_runs": 50, "queue_ms_p95": 1200 },
-    "retry": {
-      "rows_with_retry_metadata": 8,
-      "rows_after_retry_success_rate": 0.75,
-      "attempt_histogram": { "1": 42, "2": 8 }
-    }
-  },
-  "scheduler": {
-    "scheduler": { "queue_rows": 20, "worker_distribution": { "w1": 10 } },
-    "retry": {
-      "tasks_with_retry": 3,
-      "tasks_retry_recovery_rate": 0.67
-    }
-  },
-  "optimize": {
-    "scoreboard": {
-      "retry_health": {
-        "rows_after_retry": 8,
-        "rows_after_retry_success": 6,
-        "tasks_recovery_rate": 0.67,
-        "attempt_histogram": [[1, 42], [2, 8]]
-      }
-    }
-  }
+  "contract_version": "task-check.v1",
+  "can_run": true,
+  "recommended_mode": "sequential",
+  "selected": 0
 }
 ```
 
-## Task Graph + Safety + Optimization
+## What It Provides
 
-Stage II runtime commands:
+| Need | XSHELF surface |
+| --- | --- |
+| Safe first inspection | `version`, `doctor`, `health`, `diag --json` |
+| Stable runtime state | `core --json`, `mode --json`, `broker show --json` |
+| Bounded command execution | `cxo ...` |
+| Task orchestration | `task add`, `task run`, `task run-all`, `task sandbox`, `task events` |
+| Contract hygiene | schema validation, quarantine, replay, contract bundles |
+| Backend selection | primary, Ollama, llama.cpp, MLX, HTTP adapter profiles |
+| Operator compatibility | local and multi-repo compatibility checks |
 
-```bash
-./bin/cx task add "Implement parser hardening" --role implementer
-./bin/cx task list --status pending
-./bin/cx task fanout "Ship release notes improvements" --from staged-diff
-./bin/cx task run-plan --status pending
-./bin/cx task run <task_id> --mode deterministic --backend codex
-./bin/cx task run-all --status pending
-./bin/cx task run-all --status pending --mode mixed
-./bin/cx task run-all --status pending --mode mixed --halt-on-critical
-CX_TASK_HALT_ON_CRITICAL=1 ./bin/cx task run-all --status pending
+Pipeline contract:
 
-./bin/cx optimize 200
-./bin/cx optimize 200 --json | jq .
-./bin/cx diag --json --window 50 | jq .
-./bin/cx scheduler --json --window 50 | jq .
-./bin/cx broker show --json | jq .
-./bin/cx broker benchmark --backend codex --backend ollama --window 200 --json | jq .
-./bin/cx broker benchmark --backend codex --backend ollama --window 200 --strict --min-runs 5 --json | jq .
-./bin/cx broker benchmark --backend codex --backend ollama --window 200 --strict --min-runs 5 --severity warn --json | jq .
-
-./bin/cx policy show
-./bin/cx logs validate --fix=false
+```text
+capture -> reduce -> budget -> run backend -> validate -> quarantine -> telemetry
 ```
 
-## Migration Phase III (Orchestration Modes)
+Diagnostics go to stderr. Machine-readable stdout stays parseable.
 
-Current status:
-- task graph and runner exist (`task add/list/fanout/run/run-all`), with sequential execution as the default.
+## Requirements
 
-Next migration phase (active on feature branch, not yet merged to main behavior):
-- add switchable orchestration modes so tasks can be explicitly sequential or parallelizable.
-- introduce execution-policy metadata on tasks (`run_mode`, `depends_on`, `resource_keys`, optional retries/timeouts).
-- introduce `task run-plan` for deterministic schedule preview before execution.
-- keep safety/determinism contracts unchanged:
-  - policy gates still enforced for execution paths,
-  - schema commands remain deterministic by default,
-  - telemetry/log contracts remain append-only and validated.
+Minimum local tools:
+- `bash`
+- `git`
+- `jq` for JSON examples
+- Rust toolchain for development and validation: `cargo`, `rustfmt`, `clippy`
 
-## Phase IV Preview (Multi-Model Tandem)
+Optional backend tools:
 
-Planned next migration focus:
-- broker-managed backend/model routing for tasks (`codex`, `ollama`, `auto`)
-- tandem execution convergence (`first_valid`, `majority`, `judge`, `score`)
-- backend pool scheduling for mixed-mode run-all with deterministic planning constraints
+| Backend | Tool |
+| --- | --- |
+| Ollama | `ollama` |
+| llama.cpp | `llama-cli` |
+| MLX on macOS | `mlx-lm` in a Python environment |
 
-Design and schedule:
-- `docs/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`
+Install shell functions and man pages:
+
+```bash
+./bin/xshelf-install
+./bin/xs-install
+./bin/cx-install
+man xshelf
+man xs
+man cx
+```
+
+Matching uninstall wrappers are available as `./bin/xshelf-uninstall`,
+`./bin/xs-uninstall`, and `./bin/cx-uninstall`.
+
+## Quick Start
+
+After the first inspection commands, check backend and runtime readiness:
+
+```bash
+./bin/xshelf llm check
+./bin/xshelf doctor
+./bin/xshelf health
+```
+
+After readiness checks pass, run a read-only repository command through the
+bounded execution path:
+
+```bash
+./bin/xshelf cxo git status
+```
+
+Command aliases:
+
+| Command | Role |
+| --- | --- |
+| `./bin/xshelf ...` | Canonical runtime command |
+| `./bin/xs ...` | Short alias |
+| `./bin/cx ...` | Compatibility alias during migration |
+
+## Everyday Operator Flow
+
+Inspect runtime state:
+
+```bash
+./bin/xshelf core --json | jq .
+./bin/xshelf mode --json | jq .
+./bin/xshelf broker show --json | jq .
+```
+
+Work with tasks:
+
+```bash
+./bin/xshelf task add "Implement parser hardening" --role implementer
+./bin/xshelf task check --json | jq .
+./bin/xshelf task run-all --status pending --mode mixed
+./bin/xshelf task sandbox show --json | jq .
+./bin/xshelf task sandbox check --json | jq .
+./bin/xshelf task events --limit 20 --json
+```
+
+Project task sandboxing is opt-in. Configure it per repo with:
+
+```bash
+./bin/xshelf task sandbox set-image xshelf-compat:local
+./bin/xshelf task sandbox enable
+./bin/xshelf task sandbox check --json
+```
+
+When enabled, `task run` and `task run-all` execute the inner task inside the
+configured Docker image on the bind-mounted repo and stamp additive
+`execution_lane=container` provenance into run logs. The container image must
+provide `xshelf`/`cx` on `PATH` or expose a repo-local `./bin/xshelf` or
+`./bin/cx` entrypoint. Use `task sandbox check --json` as the readiness gate:
+it verifies Docker availability, configured image availability, writable
+repo-local `.cx/` state, and an available `xshelf`/`cx` entrypoint before
+returning success. `CX_TASK_SANDBOX_ENABLED` and `CX_TASK_SANDBOX_IMAGE` remain
+supported as transient overrides.
+
+Inspect telemetry and contract health:
+
+```bash
+./bin/xshelf telemetry 50 --json | jq .
+./bin/xshelf logs stats 200 --json | jq .
+./bin/xshelf logs validate --fix=false
+```
+
+Task-event progress can be streamed to `.codex/cxlogs/task_events.jsonl`.
+Telemetry and log stats also expose additive rollout summaries for capture
+prompt telemetry when `CX_CAPTURE_PROMPT_PROFILE=shadow_narrow` is enabled.
+
+For the full command catalog, use the operator manuals:
+- [docs/manuals/00_README.md](docs/manuals/00_README.md)
+- [docs/manuals/02_web/index.html](docs/manuals/02_web/index.html)
+
+## Backend Selection
+
+Choose and inspect the active backend:
+
+```bash
+./bin/xshelf llm show
+./bin/xshelf llm check
+./bin/xshelf llm use primary
+./bin/xshelf llm use ollama llama3.1
+./bin/xshelf llm smoke "Respond with OK only."
+```
+
+Local model registry support lets a backend-scoped alias or ID resolve to the
+registered `resolved_model`. Inspect uses cheap path checks by default;
+`--disk-usage` enables recursive directory accounting.
+
+```bash
+./bin/xshelf llm models list --json | jq .
+./bin/xshelf llm models add local_mlx --backend mlx --model "$MLX_MODEL_ID"
+./bin/xshelf llm models inspect local_mlx --json | jq .
+```
+
+Backend-specific entry points:
+- llama.cpp smoke path: `./scripts/llamacpp_smoke.sh`
+- MLX verification: `./bin/xshelf llm verify mlx --profile smoke --json`
+- local HTTP resident probe: `./bin/xshelf llm resident probe-models --json`
+
+Backend planning and contract notes live in
+[docs/orchestration/PHASE_VIII_LOCAL_MODEL_SUBSTRATE.md](docs/orchestration/PHASE_VIII_LOCAL_MODEL_SUBSTRATE.md).
+Optional local provider sidecar requirements live in
+[docs/providers/LOCAL_PROVIDER_SIDECARS.md](docs/providers/LOCAL_PROVIDER_SIDECARS.md).
+
+## Operations Layer
+
+XSHELF is the runtime substrate. The operator/control-plane layer lives in the
+separate `cx-ops` repository, currently named `cx-eval-lab`.
+
+The boundary is intentional:
+- XSHELF owns command execution, schema enforcement, telemetry contracts,
+  quarantine/replay, safety policy, and task orchestration.
+- The operations layer consumes those stable JSON contracts and owns
+  operator-facing control-plane UX.
+
+Export and validate the contract bundle used by the operations layer:
+
+```bash
+./bin/xshelf contracts export --profile eval-lab --json
+./bin/xshelf contracts validate --profile eval-lab --json
+```
+
+Local multi-repo compatibility checks auto-discover sibling `cx` and
+`cx-eval-lab` repositories when present:
+
+```bash
+./scripts/compat_all.sh --quick
+```
+
+The repo boundary and promotion rules are documented in
+[docs/project/REPO_ROLE_CONTRACT.md](docs/project/REPO_ROLE_CONTRACT.md).
+
+## Configuration
+
+Common runtime knobs:
+- budgeting: `CX_CONTEXT_BUDGET_CHARS`, `CX_CONTEXT_BUDGET_LINES`,
+  `CX_CONTEXT_CLIP_MODE`, `CX_CONTEXT_CLIP_FOOTER`
+- timeout: `CX_CMD_TIMEOUT_SECS`
+- backend/model: `CX_LLM_BACKEND`, `CX_MODEL`, `CX_OLLAMA_MODEL`,
+  `CX_LLAMA_CPP_MODEL`, `CX_MLX_MODEL`
+- output mode: `CX_JSON_DEFAULT`, `CX_JSON_AUTO`
+- execution mode: `CX_MODE`, `CX_SCHEMA_RELAXED`
+- HTTP adapter: `CX_HTTP_PROVIDER_URL`, `CX_HTTP_PROVIDER_TOKEN`,
+  `CX_HTTP_REQUEST_PROFILE`, `CX_HTTP_PROVIDER_MODEL`,
+  `CX_HTTP_ALLOWED_HOSTS`, `CX_HTTP_REQUIRE_HTTPS`
+
+HTTP/TLS operator guidance:
+[docs/providers/HTTP_PROVIDER_TLS.md](docs/providers/HTTP_PROVIDER_TLS.md)
 
 ## Validation
 
-Validation in `CX` means checking that structured outputs, logs, and runtime contracts remain consistent and machine-readable.
+Choose the smallest check that matches the risk:
 
-Runtime validation:
+| Goal | Command | Use when |
+| --- | --- | --- |
+| Runtime health | `./bin/xshelf doctor` / `./bin/xshelf health` | checking local operator readiness |
+| Log integrity | `./bin/xshelf logs validate --fix=false` | verifying run-log contract health |
+| Fast maintainer pass | `./scripts/compat_local.sh --quick` | checking representative local compatibility before a patch |
+| Linux preflight | `./scripts/compat_docker.sh --smoke` | getting a cheap container-hosted signal |
+| Linux CI mirror | `./scripts/compat_docker.sh --ci` | approximating the core GitHub Linux guardrail locally |
+| Release signoff | `./scripts/compat_local.sh --full` | validating the strongest host-native release-readiness path |
+
+Operator checks:
 
 ```bash
-./bin/cx doctor
-./bin/cx health
-./bin/cx logs validate --fix=false
+./bin/xshelf doctor
+./bin/xshelf health
+./bin/xshelf logs validate --fix=false
 ```
 
-What these cover:
-- `doctor` checks runtime prerequisites and repo-local wiring
-- `health` provides a lightweight runtime status check
-- `logs validate` scans `.codex/cxlogs/runs.jsonl` for JSON integrity and required telemetry fields
-
-Schema failures are quarantined under `.codex/quarantine/`, and invalid structured outputs are prevented from silently re-entering the pipeline.
-
-## Maintainer Validation
+Typical maintainer sequence:
 
 ```bash
+./scripts/compat_local.sh --quick
+./scripts/compat_docker.sh --smoke
+./scripts/compat_docker.sh --ci
+./scripts/compat_local.sh --full
+
 cd rust/cxrs
-cargo fmt
-cargo check
-cargo test --tests
-python3 tools/release_check.py --repo-root ../..
-
-cd ../..
-./test/bin_cx_entrypoint.sh
-./test/provenance_tools.sh
-./test/schema_registry.sh
-./test/core_pipeline.sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings -D clippy::too_many_arguments
+cargo test --tests -- --test-threads=1
 ```
 
-Local push guardrails:
+Docker compatibility prerequisites:
+- Docker is installed and the local daemon is available.
+- The compat image can be built from `Dockerfile` or reused from cache.
+- The repo can be bind-mounted read-write because Docker cache state is written
+  under `.cx/compat/`.
+- The first run usually spends most of its time building the image and filling
+  the Cargo target cache under `.cx/compat/`; warm-cache reruns should be much
+  faster unless `--rebuild` is used.
 
-```bash
-./bin/cx-enable-githooks
-# pre-commit scans staged content for local-path/PII/secrets leaks
-# pre-push scans tracked content, then enforces fmt + clippy + tests
-git push
-```
+If the image or bind-mounted cache is stale:
+- Force a fresh image build with `./scripts/compat_docker.sh --rebuild ...`.
+- Prune unused Docker state with `docker image prune` / `docker builder prune`
+  before retrying if cache corruption or disk pressure is suspected.
 
-These checks are for development and CI. They are not part of ordinary end-user runtime execution.
+The default image tag is `xshelf-compat:local`. Advanced users can select an
+already available image with `./scripts/compat_docker.sh --image <tag> ...` or
+`CX_COMPAT_IMAGE=<tag>`; the script never pulls remote images automatically.
+When an override tag is missing, use `--rebuild` to build the repo Dockerfile
+into that tag or pull/build the image explicitly yourself.
 
-## Notes
+Release confidence:
+- `--smoke` is a fast Linux-hosted preflight, not a signoff step.
+- `compat_local.sh --quick` and `compat_docker.sh --quick` are representative
+  compatibility checks; the quick path avoids timeout-heavy reliability and
+  scheduler timing tests so it stays deterministic under harness load.
+- `compat_local.sh --full` is the strongest host-native release-signoff signal.
+  It runs the explicit integration suites, then runs guardrails with their
+  duplicate full-test step skipped.
+- Standalone `rust/cxrs/scripts/guardrails.sh` still runs the full test suite by
+  default.
+- `compat_docker.sh --ci` mirrors the core `cxrs-compat` Linux guardrail subset
+  locally. Its JSON report includes `ci_parity.intentional_deltas` for
+  workflow-only, hosted-runner, artifact, and dependency-security gates that
+  local Docker does not claim to reproduce.
 
-- No automatic checks run during shell startup.
-- Diagnostics are sent to stderr; pipeline-oriented command output remains on stdout.
-- Capture is internal-native only; schema JSON outputs are never transformed.
+## Development
 
-## License
+Runtime entrypoints:
 
-This project is licensed under the MIT License. See `LICENSE`.
+| Path | Purpose |
+| --- | --- |
+| `bin/xshelf` | Canonical runtime entrypoint |
+| `bin/xs` | Short runtime alias |
+| `bin/cx` | Compatibility runtime alias |
+| `rust/cxrs` | Authoritative Rust runtime |
+| `lib/cx.sh` | Shell compatibility shim |
 
-## Contributing and Security
+Design discipline:
+- Rust is authoritative for runtime behavior, contracts, and telemetry.
+- Shell remains compatibility/bootstrap only.
+- Startup should not run automatic checks.
+- Diagnostics go to stderr; pipeline output stays on stdout.
+- Capture is internal-native only.
+- `contracts export --profile full --json` is the declared machine-readable
+  compatibility manifest for covered JSON surfaces.
 
-- Contributing guide: `CONTRIBUTING.md`
-- Code of conduct: `CODE_OF_CONDUCT.md`
-- Security reporting: `SECURITY.md`
-- New contributor issue list: `docs/GOOD_FIRST_ISSUES.md`
-- Contributor walkthrough: `docs/CONTRIBUTOR_WALKTHROUGH.md`
-- Roadmap: `docs/ROADMAP.md`
-- Release cadence: `docs/RELEASE_CADENCE.md`
+## Documentation
+
+Start here:
+- [docs/README.md](docs/README.md) - documentation index
+- [docs/manuals/00_README.md](docs/manuals/00_README.md) - manual entrypoint
+- [docs/providers/CONTRACT_COMPATIBILITY.md](docs/providers/CONTRACT_COMPATIBILITY.md) - adapter contract compatibility
+- [docs/project/ROADMAP.md](docs/project/ROADMAP.md) - roadmap and planning context
+- [docs/project/PUBLIC_SURFACES.md](docs/project/PUBLIC_SURFACES.md) - public surface ownership
+- [docs/project/XSHELF_RENAME_MIGRATION.md](docs/project/XSHELF_RENAME_MIGRATION.md) - rename policy
+- [CHANGELOG.md](CHANGELOG.md) - release history
+
+Generated manuals:
+- [docs/manuals/02_web/CX_MANUAL_MASTER.html](docs/manuals/02_web/CX_MANUAL_MASTER.html)
+- [docs/manuals/01_pdf/CX_MANUAL_MASTER.pdf](docs/manuals/01_pdf/CX_MANUAL_MASTER.pdf)
+
+## Contributing And Security
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md)
+- [docs/contributing/GOOD_FIRST_ISSUES.md](docs/contributing/GOOD_FIRST_ISSUES.md)
+
+Versioning:
+- current machine-readable version: [VERSION](VERSION)
+- release history: [CHANGELOG.md](CHANGELOG.md), tags, and
+  [VERSION_HISTORY.md](VERSION_HISTORY.md)

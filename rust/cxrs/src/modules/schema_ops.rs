@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::capture::budget_config_from_env;
+use crate::config::cli_app_name;
 use crate::logs::validate_runs_jsonl_file;
 use crate::paths::{repo_root, resolve_log_file, resolve_schema_dir};
 use crate::schema::list_schemas;
@@ -16,13 +17,16 @@ pub fn cmd_schema(app_name: &str, args: &[String]) -> i32 {
     }
     let as_json = args.iter().any(|a| a == "--json");
     let Some(dir) = resolve_schema_dir() else {
-        crate::cx_eprintln!("cxrs schema: unable to resolve schema directory");
+        crate::cx_eprintln!(
+            "{} schema: unable to resolve schema directory",
+            cli_app_name()
+        );
         return 1;
     };
     let schemas = match list_schemas() {
         Ok(v) => v,
         Err(e) => {
-            crate::cx_eprintln!("cxrs schema: {e}");
+            crate::cx_eprintln!("{} schema: {e}", cli_app_name());
             return 1;
         }
     };
@@ -229,7 +233,7 @@ fn print_ci_text(
     warnings: &[String],
     errors: &[String],
 ) -> i32 {
-    println!("== cxrs ci validate ==");
+    println!("== {} ci validate ==", cli_app_name());
     println!("repo_root: {}", root.display());
     println!("schema_dir: {}", schema_dir.display());
     if let Some(p) = resolve_log_file() {
@@ -264,20 +268,20 @@ pub fn cmd_ci(app_name: &str, args: &[String]) -> i32 {
     };
 
     let Some(root) = repo_root() else {
-        crate::cx_eprintln!("cxrs ci validate: not inside a git repository");
+        crate::cx_eprintln!("{app_name} ci validate: not inside a git repository");
         return 2;
     };
 
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
-    let schema_dir = root.join(".codex").join("schemas");
+    let schema_dir = root.join(".cx").join("schemas");
 
     check_required_schemas(&schema_dir, &mut errors);
     let log_file = validate_logs(parsed.legacy_ok, &mut errors, &mut warnings);
     let budget = validate_budget(&mut errors, &mut warnings);
 
     if parsed.strict {
-        let qdir = root.join(".codex").join("quarantine");
+        let qdir = root.join(".cx").join("quarantine");
         if qdir.exists() && !qdir.is_dir() {
             errors.push(format!(
                 "quarantine path exists but is not a dir: {}",

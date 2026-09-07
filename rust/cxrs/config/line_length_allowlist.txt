@@ -1,4 +1,10 @@
-rust/cxrs/src/modules/task_cmds.rs
 rust/cxrs/src/modules/diagnostics.rs
-rust/cxrs/src/modules/taskrun.rs
+rust/cxrs/src/modules/doctor.rs
+rust/cxrs/src/modules/introspect.rs
+rust/cxrs/src/modules/logs_stats.rs
+rust/cxrs/src/modules/optimize_report.rs
 rust/cxrs/src/modules/provider_adapter.rs
+rust/cxrs/src/modules/settings_cmds.rs
+rust/cxrs/src/modules/task_cmds.rs
+rust/cxrs/src/modules/taskrun.rs
+rust/cxrs/src/modules/tasks.rs

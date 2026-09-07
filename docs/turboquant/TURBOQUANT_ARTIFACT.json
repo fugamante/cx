@@ -1,0 +1,291 @@
+{
+  "contract_version": "turboquant-baseline.v1",
+  "phase": "phase1",
+  "backend": {
+    "name": "llama.cpp",
+    "ref": "version: 8590 (5ce013cd7) built with AppleClang 17.0.0.17000604 for Darwin arm64"
+  },
+  "hardware": {
+    "label": "arm64-darwin",
+    "memory_gb": 32,
+    "accel": "metal"
+  },
+  "profiles": [
+    {
+      "profile_name": "baseline_local_primary",
+      "model_id": "llama3.1:latest",
+      "model_quant": "Q4_K_M",
+      "runs": [
+        {
+          "run_index": 1,
+          "context_target": 8192,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 5961154560,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 118.0,
+          "wall_ms": 1590,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 334.1 tok/s"
+        },
+        {
+          "run_index": 2,
+          "context_target": 16384,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 7034896384,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 103.3,
+          "wall_ms": 2110,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 303.0 tok/s"
+        },
+        {
+          "run_index": 3,
+          "context_target": 32768,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 9182380032,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 108.5,
+          "wall_ms": 3100,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 252.6 tok/s"
+        },
+        {
+          "run_index": 4,
+          "context_target": 8192,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 5961154560,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 117.2,
+          "wall_ms": 3340,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 336.6 tok/s"
+        },
+        {
+          "run_index": 5,
+          "context_target": 8192,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 5961154560,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 117.1,
+          "wall_ms": 1110,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 336.3 tok/s"
+        },
+        {
+          "run_index": 6,
+          "context_target": 16384,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 7034896384,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 117.1,
+          "wall_ms": 1610,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 330.9 tok/s"
+        },
+        {
+          "run_index": 7,
+          "context_target": 16384,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 7034896384,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 111.7,
+          "wall_ms": 1610,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 336.5 tok/s"
+        },
+        {
+          "run_index": 8,
+          "context_target": 32768,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 9182380032,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 115.1,
+          "wall_ms": 1620,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 337.3 tok/s"
+        },
+        {
+          "run_index": 9,
+          "context_target": 32768,
+          "prompt_tokens": null,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 9182380032,
+          "prefill_ms": null,
+          "decode_tokens_per_sec": 116.2,
+          "wall_ms": 1600,
+          "quality_probe_name": "structured_smoke",
+          "quality_score": 1.0,
+          "notes": "exact OK response; prompt throughput 335.6 tok/s"
+        },
+        {
+          "run_index": 10,
+          "context_target": 8192,
+          "prompt_tokens": 3404,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 5961154560,
+          "prefill_ms": 5766,
+          "decode_tokens_per_sec": 65.2,
+          "wall_ms": 7160,
+          "quality_probe_name": "retrieval_check",
+          "quality_score": 1.0,
+          "notes": "exact TURBO-314159 response; prompt file docs/turboquant/prompts/retrieval.txt; prompt throughput 590.4 tok/s"
+        },
+        {
+          "run_index": 11,
+          "context_target": 16384,
+          "prompt_tokens": 3404,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 7034896384,
+          "prefill_ms": 5725,
+          "decode_tokens_per_sec": 63.8,
+          "wall_ms": 7150,
+          "quality_probe_name": "retrieval_check",
+          "quality_score": 1.0,
+          "notes": "exact TURBO-314159 response; prompt file docs/turboquant/prompts/retrieval.txt; prompt throughput 594.6 tok/s"
+        },
+        {
+          "run_index": 12,
+          "context_target": 32768,
+          "prompt_tokens": 3404,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 9182380032,
+          "prefill_ms": 5726,
+          "decode_tokens_per_sec": 64.7,
+          "wall_ms": 7140,
+          "quality_probe_name": "retrieval_check",
+          "quality_score": 1.0,
+          "notes": "exact TURBO-314159 response; prompt file docs/turboquant/prompts/retrieval.txt; prompt throughput 594.5 tok/s"
+        },
+        {
+          "run_index": 13,
+          "context_target": 8192,
+          "prompt_tokens": 1768,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 5961154560,
+          "prefill_ms": 2921,
+          "decode_tokens_per_sec": 61.3,
+          "wall_ms": 4620,
+          "quality_probe_name": "instruction_follow",
+          "quality_score": 1.0,
+          "notes": "exact JSON object response; prompt file docs/turboquant/prompts/instruct.txt; prompt throughput 605.2 tok/s"
+        },
+        {
+          "run_index": 14,
+          "context_target": 16384,
+          "prompt_tokens": 1768,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 7034896384,
+          "prefill_ms": 2872,
+          "decode_tokens_per_sec": 60.7,
+          "wall_ms": 4640,
+          "quality_probe_name": "instruction_follow",
+          "quality_score": 1.0,
+          "notes": "exact JSON object response; prompt file docs/turboquant/prompts/instruct.txt; prompt throughput 615.7 tok/s"
+        },
+        {
+          "run_index": 15,
+          "context_target": 32768,
+          "prompt_tokens": 1768,
+          "generated_tokens": 64,
+          "kv_cache_mem_bytes": 9182380032,
+          "prefill_ms": 2872,
+          "decode_tokens_per_sec": 61.3,
+          "wall_ms": 4650,
+          "quality_probe_name": "instruction_follow",
+          "quality_score": 1.0,
+          "notes": "exact JSON object response; prompt file docs/turboquant/prompts/instruct.txt; prompt throughput 615.5 tok/s"
+        }
+      ],
+      "medians": {
+        "by_context": {
+          "8192": {
+            "samples": 3,
+            "kv_cache_mem_bytes": 5961154560,
+            "kv_cache_context_bytes": 1073741824,
+            "prefill_ms": null,
+            "prompt_tokens_per_sec": 336.3,
+            "decode_tokens_per_sec": 117.2,
+            "wall_ms": 1590
+          },
+          "16384": {
+            "samples": 3,
+            "kv_cache_mem_bytes": 7034896384,
+            "kv_cache_context_bytes": 2147483648,
+            "prefill_ms": null,
+            "prompt_tokens_per_sec": 330.9,
+            "decode_tokens_per_sec": 111.7,
+            "wall_ms": 1610
+          },
+          "32768": {
+            "samples": 3,
+            "kv_cache_mem_bytes": 9182380032,
+            "kv_cache_context_bytes": 4294967296,
+            "prefill_ms": null,
+            "prompt_tokens_per_sec": 335.6,
+            "decode_tokens_per_sec": 115.1,
+            "wall_ms": 1620
+          }
+        },
+        "quality_score": 1.0,
+        "notes": "first-run cold-start skew visible in prompt throughput and wall time",
+        "quality_probe_results": {
+          "retrieval_check": {
+            "samples": 3,
+            "contexts": [
+              8192,
+              16384,
+              32768
+            ],
+            "quality_score": 1.0,
+            "prefill_ms_median": 5725,
+            "decode_tokens_per_sec_median": 64.7,
+            "wall_ms_median": 7150
+          },
+          "instruction_follow": {
+            "samples": 3,
+            "contexts": [
+              8192,
+              16384,
+              32768
+            ],
+            "quality_score": 1.0,
+            "prefill_ms_median": 2872,
+            "decode_tokens_per_sec_median": 61.3,
+            "wall_ms_median": 4640
+          }
+        }
+      },
+      "prompt_set": {
+        "revision": "phase1-locked",
+        "files": {
+          "structured_smoke": "docs/turboquant/prompts/smoke.txt",
+          "context_fill": "docs/turboquant/prompts/context_fill.txt",
+          "retrieval_check": "docs/turboquant/prompts/retrieval.txt",
+          "instruction_follow": "docs/turboquant/prompts/instruct.txt"
+        },
+        "token_counts": {
+          "structured_smoke": 7,
+          "context_fill": 1697,
+          "retrieval_check": 3404,
+          "instruction_follow": 1768
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "fixture_id": "cargo_test_failure_assertion_context",
+  "command": ["test"],
+  "exit_status": 101,
+  "profile": "balanced",
+  "input_path": "rust/cxrs/tests/fixtures/phase_x/cargo_test_failure.txt",
+  "expected_reducer_kind": "test_output",
+  "required_spans": [
+    "running 4 tests",
+    "test capture::tests::keeps_assertion_context ... FAILED",
+    "thread 'capture::tests::keeps_assertion_context' panicked",
+    "assertion `left == right` failed",
+    "left: \"raw causal line\"",
+    "right: \"expected causal line\"",
+    "warning: unused variable: `noise`",
+    "warning: generated file omitted from compile output",
+    "test result: FAILED. 3 passed; 1 failed",
+    "error: test failed"
+  ],
+  "optional_spans": [
+    "note: run with `RUST_BACKTRACE=1`"
+  ],
+  "forbidden_spans": [
+    "test capture::tests::keeps_success_noise ... ok",
+    "test capture::tests::later_success ... ok"
+  ],
+  "expected_lossiness_level": "semantic_extract",
+  "max_uncertainty": "low",
+  "min_reduction_ratio": 0.2,
+  "notes": "Fixture proves failing-test, assertion-context, summary, and repeated-warning recall before broad reducer rollout."
+}

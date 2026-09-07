@@ -1,0 +1,95 @@
+{
+  "contract_version": "turboquant-work.v1",
+  "phase": "phase2",
+  "backend": {
+    "name": "llama.cpp",
+    "target_ref": "a1cfb64"
+  },
+  "work_items": [
+    {
+      "id": "p2_exec",
+      "target": "src/llama-kv-cache.cpp + ggml/include/ggml.h",
+      "functions": [
+        "llama_kv_cache::cpy_v",
+        "llama_kv_cache::get_v",
+        "ggml_map_custom*"
+      ],
+      "goal": "lock the execution-bearing custom-op boundary for tq_v0"
+    },
+    {
+      "id": "p2_state",
+      "target": "src/llama-kv-cache.h",
+      "functions": [
+        "llama_kv_cache"
+      ],
+      "goal": "add turboquant config and sidecar V state"
+    },
+    {
+      "id": "p2_args",
+      "target": "common/arg.cpp",
+      "functions": [
+        "common params arg registration"
+      ],
+      "goal": "add explicit turboquant runtime args"
+    },
+    {
+      "id": "p2_model",
+      "target": "src/llama-model.cpp",
+      "functions": [
+        "llama_model memory construction path"
+      ],
+      "goal": "plumb turboquant config into kv cache construction"
+    },
+    {
+      "id": "p2_write_gate",
+      "target": "src/llama-kv-cache.cpp:1219",
+      "functions": [
+        "llama_kv_cache::cpy_v"
+      ],
+      "goal": "add enable/disable and fallback gate"
+    },
+    {
+      "id": "p2_custom",
+      "target": "src/llama-kv-cache.cpp",
+      "functions": [
+        "llama_kv_cache::cpy_v",
+        "llama_kv_cache::get_v"
+      ],
+      "goal": "add CPU-first custom-op scaffold on the V path"
+    },
+    {
+      "id": "p2_write_codec",
+      "target": "src/llama-kv-cache.cpp:1219",
+      "functions": [
+        "llama_kv_cache::cpy_v"
+      ],
+      "goal": "store tq_v0 compressed V payload"
+    },
+    {
+      "id": "p2_read_gate",
+      "target": "src/llama-kv-cache.cpp:1152",
+      "functions": [
+        "llama_kv_cache::get_v"
+      ],
+      "goal": "add read fallback gate"
+    },
+    {
+      "id": "p2_read_codec",
+      "target": "src/llama-kv-cache.cpp:1152",
+      "functions": [
+        "llama_kv_cache::get_v"
+      ],
+      "goal": "dequantize tq_v0 payload on read"
+    },
+    {
+      "id": "p2_mem",
+      "target": "src/llama-kv-cache.cpp",
+      "functions": [
+        "memory_breakdown",
+        "total_size",
+        "size_v_bytes"
+      ],
+      "goal": "report compressed V memory footprint"
+    }
+  ]
+}

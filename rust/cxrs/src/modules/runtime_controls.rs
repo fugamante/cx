@@ -1,12 +1,14 @@
 use std::env;
 
+use crate::config::cli_app_name;
+
 pub fn cmd_log_off() -> i32 {
-    println!("cx logging: OFF (process-local)");
+    println!("{} logging: OFF (process-local)", cli_app_name());
     0
 }
 
 pub fn cmd_log_on() -> i32 {
-    println!("cx logging: ON (process-local)");
+    println!("{} logging: ON (process-local)", cli_app_name());
     0
 }
 
@@ -15,7 +17,7 @@ pub fn cmd_alert_show() -> i32 {
     let max_ms = env::var("CXALERT_MAX_MS").unwrap_or_else(|_| "8000".to_string());
     let max_eff = env::var("CXALERT_MAX_EFF_IN").unwrap_or_else(|_| "5000".to_string());
     let max_out = env::var("CXALERT_MAX_OUT").unwrap_or_else(|_| "500".to_string());
-    println!("cx alerts:");
+    println!("{} alerts:", cli_app_name());
     println!("enabled={enabled}");
     println!("max_ms={max_ms}");
     println!("max_eff_in={max_eff}");
@@ -24,12 +26,12 @@ pub fn cmd_alert_show() -> i32 {
 }
 
 pub fn cmd_alert_off() -> i32 {
-    println!("cx alerts: OFF (process-local)");
+    println!("{} alerts: OFF (process-local)", cli_app_name());
     0
 }
 
 pub fn cmd_alert_on() -> i32 {
-    println!("cx alerts: ON (process-local)");
+    println!("{} alerts: ON (process-local)", cli_app_name());
     0
 }
 

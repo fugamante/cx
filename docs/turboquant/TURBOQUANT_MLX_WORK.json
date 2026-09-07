@@ -1,0 +1,51 @@
+{
+  "phase": "phase3a",
+  "status": "closed",
+  "backend": "mlx",
+  "baseline_reference": "vec_bits6_bypass256",
+  "steps": [
+    {
+      "id": "mlx_contract",
+      "status": "complete",
+      "goal": "lock the MLX comparative scope, gates, and baseline reference"
+    },
+    {
+      "id": "mlx_runtime",
+      "status": "complete",
+      "goal": "identify the practical local MLX runtime entrypoint and compatible model surface"
+    },
+    {
+      "id": "mlx_metrics",
+      "status": "complete",
+      "goal": "define memory and runtime fields that can be compared honestly with the llama.cpp vector ladder"
+    },
+    {
+      "id": "mlx_parity_8k",
+      "status": "complete",
+      "goal": "run the first 8k parity pass on the fixed prompt set"
+    },
+    {
+      "id": "mlx_ladder",
+      "status": "complete",
+      "goal": "capture the 8k/16k/32k MLX ladder in a matching artifact shape"
+    },
+    {
+      "id": "mlx_compare",
+      "status": "complete",
+      "goal": "record the comparative decision against the closed llama.cpp vector result"
+    }
+  ],
+  "references": [
+    "docs/turboquant/TURBOQUANT_MLX.md",
+    "docs/turboquant/TURBOQUANT_MLX_8K.json",
+    "docs/turboquant/TURBOQUANT_MLX_16K.json",
+    "docs/turboquant/TURBOQUANT_MLX_32K.json",
+    "docs/turboquant/TURBOQUANT_MLX_LADDER.json",
+    "docs/turboquant/TURBOQUANT_MLX_COMPARE.json",
+    "docs/turboquant/TURBOQUANT_PHASE3_CLOSE.json",
+    "docs/turboquant/TURBOQUANT_VEC_LADDER.json",
+    "docs/turboquant/TURBOQUANT_VEC_PROFILE.json"
+  ],
+  "decision": "mlx_portable_go",
+  "close_artifact": "docs/turboquant/TURBOQUANT_MLX_CLOSE.json"
+}

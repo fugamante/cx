@@ -70,7 +70,7 @@ pub fn clip_text_with_config(input: &str, cfg: &BudgetConfig) -> (String, Captur
     let clipped = kept_chars < original_chars || kept_lines < original_lines;
     let final_text = if clipped && cfg.clip_footer {
         format!(
-            "{char_limited}\n[cx] output clipped: original={}/{}, kept={}/{}, mode={}",
+            "{char_limited}\n[XSHELF] output clipped: original={}/{}, kept={}/{}, mode={}",
             original_chars, original_lines, kept_chars, kept_lines, mode_used
         )
     } else {
@@ -92,8 +92,142 @@ pub fn clip_text_with_config(input: &str, cfg: &BudgetConfig) -> (String, Captur
             clip_footer: Some(cfg.clip_footer),
             rtk_used: None,
             capture_provider: None,
+            capture_prompt_profile: None,
+            capture_prompt_profile_applied: None,
+            capture_prompt_reducer_kind: None,
+            capture_prompt_fallback_reason: None,
         },
     )
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SectionPriority {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+#[allow(dead_code)]
+impl SectionPriority {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::Critical => 0,
+            Self::High => 1,
+            Self::Medium => 2,
+            Self::Low => 3,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PromptSection<'a> {
+    pub id: &'a str,
+    pub priority: SectionPriority,
+    pub text: &'a str,
+    pub uncertainty: &'a str,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SectionOmission {
+    pub id: String,
+    pub priority: &'static str,
+    pub chars: usize,
+    pub lines: usize,
+    pub reason: &'static str,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AssemblyResult {
+    pub text: String,
+    pub omissions: Vec<SectionOmission>,
+    pub clipped: bool,
+}
+
+#[allow(dead_code)]
+fn section_block(section: &PromptSection<'_>) -> String {
+    format!(
+        "[{}] {}\n{}\n",
+        section.priority.as_str(),
+        section.id,
+        section.text.trim_end()
+    )
+}
+
+#[allow(dead_code)]
+fn block_fits(current: &str, block: &str, cfg: &BudgetConfig) -> bool {
+    current.chars().count() + block.chars().count() <= cfg.budget_chars
+        && current.lines().count() + block.lines().count() <= cfg.budget_lines
+}
+
+#[allow(dead_code)]
+fn omission(section: &PromptSection<'_>, reason: &'static str) -> SectionOmission {
+    SectionOmission {
+        id: section.id.to_string(),
+        priority: section.priority.as_str(),
+        chars: section.text.chars().count(),
+        lines: section.text.lines().count(),
+        reason,
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn assemble_sections_with_config(
+    sections: &[PromptSection<'_>],
+    cfg: &BudgetConfig,
+) -> AssemblyResult {
+    let mut ordered: Vec<(usize, &PromptSection<'_>)> = sections.iter().enumerate().collect();
+    ordered.sort_by_key(|(idx, section)| {
+        let rank = if section.uncertainty == "high" {
+            SectionPriority::Critical.rank()
+        } else {
+            section.priority.rank()
+        };
+        (rank, *idx)
+    });
+
+    let mut text = String::new();
+    let mut omissions = Vec::new();
+    for (_, section) in ordered {
+        let block = section_block(section);
+        if block_fits(&text, &block, cfg) {
+            text.push_str(&block);
+            continue;
+        }
+        if text.is_empty()
+            && (section.priority == SectionPriority::Critical || section.uncertainty == "high")
+        {
+            let (clipped, _) = clip_text_with_config(&block, cfg);
+            text.push_str(&clipped);
+            omissions.push(omission(section, "clipped_section"));
+            continue;
+        }
+        let reason = if section.uncertainty == "high" {
+            "omitted_high_uncertainty_over_budget"
+        } else {
+            "omitted_over_budget"
+        };
+        omissions.push(omission(section, reason));
+    }
+
+    AssemblyResult {
+        text,
+        clipped: !omissions.is_empty(),
+        omissions,
+    }
 }
 
 pub fn chunk_text_by_budget(input: &str, chunk_chars: usize) -> Vec<String> {
@@ -118,5 +252,125 @@ pub fn chunk_text_by_budget(input: &str, chunk_chars: usize) -> Vec<String> {
         vec![String::new()]
     } else {
         chunks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_budget(chars: usize, lines: usize) -> BudgetConfig {
+        BudgetConfig {
+            budget_chars: chars,
+            budget_lines: lines,
+            clip_mode: "head".to_string(),
+            clip_footer: false,
+        }
+    }
+
+    #[test]
+    fn assembly_omits_low_priority_first() {
+        let sections = [
+            PromptSection {
+                id: "low-noise",
+                priority: SectionPriority::Low,
+                text: "low context that should drop",
+                uncertainty: "low",
+            },
+            PromptSection {
+                id: "critical-error",
+                priority: SectionPriority::Critical,
+                text: "error: root cause",
+                uncertainty: "low",
+            },
+            PromptSection {
+                id: "high-context",
+                priority: SectionPriority::High,
+                text: "nearby stack frame",
+                uncertainty: "low",
+            },
+        ];
+        let result = assemble_sections_with_config(&sections, &test_budget(100, 8));
+        assert!(result.text.contains("[critical] critical-error"));
+        assert!(result.text.contains("[high] high-context"));
+        assert!(!result.text.contains("low-noise"));
+        assert_eq!(result.omissions.len(), 1);
+        assert_eq!(result.omissions[0].id, "low-noise");
+        assert_eq!(result.omissions[0].reason, "omitted_over_budget");
+    }
+
+    #[test]
+    fn assembly_preserves_same_priority_order() {
+        let sections = [
+            PromptSection {
+                id: "first",
+                priority: SectionPriority::High,
+                text: "first high",
+                uncertainty: "low",
+            },
+            PromptSection {
+                id: "second",
+                priority: SectionPriority::High,
+                text: "second high",
+                uncertainty: "low",
+            },
+            PromptSection {
+                id: "third",
+                priority: SectionPriority::Medium,
+                text: "third medium",
+                uncertainty: "low",
+            },
+        ];
+        let result = assemble_sections_with_config(&sections, &test_budget(300, 20));
+        let first = result.text.find("[high] first").expect("first section");
+        let second = result.text.find("[high] second").expect("second section");
+        let third = result.text.find("[medium] third").expect("third section");
+        assert!(first < second);
+        assert!(second < third);
+        assert!(result.omissions.is_empty());
+    }
+
+    #[test]
+    fn assembly_promotes_high_uncertainty_section() {
+        let sections = [
+            PromptSection {
+                id: "normal-critical",
+                priority: SectionPriority::Critical,
+                text: "known critical",
+                uncertainty: "low",
+            },
+            PromptSection {
+                id: "uncertain-medium",
+                priority: SectionPriority::Medium,
+                text: "uncertain reducer fallback evidence",
+                uncertainty: "high",
+            },
+            PromptSection {
+                id: "normal-high",
+                priority: SectionPriority::High,
+                text: "ordinary nearby context",
+                uncertainty: "low",
+            },
+        ];
+        let result = assemble_sections_with_config(&sections, &test_budget(120, 8));
+        assert!(result.text.contains("normal-critical"));
+        assert!(result.text.contains("uncertain-medium"));
+        assert!(!result.text.contains("normal-high"));
+        assert_eq!(result.omissions[0].id, "normal-high");
+    }
+
+    #[test]
+    fn assembly_clips_oversized_critical_section() {
+        let sections = [PromptSection {
+            id: "critical-long",
+            priority: SectionPriority::Critical,
+            text: "0123456789abcdefghijklmnopqrstuvwxyz",
+            uncertainty: "low",
+        }];
+        let result = assemble_sections_with_config(&sections, &test_budget(24, 10));
+        assert!(result.clipped);
+        assert!(result.text.chars().count() <= 24);
+        assert_eq!(result.omissions.len(), 1);
+        assert_eq!(result.omissions[0].reason, "clipped_section");
     }
 }

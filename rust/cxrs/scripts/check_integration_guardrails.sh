@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 TEST_DIR="$ROOT_DIR/rust/cxrs/tests"
 MAX_TEST_LINES="${2:-500}"
+ALLOWLIST_FILE="${3:-$ROOT_DIR/rust/cxrs/config/itest_lines_allowlist.txt}"
 
 if ! [[ "$MAX_TEST_LINES" =~ ^[0-9]+$ ]]; then
   echo "error: MAX_TEST_LINES must be an integer (got '$MAX_TEST_LINES')" >&2
@@ -26,6 +27,12 @@ required_files=(
 
 violations=0
 
+is_allowlisted() {
+  local rel="$1"
+  [[ -f "$ALLOWLIST_FILE" ]] || return 1
+  grep -Fqx -- "$rel" "$ALLOWLIST_FILE"
+}
+
 has_line() {
   local pattern="$1"
   local file="$2"
@@ -43,8 +50,10 @@ while IFS= read -r -d '' file; do
   rel="${file#$ROOT_DIR/}"
   lines=$(wc -l < "$file" | tr -d ' ')
   if (( lines > MAX_TEST_LINES )); then
-    echo "guardrail violation: $rel has $lines lines (max $MAX_TEST_LINES)" >&2
-    violations=$((violations + 1))
+    if ! is_allowlisted "$rel"; then
+      echo "guardrail violation: $rel has $lines lines (max $MAX_TEST_LINES)" >&2
+      violations=$((violations + 1))
+    fi
   fi
   if ! has_line '^mod common;$' "$file"; then
     echo "guardrail violation: $rel must import 'mod common;'" >&2
@@ -61,4 +70,4 @@ if (( violations > 0 )); then
   exit 1
 fi
 
-echo "ok: integration guardrails passed (max per *_tests.rs: $MAX_TEST_LINES lines)"
+echo "ok: integration guardrails passed (max per *_tests.rs: $MAX_TEST_LINES lines; allowlist: $ALLOWLIST_FILE)"

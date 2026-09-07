@@ -1,0 +1,16 @@
+{
+  "contract_version": "turboquant-mlx-decide.v1",
+  "phase": "phase3b",
+  "status": "closed",
+  "decision": "mlx_comparative_only",
+  "why": [
+    "MLX already answered the portability question cleanly.",
+    "The repo now has a normalized metric contract and a XSHELF-facing capability contract.",
+    "There is not yet a product reason strong enough to justify a real MLX codec-bearing fork."
+  ],
+  "allowed_next_steps": [
+    "surface MLX as a comparative backend in XSHELF-facing docs and telemetry",
+    "reopen MLX only if product requirements justify a second true codec backend",
+    "keep llama.cpp vector work as the current codec-bearing reference path"
+  ]
+}

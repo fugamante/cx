@@ -12,6 +12,7 @@ use crate::runtime::{llm_backend, llm_model};
 const ROUTE_NAMES: &[&str] = &[
     "help",
     "version",
+    "contracts",
     "where",
     "routes",
     "logs",
@@ -65,6 +66,7 @@ const ROUTE_NAMES: &[&str] = &[
     "quarantine",
     "supports",
     "cxversion",
+    "cxcontracts",
     "cxdoctor",
     "cxwhere",
     "cxdiag",

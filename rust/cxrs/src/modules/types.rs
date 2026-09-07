@@ -44,6 +44,14 @@ pub struct RunEntry {
     #[serde(default)]
     pub prompt_filter_applied: Option<bool>,
     #[serde(default)]
+    pub capture_prompt_profile: Option<String>,
+    #[serde(default)]
+    pub capture_prompt_profile_applied: Option<bool>,
+    #[serde(default)]
+    pub capture_prompt_reducer_kind: Option<String>,
+    #[serde(default)]
+    pub capture_prompt_fallback_reason: Option<String>,
+    #[serde(default)]
     pub schema_prompt_sha256: Option<String>,
     #[serde(default)]
     pub schema_sha256: Option<String>,
@@ -94,6 +102,12 @@ pub struct RunEntry {
     #[serde(default)]
     pub provider_status: Option<String>,
     #[serde(default)]
+    pub execution_lane: Option<String>,
+    #[serde(default)]
+    pub execution_lane_detail: Option<String>,
+    #[serde(default)]
+    pub http_request_profile: Option<String>,
+    #[serde(default)]
     pub http_provider_format: Option<String>,
     #[serde(default)]
     pub http_parser_mode: Option<String>,
@@ -107,6 +121,46 @@ pub struct RunEntry {
     pub converge_votes: Option<Value>,
     #[serde(default)]
     pub queue_ms: Option<u64>,
+    #[serde(default)]
+    pub wave_index: Option<u64>,
+    #[serde(default)]
+    pub wave_mode: Option<String>,
+    #[serde(default)]
+    pub wave_size: Option<u64>,
+    #[serde(default)]
+    pub run_all_wave_pressure_kind: Option<String>,
+    #[serde(default)]
+    pub run_all_wave_pressure_suggested_mode: Option<String>,
+    #[serde(default)]
+    pub run_all_latest_wave_index: Option<u64>,
+    #[serde(default)]
+    pub run_all_max_queue_wave_index: Option<u64>,
+    #[serde(default)]
+    pub run_all_max_queue_wave_ms: Option<u64>,
+    #[serde(default)]
+    pub run_all_worker_count: Option<u64>,
+    #[serde(default)]
+    pub run_all_workers: Option<String>,
+    #[serde(default)]
+    pub run_all_max_retry_attempt: Option<u32>,
+    #[serde(default)]
+    pub run_all_first_queue_started_at: Option<String>,
+    #[serde(default)]
+    pub run_all_first_task_started_at: Option<String>,
+    #[serde(default)]
+    pub run_all_last_task_finished_at: Option<String>,
+    #[serde(default)]
+    pub run_all_invocation_command: Option<String>,
+    #[serde(default)]
+    pub run_all_failure_pattern: Option<String>,
+    #[serde(default)]
+    pub run_all_recommended_resume_point: Option<String>,
+    #[serde(default)]
+    pub queue_started_at: Option<String>,
+    #[serde(default)]
+    pub task_started_at: Option<String>,
+    #[serde(default)]
+    pub task_finished_at: Option<String>,
     #[serde(default)]
     pub task_id: Option<String>,
     #[serde(default)]
@@ -182,6 +236,10 @@ pub struct CaptureStats {
     pub clip_footer: Option<bool>,
     pub rtk_used: Option<bool>,
     pub capture_provider: Option<String>,
+    pub capture_prompt_profile: Option<String>,
+    pub capture_prompt_profile_applied: Option<bool>,
+    pub capture_prompt_reducer_kind: Option<String>,
+    pub capture_prompt_fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -254,6 +312,9 @@ pub struct ExecutionLog {
     pub adapter_type: Option<String>,
     pub provider_transport: Option<String>,
     pub provider_status: Option<String>,
+    pub execution_lane: Option<String>,
+    pub execution_lane_detail: Option<String>,
+    pub http_request_profile: Option<String>,
     pub http_provider_format: Option<String>,
     pub http_parser_mode: Option<String>,
     pub backend_selected: Option<String>,
@@ -267,6 +328,12 @@ pub struct ExecutionLog {
     pub converge_winner: Option<String>,
     pub converge_votes: Option<Value>,
     pub queue_ms: Option<u64>,
+    pub wave_index: Option<u64>,
+    pub wave_mode: Option<String>,
+    pub wave_size: Option<u64>,
+    pub queue_started_at: Option<String>,
+    pub task_started_at: Option<String>,
+    pub task_finished_at: Option<String>,
     pub capture_provider: Option<String>,
     pub execution_mode: String,
     pub duration_ms: Option<u64>,
@@ -300,6 +367,10 @@ pub struct ExecutionLog {
     pub prompt_len_raw: Option<u64>,
     pub prompt_len_filtered: Option<u64>,
     pub prompt_filter_applied: Option<bool>,
+    pub capture_prompt_profile: Option<String>,
+    pub capture_prompt_profile_applied: Option<bool>,
+    pub capture_prompt_reducer_kind: Option<String>,
+    pub capture_prompt_fallback_reason: Option<String>,
     pub schema_prompt_sha256: Option<String>,
     pub schema_sha256: Option<String>,
     pub schema_attempt: Option<u64>,
@@ -322,6 +393,23 @@ pub struct ExecutionLog {
     pub run_all_retryable_failures: Option<u64>,
     pub run_all_non_retryable_failures: Option<u64>,
     pub run_all_critical_errors: Option<u64>,
+    pub run_all_halted_remaining: Option<u64>,
+    pub run_all_backend_fallback_rows: Option<u64>,
+    pub run_all_backend_fallbacks: Option<String>,
+    pub run_all_wave_pressure_kind: Option<String>,
+    pub run_all_wave_pressure_suggested_mode: Option<String>,
+    pub run_all_latest_wave_index: Option<u64>,
+    pub run_all_max_queue_wave_index: Option<u64>,
+    pub run_all_max_queue_wave_ms: Option<u64>,
+    pub run_all_worker_count: Option<u64>,
+    pub run_all_workers: Option<String>,
+    pub run_all_max_retry_attempt: Option<u32>,
+    pub run_all_first_queue_started_at: Option<String>,
+    pub run_all_first_task_started_at: Option<String>,
+    pub run_all_last_task_finished_at: Option<String>,
+    pub run_all_invocation_command: Option<String>,
+    pub run_all_failure_pattern: Option<String>,
+    pub run_all_recommended_resume_point: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

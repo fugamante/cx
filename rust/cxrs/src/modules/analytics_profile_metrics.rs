@@ -2,12 +2,13 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::config::cli_app_name;
 use crate::types::RunEntry;
 
 use super::analytics_shared::{load_runs_for, print_json_value};
 
 fn print_profile_empty(n: usize, log_file: &Path) {
-    println!("== cxrs profile (last {n} runs) ==");
+    println!("== {} profile (last {n} runs) ==", cli_app_name());
     println!("Runs: 0");
     println!("Avg duration: 0ms");
     println!("Avg effective tokens: 0");
@@ -59,7 +60,7 @@ pub fn print_profile(n: usize) -> i32 {
         .sum();
     let sum_out: u64 = runs.iter().map(|r| r.output_tokens.unwrap_or(0)).sum();
 
-    println!("== cxrs profile (last {n} runs) ==");
+    println!("== {} profile (last {n} runs) ==", cli_app_name());
     println!("Runs: {}", runs.len());
     println!("Avg duration: {}ms", sum_dur / total);
     println!("Avg effective tokens: {}", sum_eff / total);
@@ -146,7 +147,10 @@ pub fn print_metrics(n: usize) -> i32 {
         Err(code) => return code,
     };
     if runs.is_empty() {
-        return print_json_value("cxrs metrics", &metrics_empty_json(&log_file));
+        return print_json_value(
+            &format!("{} metrics", cli_app_name()),
+            &metrics_empty_json(&log_file),
+        );
     }
 
     let total = runs.len() as f64;
@@ -178,5 +182,5 @@ pub fn print_metrics(n: usize) -> i32 {
       "avg_output_tokens": sum_out / total,
       "by_tool": group_metrics_by_tool(&runs)
     });
-    print_json_value("cxrs metrics", &out)
+    print_json_value(&format!("{} metrics", cli_app_name()), &out)
 }

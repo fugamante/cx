@@ -1,0 +1,25 @@
+{
+  "top_level_keys": [
+    "contract_version",
+    "broker_policy",
+    "active_backend",
+    "active_model",
+    "availability",
+    "adapter_rollout_policy"
+  ],
+  "availability_keys": [
+    "primary",
+    "ollama"
+  ],
+  "adapter_rollout_policy_keys": [
+    "default_transport",
+    "http_transport_opt_in",
+    "explicit_override_required_for_http",
+    "selected_adapter",
+    "selected_transport",
+    "selected_status",
+    "explicit_override_set",
+    "default_switch_guard",
+    "rollback_rule"
+  ]
+}

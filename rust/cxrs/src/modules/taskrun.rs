@@ -9,9 +9,13 @@ use std::process::Command;
 
 use crate::capture::{BudgetConfig, clip_text_with_config};
 use crate::config::app_config;
+use crate::config::cli_app_name;
+use crate::local_models::resolve_model_for_backend;
 use crate::logs::file_len;
-use crate::paths::resolve_log_file;
-use crate::runlog::{RunLogInput, log_codex_run};
+use crate::paths::{repo_root, resolve_log_file};
+use crate::runlog::{RunLogInput, log_primary_run};
+use crate::runtime::llm_backend;
+use crate::state::{read_state_value, value_at_path};
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskRecord, TaskSpec};
 
 #[derive(Debug, Clone)]
@@ -46,12 +50,376 @@ pub struct TaskRunner {
     pub execute_task: fn(TaskSpec) -> Result<ExecutionResult, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSandboxConfig {
+    pub enabled: bool,
+    pub image: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskSandboxReadiness {
+    pub enabled: bool,
+    pub active: bool,
+    pub image: Option<String>,
+    pub ready: bool,
+    pub docker_available: bool,
+    pub image_available: bool,
+    pub repo_mount_writable: bool,
+    pub entrypoint_available: bool,
+    pub issues: Vec<String>,
+    pub recommended_action: Option<String>,
+}
+
+fn env_bool_override(name: &str) -> Option<bool> {
+    env::var(name)
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .and_then(|v| match v.as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+}
+
+fn state_pref_bool(path: &str) -> Option<bool> {
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, path))
+        .and_then(Value::as_bool)
+}
+
+fn state_pref_string(path: &str) -> Option<String> {
+    read_state_value()
+        .as_ref()
+        .and_then(|v| value_at_path(v, path))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+pub fn task_sandbox_config() -> TaskSandboxConfig {
+    let enabled = env_bool_override("CX_TASK_SANDBOX_ENABLED")
+        .or_else(|| state_pref_bool("preferences.task_sandbox.enabled"))
+        .unwrap_or(false);
+    let image = env::var("CX_TASK_SANDBOX_IMAGE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| state_pref_string("preferences.task_sandbox.image"));
+    TaskSandboxConfig { enabled, image }
+}
+
+fn task_sandbox_active() -> bool {
+    env_bool_override("CX_TASK_SANDBOX_ACTIVE").unwrap_or(false)
+}
+
+fn passthrough_container_envs(cmd: &mut Command) {
+    let mut pairs: Vec<(String, String)> = env::vars()
+        .filter(|(k, _)| {
+            k.starts_with("CX_")
+                || k.starts_with("OPENAI_")
+                || k.starts_with("OLLAMA_")
+                || matches!(k.as_str(), "HTTP_PROXY" | "HTTPS_PROXY" | "NO_PROXY")
+        })
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (key, value) in pairs {
+        if key == "CX_TASK_SANDBOX_ACTIVE" {
+            continue;
+        }
+        cmd.arg("-e");
+        cmd.arg(format!("{key}={value}"));
+    }
+}
+
+fn sandbox_lane_detail(image: &str) -> String {
+    format!("docker:{image}")
+}
+
+fn current_uid_gid() -> Result<(String, String), String> {
+    let uid = crate::process::run_command_output_with_timeout(
+        {
+            let mut cmd = Command::new("id");
+            cmd.arg("-u");
+            cmd
+        },
+        "id -u",
+    )
+    .map_err(|e| format!("{} task sandbox: {e}", cli_app_name()))?;
+    let gid = crate::process::run_command_output_with_timeout(
+        {
+            let mut cmd = Command::new("id");
+            cmd.arg("-g");
+            cmd
+        },
+        "id -g",
+    )
+    .map_err(|e| format!("{} task sandbox: {e}", cli_app_name()))?;
+    let uid = String::from_utf8_lossy(&uid.stdout).trim().to_string();
+    let gid = String::from_utf8_lossy(&gid.stdout).trim().to_string();
+    if uid.is_empty() || gid.is_empty() {
+        return Err(format!(
+            "{} task sandbox: unable to resolve uid/gid for docker run",
+            cli_app_name()
+        ));
+    }
+    Ok((uid, gid))
+}
+
+fn command_success(cmd: Command, label: &str) -> bool {
+    crate::process::run_command_output_with_timeout(cmd, label)
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+fn sandbox_probe_success(root: &Path, image: &str) -> bool {
+    let Ok((uid, gid)) = current_uid_gid() else {
+        return false;
+    };
+    let mut cmd = Command::new("docker");
+    cmd.arg("run");
+    cmd.arg("--rm");
+    cmd.arg("--user");
+    cmd.arg(format!("{uid}:{gid}"));
+    cmd.arg("--workdir");
+    cmd.arg("/work");
+    cmd.arg("-v");
+    cmd.arg(format!("{}:/work", root.display()));
+    cmd.arg(image);
+    cmd.arg("bash");
+    cmd.arg("-lc");
+    cmd.arg(
+        "test -d .cx && test -w .cx && \
+if [[ -x ./bin/xshelf || -x ./bin/cx ]]; then exit 0; fi && \
+if command -v xshelf >/dev/null 2>&1 || command -v cx >/dev/null 2>&1; then exit 0; fi && \
+exit 127",
+    );
+    command_success(cmd, "task sandbox readiness docker run")
+}
+
+pub fn task_sandbox_readiness() -> TaskSandboxReadiness {
+    let cfg = task_sandbox_config();
+    let active = task_sandbox_active();
+    let mut issues: Vec<String> = Vec::new();
+    if !cfg.enabled {
+        issues.push("sandbox_disabled".to_string());
+    }
+    if cfg.image.is_none() {
+        issues.push("image_unset".to_string());
+    }
+    let docker_available = {
+        let mut cmd = Command::new("docker");
+        cmd.arg("--version");
+        command_success(cmd, "docker --version")
+    };
+    if !docker_available {
+        issues.push("docker_unavailable".to_string());
+    }
+    let image_available = if docker_available {
+        if let Some(image) = cfg.image.as_deref() {
+            let mut cmd = Command::new("docker");
+            cmd.arg("image");
+            cmd.arg("inspect");
+            cmd.arg(image);
+            command_success(cmd, "docker image inspect")
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if cfg.image.is_some() && !image_available {
+        issues.push("image_unavailable".to_string());
+    }
+    let root = repo_root();
+    let repo_mount_writable = root
+        .as_ref()
+        .map(|p| {
+            p.join(".cx").is_dir()
+                && !p
+                    .join(".cx")
+                    .metadata()
+                    .map(|m| m.permissions().readonly())
+                    .unwrap_or(true)
+        })
+        .unwrap_or(false);
+    if root.is_none() {
+        issues.push("repo_unavailable".to_string());
+    } else if !repo_mount_writable {
+        issues.push("repo_state_not_writable".to_string());
+    }
+    let entrypoint_available = if docker_available && image_available && repo_mount_writable {
+        if let (Some(root), Some(image)) = (root.as_ref(), cfg.image.as_deref()) {
+            sandbox_probe_success(root, image)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if cfg.enabled
+        && cfg.image.is_some()
+        && docker_available
+        && image_available
+        && !entrypoint_available
+    {
+        issues.push("entrypoint_unavailable".to_string());
+    }
+    let ready = cfg.enabled
+        && cfg.image.is_some()
+        && docker_available
+        && image_available
+        && repo_mount_writable
+        && entrypoint_available
+        && issues.is_empty();
+    let recommended_action = if ready {
+        None
+    } else if issues.iter().any(|i| i == "sandbox_disabled") {
+        Some("run `xshelf task sandbox enable`".to_string())
+    } else if issues.iter().any(|i| i == "image_unset") {
+        Some("run `xshelf task sandbox set-image <image>`".to_string())
+    } else if issues.iter().any(|i| i == "docker_unavailable") {
+        Some("start Docker and make `docker --version` work".to_string())
+    } else if issues.iter().any(|i| i == "image_unavailable") {
+        Some("build or pull the configured sandbox image".to_string())
+    } else if issues.iter().any(|i| i == "repo_state_not_writable") {
+        Some("ensure repo-local `.cx/` state is writable from the container user".to_string())
+    } else if issues.iter().any(|i| i == "entrypoint_unavailable") {
+        Some(
+            "install xshelf/cx in the image or expose repo-local ./bin/xshelf or ./bin/cx"
+                .to_string(),
+        )
+    } else {
+        Some("inspect sandbox configuration".to_string())
+    };
+    TaskSandboxReadiness {
+        enabled: cfg.enabled,
+        active,
+        image: cfg.image,
+        ready,
+        docker_available,
+        image_available,
+        repo_mount_writable,
+        entrypoint_available,
+        issues,
+        recommended_action,
+    }
+}
+
+fn task_in_sandbox(
+    id: &str,
+    mode_override: Option<&str>,
+    backend_override: Option<&str>,
+    emit_output: bool,
+) -> Result<(i32, Option<String>), String> {
+    let cfg = task_sandbox_config();
+    let image = cfg.image.ok_or_else(|| {
+        format!(
+            "{} task sandbox: image is required when sandbox is enabled",
+            cli_app_name()
+        )
+    })?;
+    let root = repo_root().ok_or_else(|| {
+        format!(
+            "{} task sandbox: not inside a git repository",
+            cli_app_name()
+        )
+    })?;
+    let (uid, gid) = current_uid_gid()?;
+
+    let log_cursor = capture_log_cursor();
+    let mut docker = Command::new("docker");
+    docker.arg("run");
+    docker.arg("--rm");
+    docker.arg("--user");
+    docker.arg(format!("{uid}:{gid}"));
+    docker.arg("--workdir");
+    docker.arg("/work");
+    docker.arg("-e");
+    docker.arg("HOME=/tmp/cx-home");
+    docker.arg("-e");
+    docker.arg("CARGO_TARGET_DIR=.cx/task-sandbox/target");
+    docker.arg("-e");
+    docker.arg("CX_TASK_SANDBOX_ACTIVE=1");
+    docker.arg("-e");
+    docker.arg("CX_EXECUTION_LANE=container");
+    docker.arg("-e");
+    docker.arg(format!(
+        "CX_EXECUTION_LANE_DETAIL={}",
+        sandbox_lane_detail(&image)
+    ));
+    passthrough_container_envs(&mut docker);
+    docker.arg("-v");
+    docker.arg(format!("{}:/work", root.display()));
+    docker.arg(&image);
+    docker.arg("bash");
+    docker.arg("-lc");
+
+    let mut inner_args = vec![
+        "task".to_string(),
+        "run".to_string(),
+        id.to_string(),
+        "--managed-by-parent".to_string(),
+    ];
+    if let Some(mode) = mode_override {
+        inner_args.push("--mode".to_string());
+        inner_args.push(mode.to_string());
+    }
+    if let Some(backend) = backend_override {
+        inner_args.push("--backend".to_string());
+        inner_args.push(backend.to_string());
+    }
+    let quoted = inner_args
+        .iter()
+        .map(|arg| shell_words::quote(arg).to_string())
+        .collect::<Vec<String>>()
+        .join(" ");
+    let script = format!(
+        "mkdir -p \"$HOME\" \"$CARGO_TARGET_DIR\" && \
+if [[ -x ./bin/xshelf ]]; then app=./bin/xshelf; \
+elif [[ -x ./bin/cx ]]; then app=./bin/cx; \
+elif command -v xshelf >/dev/null 2>&1; then app=xshelf; \
+elif command -v cx >/dev/null 2>&1; then app=cx; \
+else echo \"{} task sandbox: xshelf/cx is not available inside the container image\" >&2; exit 127; fi && \
+\"$app\" {quoted}",
+        cli_app_name()
+    );
+    docker.arg(script);
+
+    let status_code = if emit_output {
+        crate::process::run_command_status_with_timeout(docker, "task sandbox docker run")
+            .map_err(|e| format!("{} task sandbox: {e}", cli_app_name()))?
+            .code()
+            .unwrap_or(1)
+    } else {
+        crate::process::run_command_output_with_timeout(docker, "task sandbox docker run")
+            .map_err(|e| format!("{} task sandbox: {e}", cli_app_name()))?
+            .status
+            .code()
+            .unwrap_or(1)
+    };
+    let recovered = log_cursor
+        .as_ref()
+        .and_then(|(p, offset)| recover_execution_id_from_log(p, *offset));
+    Ok((status_code, recovered))
+}
+
 #[derive(Debug, Clone)]
 struct ReplicaOutcome {
     index: u32,
     status_code: i32,
     execution_id: Option<String>,
     error: Option<String>,
+}
+
+struct ReplicaRunConfig<'a> {
+    mode_override: Option<&'a str>,
+    backend_override: Option<&'a str>,
+    emit_output: bool,
+    replica_index: u32,
+    replica_count: u32,
+    converge_mode: &'a str,
 }
 
 fn parse_words(input: &str) -> Vec<String> {
@@ -131,10 +499,11 @@ fn task_prompt(task: &TaskRecord) -> String {
 
 fn task_backend_override(task: &TaskRecord) -> Option<String> {
     let backend = task.backend.trim().to_lowercase();
-    if matches!(backend.as_str(), "codex" | "ollama") {
-        Some(backend)
-    } else {
-        None
+    match backend.as_str() {
+        "primary" => Some("primary".to_string()),
+        "ollama" | "llamacpp" | "mlx" => Some(backend),
+        "llama.cpp" | "llama_cpp" => Some("llamacpp".to_string()),
+        _ => None,
     }
 }
 
@@ -155,6 +524,36 @@ fn task_model_override(task: &TaskRecord) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn normalize_model_backend(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "ollama" => "ollama".to_string(),
+        "llamacpp" | "llama.cpp" | "llama_cpp" => "llamacpp".to_string(),
+        "mlx" => "mlx".to_string(),
+        _ => "primary".to_string(),
+    }
+}
+
+fn resolved_task_model_override(
+    backend_override: Option<&str>,
+    model: Option<&str>,
+) -> Result<Option<(String, String)>, String> {
+    let raw_model = match model.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let backend_raw = backend_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(llm_backend);
+    let backend = normalize_model_backend(&backend_raw);
+    if matches!(backend.as_str(), "ollama" | "llamacpp" | "mlx") {
+        let resolved = resolve_model_for_backend(&backend, raw_model)?.resolved_model;
+        return Ok(Some((backend, resolved)));
+    }
+    Ok(Some((backend, raw_model.to_string())))
+}
+
 fn set_optional_env(name: &str, value: Option<String>) {
     match value {
         Some(v) => unsafe { env::set_var(name, v) },
@@ -168,10 +567,14 @@ fn run_task_prompt(
     mode_override: Option<&str>,
     backend_override: Option<&str>,
     model_override: Option<&str>,
+    emit_output: bool,
 ) -> Result<(i32, Option<String>), String> {
     let prev_mode = env::var("CX_MODE").ok();
     let prev_backend = env::var("CX_LLM_BACKEND").ok();
     let prev_ollama_model = env::var("CX_OLLAMA_MODEL").ok();
+    let prev_llama_cpp_model = env::var("CX_LLAMA_CPP_MODEL").ok();
+    let prev_mlx_model = env::var("CX_MLX_MODEL").ok();
+    let prev_primary_model = env::var("CX_MODEL").ok();
     if let Some(mode) = mode_override {
         // scoped overrides for prompt-based task execution.
         unsafe { env::set_var("CX_MODE", mode) };
@@ -179,8 +582,26 @@ fn run_task_prompt(
     if let Some(backend) = backend_override {
         unsafe { env::set_var("CX_LLM_BACKEND", backend) };
     }
-    if let Some(model) = model_override {
-        unsafe { env::set_var("CX_OLLAMA_MODEL", model) };
+    let resolved_model_override =
+        match resolved_task_model_override(backend_override, model_override) {
+            Ok(v) => v,
+            Err(e) => {
+                set_optional_env("CX_MODE", prev_mode);
+                set_optional_env("CX_LLM_BACKEND", prev_backend);
+                set_optional_env("CX_OLLAMA_MODEL", prev_ollama_model);
+                set_optional_env("CX_LLAMA_CPP_MODEL", prev_llama_cpp_model);
+                set_optional_env("CX_MLX_MODEL", prev_mlx_model);
+                set_optional_env("CX_MODEL", prev_primary_model);
+                return Err(e);
+            }
+        };
+    if let Some((backend, model)) = resolved_model_override {
+        match backend.as_str() {
+            "llamacpp" => unsafe { env::set_var("CX_LLAMA_CPP_MODEL", model) },
+            "mlx" => unsafe { env::set_var("CX_MLX_MODEL", model) },
+            "primary" => unsafe { env::set_var("CX_MODEL", model) },
+            _ => unsafe { env::set_var("CX_OLLAMA_MODEL", model) },
+        }
     }
     let exec_result = (runner.execute_task)(TaskSpec {
         command_name: "cxtask_run".to_string(),
@@ -194,8 +615,13 @@ fn run_task_prompt(
     set_optional_env("CX_MODE", prev_mode);
     set_optional_env("CX_LLM_BACKEND", prev_backend);
     set_optional_env("CX_OLLAMA_MODEL", prev_ollama_model);
+    set_optional_env("CX_LLAMA_CPP_MODEL", prev_llama_cpp_model);
+    set_optional_env("CX_MLX_MODEL", prev_mlx_model);
+    set_optional_env("CX_MODEL", prev_primary_model);
     let res = exec_result?;
-    println!("{}", res.stdout);
+    if emit_output {
+        println!("{}", res.stdout);
+    }
     Ok((0, Some(res.execution_id)))
 }
 
@@ -204,11 +630,13 @@ fn run_objective_subprocess(
     mode_override: Option<&str>,
     backend_override: Option<&str>,
     model_override: Option<&str>,
+    emit_output: bool,
 ) -> Result<i32, String> {
     if objective_words.is_empty() {
         return Ok(2);
     }
-    let exe = env::current_exe().map_err(|e| format!("cxrs task run: current_exe failed: {e}"))?;
+    let exe = env::current_exe()
+        .map_err(|e| format!("{} task run: current_exe failed: {e}", cli_app_name()))?;
     let mut cmd = Command::new(exe);
     cmd.args(objective_words);
     if let Some(mode) = mode_override {
@@ -217,11 +645,35 @@ fn run_objective_subprocess(
     if let Some(backend) = backend_override {
         cmd.env("CX_LLM_BACKEND", backend);
     }
-    if let Some(model) = model_override {
-        cmd.env("CX_OLLAMA_MODEL", model);
+    let resolved_model_override = resolved_task_model_override(backend_override, model_override)
+        .map_err(|e| {
+            format!(
+                "{} task run: model override resolution failed: {e}",
+                cli_app_name()
+            )
+        })?;
+    if let Some((backend, model)) = resolved_model_override {
+        match backend.as_str() {
+            "llamacpp" => {
+                cmd.env("CX_LLAMA_CPP_MODEL", model);
+            }
+            "mlx" => {
+                cmd.env("CX_MLX_MODEL", model);
+            }
+            "primary" => {
+                cmd.env("CX_MODEL", model);
+            }
+            _ => {
+                cmd.env("CX_OLLAMA_MODEL", model);
+            }
+        }
     }
-    let status = crate::process::run_command_status_with_timeout(cmd, "cxtask_run subprocess")?;
-    Ok(status.code().unwrap_or(1))
+    if emit_output {
+        let status = crate::process::run_command_status_with_timeout(cmd, "cxtask_run subprocess")?;
+        return Ok(status.code().unwrap_or(1));
+    }
+    let output = crate::process::run_command_output_with_timeout(cmd, "cxtask_run subprocess")?;
+    Ok(output.status.code().unwrap_or(1))
 }
 
 fn capture_log_cursor() -> Option<(PathBuf, u64)> {
@@ -268,13 +720,31 @@ fn dispatch_task_command(
     task: &TaskRecord,
     mode_override: Option<&str>,
     backend_override: Option<&str>,
+    emit_output: bool,
 ) -> Result<(i32, Option<String>), String> {
     let Some(cmd0) = words.first().map(String::as_str) else {
-        return run_task_prompt(runner, task, mode_override, backend_override, None);
+        return run_task_prompt(
+            runner,
+            task,
+            mode_override,
+            backend_override,
+            None,
+            emit_output,
+        );
     };
     let args: Vec<String> = words.iter().skip(1).cloned().collect();
     let model_override = task_model_override(task);
-    if mode_override.is_some() || backend_override.is_some() {
+    if !emit_output {
+        let code = run_objective_subprocess(
+            words,
+            mode_override,
+            backend_override,
+            model_override.as_deref(),
+            false,
+        )?;
+        return Ok((code, None));
+    }
+    if mode_override.is_some() || backend_override.is_some() || model_override.is_some() {
         match cmd0 {
             "cxcommitjson" | "commitjson" | "cxcommitmsg" | "commitmsg" | "cxdiffsum"
             | "diffsum" | "cxdiffsum_staged" | "diffsum-staged" | "cxnext" | "next"
@@ -284,6 +754,7 @@ fn dispatch_task_command(
                     mode_override,
                     backend_override,
                     model_override.as_deref(),
+                    true,
                 )?;
                 return Ok((code, None));
             }
@@ -308,6 +779,7 @@ fn dispatch_task_command(
                 mode_override,
                 backend_override,
                 model_override.as_deref(),
+                emit_output,
             );
         }
     };
@@ -319,11 +791,18 @@ fn run_task_objective(
     task: &TaskRecord,
     mode_override: Option<&str>,
     backend_override: Option<&str>,
+    emit_output: bool,
 ) -> Result<(i32, Option<String>), String> {
     let log_cursor = capture_log_cursor();
     let words = parse_words(&task.objective);
-    let (status, execution_id) =
-        dispatch_task_command(runner, &words, task, mode_override, backend_override)?;
+    let (status, execution_id) = dispatch_task_command(
+        runner,
+        &words,
+        task,
+        mode_override,
+        backend_override,
+        emit_output,
+    )?;
     if execution_id.is_some() {
         return Ok((status, execution_id));
     }
@@ -510,25 +989,46 @@ fn judge_winner_with_model(
 fn run_replica(
     runner: &TaskRunner,
     task: &TaskRecord,
-    mode_override: Option<&str>,
-    backend_override: Option<&str>,
-    replica_index: u32,
-    replica_count: u32,
-    converge_mode: &str,
+    config: ReplicaRunConfig<'_>,
 ) -> ReplicaOutcome {
-    set_optional_env("CX_TASK_REPLICA_INDEX", Some(replica_index.to_string()));
-    set_optional_env("CX_TASK_REPLICA_COUNT", Some(replica_count.to_string()));
-    set_optional_env("CX_TASK_CONVERGE_MODE", Some(converge_mode.to_string()));
+    set_optional_env(
+        "CX_TASK_REPLICA_INDEX",
+        Some(config.replica_index.to_string()),
+    );
+    set_optional_env(
+        "CX_TASK_REPLICA_COUNT",
+        Some(config.replica_count.to_string()),
+    );
+    set_optional_env(
+        "CX_TASK_CONVERGE_MODE",
+        Some(config.converge_mode.to_string()),
+    );
     set_optional_env("CX_TASK_CONVERGE_WINNER", None);
-    match run_task_objective(runner, task, mode_override, backend_override) {
+    let run_result = if !task_sandbox_active() && task_sandbox_config().enabled {
+        task_in_sandbox(
+            &task.id,
+            config.mode_override,
+            config.backend_override,
+            config.emit_output,
+        )
+    } else {
+        run_task_objective(
+            runner,
+            task,
+            config.mode_override,
+            config.backend_override,
+            config.emit_output,
+        )
+    };
+    match run_result {
         Ok((code, execution_id)) => ReplicaOutcome {
-            index: replica_index,
+            index: config.replica_index,
             status_code: code,
             execution_id,
             error: None,
         },
         Err(e) => ReplicaOutcome {
-            index: replica_index,
+            index: config.replica_index,
             status_code: 1,
             execution_id: None,
             error: Some(e),
@@ -595,7 +1095,7 @@ fn log_convergence_summary(
     set_optional_env("CX_TASK_CONVERGE_VOTES", Some(votes_json));
     let usage = crate::types::UsageStats::default();
     let capture = crate::types::CaptureStats::default();
-    let _ = log_codex_run(RunLogInput {
+    let _ = log_primary_run(RunLogInput {
         tool: "cxtask_converge",
         prompt: &task.objective,
         prompt_raw: None,
@@ -651,10 +1151,12 @@ fn finalize_task_status(
     status_code: i32,
 ) -> Result<(), TaskRunError> {
     let mut tasks = (runner.read_tasks)().map_err(TaskRunError::Critical)?;
-    let idx = tasks
-        .iter()
-        .position(|t| t.id == id)
-        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task disappeared: {id}")))?;
+    let idx = tasks.iter().position(|t| t.id == id).ok_or_else(|| {
+        TaskRunError::Critical(format!(
+            "{} task run: task disappeared: {id}",
+            cli_app_name()
+        ))
+    })?;
     tasks[idx].status = if status_code == 0 {
         "complete".to_string()
     } else {
@@ -674,12 +1176,12 @@ pub fn run_task_by_id(
     mode_override: Option<&str>,
     backend_override: Option<&str>,
     managed_by_parent: bool,
+    emit_output: bool,
 ) -> Result<(i32, Option<String>), TaskRunError> {
     let mut tasks = (runner.read_tasks)().map_err(TaskRunError::Critical)?;
-    let idx = tasks
-        .iter()
-        .position(|t| t.id == id)
-        .ok_or_else(|| TaskRunError::Critical(format!("cxrs task run: task not found: {id}")))?;
+    let idx = tasks.iter().position(|t| t.id == id).ok_or_else(|| {
+        TaskRunError::Critical(format!("{} task run: task not found: {id}", cli_app_name()))
+    })?;
     if tasks[idx].status == "complete" {
         return Ok((0, None));
     }
@@ -716,7 +1218,8 @@ pub fn run_task_by_id(
     let replica_count = effective_replica_count(&tasks[idx], &converge_mode);
     if tasks[idx].converge == "none" && tasks[idx].replicas > 1 {
         crate::cx_eprintln!(
-            "cxrs task run: task {} replicas={} ignored because converge=none",
+            "{} task run: task {} replicas={} ignored because converge=none",
+            cli_app_name(),
             id,
             tasks[idx].replicas
         );
@@ -726,11 +1229,14 @@ pub fn run_task_by_id(
         let outcome = run_replica(
             runner,
             &tasks[idx],
-            effective_mode.as_deref(),
-            effective_backend.as_deref(),
-            replica_index,
-            replica_count,
-            &converge_mode,
+            ReplicaRunConfig {
+                mode_override: effective_mode.as_deref(),
+                backend_override: effective_backend.as_deref(),
+                emit_output,
+                replica_index,
+                replica_count,
+                converge_mode: &converge_mode,
+            },
         );
         let should_stop = converge_mode == "first_valid" && outcome.status_code == 0;
         outcomes.push(outcome);
@@ -791,7 +1297,10 @@ pub fn run_task_by_id(
         finalize_task_status(runner, id, status_code)?;
     }
     if let Some(e) = objective_err {
-        crate::cx_eprintln!("cxrs task run: objective failed for {id}: {e}");
+        crate::cx_eprintln!(
+            "{} task run: objective failed for {id}: {e}",
+            cli_app_name()
+        );
     }
     Ok((status_code, execution_id))
 }
@@ -835,7 +1344,7 @@ mod tests {
     }
 
     #[test]
-    fn task_prompt_clips_context() {
+    fn prompt_clips_context() {
         let t = TaskRecord {
             id: "task_001".to_string(),
             parent_id: None,

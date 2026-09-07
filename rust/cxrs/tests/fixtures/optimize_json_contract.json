@@ -3,6 +3,7 @@
     "contract_version",
     "window",
     "runs",
+    "backend_capabilities",
     "scoreboard",
     "anomalies",
     "recommendations",
@@ -19,8 +20,18 @@
     "schema_failure_frequency",
     "timeout_frequency",
     "retry_health",
+    "timing_attribution_coverage",
     "capture_provider_compression",
+    "capture_prompt_profile_rollout",
     "budget_clipping_frequency"
+  ],
+  "backend_capabilities_keys": [
+    "turboquant"
+  ],
+  "backend_capabilities_turboquant_keys": [
+    "cx_runtime_support",
+    "selected_backend_role",
+    "memory_metric_kind"
   ],
   "retry_health_keys": [
     "rows_after_retry",
@@ -31,5 +42,27 @@
     "tasks_recovered",
     "tasks_recovery_rate",
     "attempt_histogram"
+  ],
+  "timing_coverage_keys": [
+    "task_rows",
+    "rows_with_retry_attempt",
+    "rows_with_queue_started_at",
+    "rows_with_task_started_at",
+    "rows_with_task_finished_at",
+    "retry_attempt_rate",
+    "queue_started_at_rate",
+    "task_started_at_rate",
+    "task_finished_at_rate",
+    "min_coverage_rate"
+  ],
+  "capture_prompt_rollout_keys": [
+    "rows_with_explicit_profile",
+    "shadow_narrow_configured_runs",
+    "shadow_narrow_applied_runs",
+    "shadow_narrow_fallback_runs",
+    "shadow_narrow_applied_rate",
+    "shadow_narrow_fallback_rate",
+    "applied_reducer_kinds",
+    "fallback_reasons"
   ]
 }

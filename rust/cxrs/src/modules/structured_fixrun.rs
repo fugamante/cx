@@ -9,7 +9,7 @@ use crate::error::{EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, format_error};
 use crate::paths::repo_root;
 use crate::policy::{SafetyDecision, evaluate_command_safety};
 use crate::process::run_command_status_with_timeout;
-use crate::runlog::{RunLogInput, log_codex_run};
+use crate::runlog::{RunLogInput, log_primary_run};
 use crate::schema::load_schema;
 use crate::types::{ExecutionResult, LlmOutputKind, TaskInput, TaskSpec};
 
@@ -86,7 +86,7 @@ fn log_schema_failure_and_exit(
     if result.schema_valid != Some(false) {
         return Ok(());
     }
-    let _ = log_codex_run(RunLogInput {
+    let _ = log_primary_run(RunLogInput {
         tool: "cxrs_fix_run",
         prompt: task_input,
         prompt_raw: None,
@@ -119,7 +119,7 @@ fn log_schema_failure_and_exit(
 }
 
 fn log_fix_run(ctx: &FixRunCtx, policy_blocked: Option<bool>, policy_reason: Option<&str>) {
-    let _ = log_codex_run(RunLogInput {
+    let _ = log_primary_run(RunLogInput {
         tool: "cxrs_fix_run",
         prompt: &ctx.task_input,
         prompt_raw: None,

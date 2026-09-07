@@ -1,0 +1,510 @@
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 3e0fd31..833fc3b 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -6,6 +6,7 @@
+ #include "llama-context.h"
+ 
+ #include <algorithm>
++#include <array>
+ #include <cassert>
+ #include <cmath>
+ #include <cstring>
+@@ -72,6 +73,146 @@ static ggml_tensor * ggml_mul_mat_aux(
+     return res;
+ }
+ 
++static void tq_v0_identity_map(
++        ggml_tensor * dst,
++        const ggml_tensor * src,
++        int ith,
++        int nth,
++        void * userdata) {
++    GGML_UNUSED(userdata);
++
++    if (ith != 0) {
++        return;
++    }
++
++    GGML_ASSERT(nth >= 1);
++    GGML_ASSERT(dst->type == src->type);
++    GGML_ASSERT(ggml_nbytes(dst) == ggml_nbytes(src));
++
++    memcpy(dst->data, src->data, ggml_nbytes(src));
++}
++
++static size_t tq_tensor_offset(const ggml_tensor * tensor, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
++    return size_t(i0)*tensor->nb[0] + size_t(i1)*tensor->nb[1] + size_t(i2)*tensor->nb[2] + size_t(i3)*tensor->nb[3];
++}
++
++static float tq_tensor_get_f32(const ggml_tensor * tensor, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
++    const size_t off = tq_tensor_offset(tensor, i0, i1, i2, i3);
++    const char * base = static_cast<const char *>(tensor->data) + off;
++
++    switch (tensor->type) {
++        case GGML_TYPE_F32:
++            return *reinterpret_cast<const float *>(base);
++        case GGML_TYPE_F16:
++            return ggml_fp16_to_fp32(*reinterpret_cast<const ggml_fp16_t *>(base));
++        default:
++            GGML_ABORT("unsupported tq tensor type");
++    }
++}
++
++static void tq_tensor_set_f32(ggml_tensor * tensor, int64_t i0, int64_t i1, int64_t i2, int64_t i3, float value) {
++    const size_t off = tq_tensor_offset(tensor, i0, i1, i2, i3);
++    char * base = static_cast<char *>(tensor->data) + off;
++
++    switch (tensor->type) {
++        case GGML_TYPE_F32:
++            *reinterpret_cast<float *>(base) = value;
++            return;
++        case GGML_TYPE_F16:
++            *reinterpret_cast<ggml_fp16_t *>(base) = ggml_fp32_to_fp16(value);
++            return;
++        default:
++            GGML_ABORT("unsupported tq tensor type");
++    }
++}
++
++static void tq_v0_simulate_map(
++        ggml_tensor * dst,
++        const ggml_tensor * src,
++        int ith,
++        int nth,
++        void * userdata) {
++    auto * params = static_cast<llama_kv_cache::tq_v_layer_state *>(userdata);
++
++    if (ith != 0) {
++        return;
++    }
++
++    GGML_ASSERT(params != nullptr);
++    GGML_ASSERT(nth >= 1);
++    GGML_ASSERT(dst->type == src->type);
++
++    const uint32_t group_size = std::max<uint32_t>(1, params->group_size);
++    const uint32_t codebook_bits = std::max<uint32_t>(1, params->codebook_bits);
++    const int32_t qmax = std::max<int32_t>(1, (1 << (std::min<uint32_t>(codebook_bits, 15u) - 1)) - 1);
++
++    std::vector<float> group;
++    group.reserve(group_size);
++
++    auto flush_group = [&](std::vector<std::array<int64_t, 4>> & coords) {
++        if (group.empty()) {
++            return;
++        }
++
++        float max_abs = 0.0f;
++        for (float v : group) {
++            max_abs = std::max(max_abs, std::fabs(v));
++        }
++
++        const float scale = max_abs > 0.0f ? (max_abs / float(qmax)) : 0.0f;
++
++        for (size_t i = 0; i < group.size(); ++i) {
++            float out = 0.0f;
++            if (scale > 0.0f) {
++                const float qf = std::round(group[i] / scale);
++                const float qc = std::max(-float(qmax), std::min(float(qmax), qf));
++                out = qc * scale;
++            }
++            const auto & c = coords[i];
++            tq_tensor_set_f32(dst, c[0], c[1], c[2], c[3], out);
++        }
++
++        group.clear();
++        coords.clear();
++    };
++
++    std::vector<std::array<int64_t, 4>> coords;
++    coords.reserve(group_size);
++
++    for (int64_t i3 = 0; i3 < dst->ne[3]; ++i3) {
++        for (int64_t i2 = 0; i2 < dst->ne[2]; ++i2) {
++            for (int64_t i1 = 0; i1 < dst->ne[1]; ++i1) {
++                for (int64_t i0 = 0; i0 < dst->ne[0]; ++i0) {
++                    group.push_back(tq_tensor_get_f32(src, i0, i1, i2, i3));
++                    coords.push_back({i0, i1, i2, i3});
++
++                    if (group.size() == group_size) {
++                        flush_group(coords);
++                    }
++                }
++            }
++        }
++    }
++
++    flush_group(coords);
++}
++
++static void tq_pack_bits(std::vector<uint8_t> & dst, size_t & bit_cursor, uint32_t value, uint32_t bits) {
++    if (bits == 0) {
++        return;
++    }
++    for (uint32_t i = 0; i < bits; ++i) {
++        const uint32_t bit = (value >> i) & 1u;
++        const size_t byte_idx = bit_cursor / 8u;
++        const uint32_t bit_idx = bit_cursor % 8u;
++        if (byte_idx >= dst.size()) {
++            dst.push_back(0);
++        }
++        dst[byte_idx] |= uint8_t(bit << bit_idx);
++        ++bit_cursor;
++    }
++}
++
+ //
+ // llama_kv_cache
+ //
+@@ -80,6 +221,9 @@ llama_kv_cache::llama_kv_cache(
+         const llama_model & model,
+                 ggml_type   type_k,
+                 ggml_type   type_v,
++                     bool   turboquant_enable,
++                 uint32_t   turboquant_group_size,
++                 uint32_t   turboquant_codebook_bits,
+                      bool   v_trans,
+                      bool   offload,
+                      bool   unified,
+@@ -92,6 +236,9 @@ llama_kv_cache::llama_kv_cache(
+     const  layer_reuse_cb & reuse) :
+     model(model), hparams(model.hparams), v_trans(v_trans),
+     n_seq_max(n_seq_max), n_stream(unified ? 1 : n_seq_max), n_pad(n_pad), n_swa(n_swa), swa_type(swa_type) {
++    turboquant.enable = turboquant_enable;
++    turboquant.group_size = turboquant_group_size;
++    turboquant.codebook_bits = turboquant_codebook_bits;
+ 
+     GGML_ASSERT(kv_size % n_pad == 0);
+ 
+@@ -211,6 +358,11 @@ llama_kv_cache::llama_kv_cache(
+         map_layer_ids[il] = layers.size();
+ 
+         layers.push_back({ il, k, v, k_stream, v_stream, });
++        tq_v_layer_state tq_state;
++        tq_state.il = il;
++        tq_state.group_size = turboquant.group_size;
++        tq_state.codebook_bits = turboquant.codebook_bits;
++        tq_v_layers.push_back(std::move(tq_state));
+     }
+ 
+     if (reuse) {
+@@ -266,6 +418,10 @@ llama_kv_cache::llama_kv_cache(
+                 (float)(memory_size_k + memory_size_v) / (1024.0f * 1024.0f), kv_size, (int) layers.size(), n_seq_max, n_stream,
+                 ggml_type_name(type_k), (float)memory_size_k / (1024.0f * 1024.0f),
+                 ggml_type_name(type_v), (float)memory_size_v / (1024.0f * 1024.0f));
++        if (turboquant.enable) {
++            LLAMA_LOG_INFO("%s: turboquant_v = 1, group_size = %u, codebook_bits = %u\n",
++                    __func__, turboquant.group_size, turboquant.codebook_bits);
++        }
+     }
+ 
+     const char * LLAMA_ATTN_ROT_DISABLE = getenv("LLAMA_ATTN_ROT_DISABLE");
+@@ -315,6 +471,11 @@ llama_kv_cache::llama_kv_cache(
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
++    turboquant_fallback = false;
++    turboquant_fallback_reason.clear();
++    for (auto & tq : tq_v_layers) {
++        turboquant_reset_sidecar(tq);
++    }
+     for (uint32_t s = 0; s < n_stream; ++s) {
+         v_cells[s].reset();
+         v_heads[s] = 0;
+@@ -1113,6 +1274,135 @@ ggml_type llama_kv_cache::type_v() const {
+     return layers[0].v->type;
+ }
+ 
++bool llama_kv_cache::turboquant_supported_v(const ggml_tensor * v_cur) const {
++    if (!turboquant.enable || v_cur == nullptr) {
++        return false;
++    }
++
++    if (v_trans) {
++        return false;
++    }
++
++    if (turboquant.group_size == 0 || turboquant.codebook_bits == 0) {
++        return false;
++    }
++
++    if (v_cur->type != GGML_TYPE_F16 && v_cur->type != GGML_TYPE_F32) {
++        return false;
++    }
++
++    const int64_t n_embd_gqa = v_cur->ne[0]*v_cur->ne[1];
++    return n_embd_gqa % turboquant.group_size == 0;
++}
++
++bool llama_kv_cache::turboquant_supported_backend_v(const ggml_tensor * v_dst) const {
++    if (!turboquant.enable || v_dst == nullptr || v_dst->buffer == nullptr) {
++        return false;
++    }
++
++    return ggml_backend_buffer_is_host(v_dst->buffer);
++}
++
++void llama_kv_cache::turboquant_set_fallback(const char * reason) const {
++    if (!turboquant.enable) {
++        return;
++    }
++
++    const char * why = reason ? reason : "unknown";
++    if (!turboquant_fallback || turboquant_fallback_reason != why) {
++        LLAMA_LOG_WARN("%s: turboquant fallback active for V cache: %s\n", __func__, why);
++    }
++
++    turboquant_fallback = true;
++    turboquant_fallback_reason = why;
++}
++
++bool llama_kv_cache::turboquant_is_active_v() const {
++    return turboquant.enable && !turboquant_fallback;
++}
++
++void llama_kv_cache::turboquant_reset_sidecar(tq_v_layer_state & layer) const {
++    layer.row_width = 0;
++    layer.row_count = 0;
++    layer.payload_bytes = 0;
++    layer.scale_bytes = 0;
++    layer.rows_written = 0;
++    layer.rows_bypassed = 0;
++    layer.sidecar.payload.clear();
++    layer.sidecar.scales_fp16.clear();
++    layer.sidecar.rows.clear();
++}
++
++void llama_kv_cache::turboquant_sync_sidecar_v(const ggml_tensor * v_dst, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
++    if (!turboquant_is_active_v() || v_dst == nullptr || v_trans) {
++        return;
++    }
++
++    const int32_t ikv = map_layer_ids.at(il);
++    auto & layer = tq_v_layers.at(ikv);
++    turboquant_reset_sidecar(layer);
++
++    const uint32_t width = uint32_t(v_dst->ne[0]);
++    const uint32_t group_size = std::max<uint32_t>(1, layer.group_size);
++    const uint32_t bits = std::max<uint32_t>(1, layer.codebook_bits);
++    const int32_t qmax = std::max<int32_t>(1, (1 << (std::min<uint32_t>(bits, 15u) - 1)) - 1);
++    const size_t elem_size = ggml_type_size(v_dst->type);
++
++    layer.row_width = width;
++    layer.row_count = n_kv * sinfo.n_stream();
++    layer.raw_bytes = size_t(layer.row_width) * size_t(layer.row_count) * elem_size;
++
++    for (uint32_t si = 0; si < sinfo.n_stream(); ++si) {
++        const uint32_t strm = sinfo.strm[si];
++        for (uint32_t slot = 0; slot < n_kv; ++slot) {
++            tq_v_group row;
++            row.slot = slot;
++            row.strm = strm;
++            row.width = width;
++            row.payload_offset = layer.sidecar.payload.size();
++            row.scale_offset = layer.sidecar.scales_fp16.size();
++
++            size_t bit_cursor = row.payload_offset * 8u;
++            uint32_t code_count = 0;
++
++            for (uint32_t base = 0; base < width; base += group_size) {
++                const uint32_t group_width = std::min<uint32_t>(group_size, width - base);
++                float max_abs = 0.0f;
++                std::vector<float> values(group_width);
++                for (uint32_t j = 0; j < group_width; ++j) {
++                    const float value = tq_tensor_get_f32(v_dst, base + j, slot, strm, 0);
++                    values[j] = value;
++                    max_abs = std::max(max_abs, std::fabs(value));
++                }
++
++                const float scale = max_abs > 0.0f ? (max_abs / float(qmax)) : 0.0f;
++                layer.sidecar.scales_fp16.push_back(ggml_fp32_to_fp16(scale));
++
++                for (uint32_t j = 0; j < group_width; ++j) {
++                    uint32_t packed = 0;
++                    if (scale > 0.0f) {
++                        const float qf = std::round(values[j] / scale);
++                        const float qc = std::max(-float(qmax), std::min(float(qmax), qf));
++                        packed = uint32_t(int32_t(qc) + qmax);
++                    }
++                    tq_pack_bits(layer.sidecar.payload, bit_cursor, packed, bits);
++                    ++code_count;
++                }
++            }
++
++            row.code_count = code_count;
++            row.payload_bytes = layer.sidecar.payload.size() - row.payload_offset;
++            row.scale_count = layer.sidecar.scales_fp16.size() - row.scale_offset;
++            layer.sidecar.rows.push_back(row);
++            ++layer.rows_written;
++        }
++    }
++
++    layer.payload_bytes = layer.sidecar.payload.size();
++    layer.scale_bytes = layer.sidecar.scales_fp16.size() * sizeof(uint16_t);
++    layer.simulated_bytes = layer.payload_bytes + layer.scale_bytes;
++}
++
+ uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo) const {
+     uint32_t result = 0;
+ 
+@@ -1154,6 +1444,10 @@ ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_k
+ 
+     auto * v = layers[ikv].v;
+ 
++    if (turboquant.enable && !turboquant_supported_backend_v(v)) {
++        turboquant_set_fallback("unsupported_v_backend");
++    }
++
+     const uint64_t kv_size      = get_size();
+     const uint64_t n_embd_v_gqa = v->ne[0];
+ 
+@@ -1164,21 +1458,32 @@ ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_k
+ 
+     if (!v_trans) {
+         // note: v->nb[1] <= v->nb[2]
+-        return ggml_view_4d(ctx, v,
++        if (turboquant_is_active_v()) {
++            turboquant_sync_sidecar_v(v, il, n_kv, sinfo);
++        }
++        auto * v_view = ggml_view_4d(ctx, v,
+                 hparams.n_embd_head_v(il), hparams.n_head_kv(il), n_kv, ns,
+                 ggml_row_size(v->type, hparams.n_embd_head_v(il)),          // v->nb[1]
+                 ggml_row_size(v->type, n_embd_v_gqa),                   // v->nb[2]
+                 ggml_row_size(v->type, n_embd_v_gqa*kv_size),           // v->nb[3]
+                 ggml_row_size(v->type, n_embd_v_gqa*kv_size)*sinfo.s0);
++        if (turboquant_is_active_v()) {
++            return ggml_map_custom1(ctx, v_view, tq_v0_identity_map, GGML_N_TASKS_MAX, nullptr);
++        }
++        return v_view;
+     }
+ 
+     // note: v->nb[1] > v->nb[2]
+-    return ggml_view_4d(ctx, v,
++    auto * v_view = ggml_view_4d(ctx, v,
+             n_kv, hparams.n_head_kv(il), hparams.n_embd_head_v(il), ns,
+             ggml_row_size(v->type, kv_size*hparams.n_embd_head_v(il)),  // v->nb[1]
+             ggml_row_size(v->type, kv_size),                        // v->nb[2]
+             ggml_row_size(v->type, kv_size*n_embd_v_gqa),           // v->nb[3]
+             ggml_row_size(v->type, kv_size*n_embd_v_gqa)*sinfo.s0);
++    if (turboquant_is_active_v()) {
++        return ggml_map_custom1(ctx, v_view, tq_v0_identity_map, GGML_N_TASKS_MAX, nullptr);
++    }
++    return v_view;
+ }
+ 
+ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const {
+@@ -1223,6 +1528,25 @@ ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggm
+ 
+     auto * v = layers[ikv].v;
+ 
++    if (turboquant.enable) {
++        if (!turboquant_supported_v(v_cur)) {
++            turboquant_set_fallback("unsupported_v_layout");
++            tq_v_layers.at(ikv).rows_bypassed += size_t(v_cur->ne[2]);
++        } else if (!turboquant_supported_backend_v(v)) {
++            turboquant_set_fallback("unsupported_v_backend");
++            tq_v_layers.at(ikv).rows_bypassed += size_t(v_cur->ne[2]);
++        } else {
++            auto & tq = tq_v_layers.at(ikv);
++            tq.group_size = turboquant.group_size;
++            tq.codebook_bits = turboquant.codebook_bits;
++            tq.raw_bytes = ggml_nbytes(v_cur);
++            const size_t n_elem = ggml_nelements(v_cur);
++            const size_t n_group = (n_elem + tq.group_size - 1)/tq.group_size;
++            tq.simulated_bytes = ((n_elem * tq.codebook_bits) + 7)/8 + n_group*sizeof(uint16_t);
++            v_cur = ggml_map_custom1(ctx, v_cur, tq_v0_simulate_map, GGML_N_TASKS_MAX, &tq);
++        }
++    }
++
+     const int64_t n_embd_head = v_cur->ne[0];
+     const int64_t n_head      = v_cur->ne[1];
+     const int64_t n_tokens    = v_cur->ne[2];
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index d4569a0..087ab63 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -93,10 +93,52 @@ public:
+ 
+     using slot_info_vec_t = std::vector<slot_info>;
+ 
++    // TurboQuant prototype state is kept public for file-local custom-op callbacks in Phase 2.
++    struct tq_v_params {
++        bool enable = false;
++        uint32_t group_size = 64;
++        uint32_t codebook_bits = 8;
++    };
++
++    struct tq_v_group {
++        uint32_t slot = 0;
++        uint32_t strm = 0;
++        uint32_t width = 0;
++        uint32_t code_count = 0;
++        size_t payload_offset = 0;
++        size_t payload_bytes = 0;
++        size_t scale_offset = 0;
++        size_t scale_count = 0;
++    };
++
++    struct tq_v_sidecar {
++        std::vector<uint8_t> payload;
++        std::vector<uint16_t> scales_fp16;
++        std::vector<tq_v_group> rows;
++    };
++
++    struct tq_v_layer_state {
++        uint32_t il = 0;
++        uint32_t group_size = 64;
++        uint32_t codebook_bits = 8;
++        uint32_t row_width = 0;
++        uint32_t row_count = 0;
++        size_t raw_bytes = 0;
++        size_t simulated_bytes = 0;
++        size_t payload_bytes = 0;
++        size_t scale_bytes = 0;
++        size_t rows_written = 0;
++        size_t rows_bypassed = 0;
++        tq_v_sidecar sidecar;
++    };
++
+     llama_kv_cache(
+             const llama_model & model,
+                     ggml_type   type_k,
+                     ggml_type   type_v,
++                         bool   turboquant_enable,
++                     uint32_t   turboquant_group_size,
++                     uint32_t   turboquant_codebook_bits,
+                          bool   v_trans,
+                          bool   offload,
+                          bool   unified,
+@@ -238,6 +280,9 @@ private:
+     // env: LLAMA_ATTN_ROT_DISABLE
+     bool attn_rot_k = false;
+     bool attn_rot_v = false;
++    tq_v_params turboquant;
++    mutable bool turboquant_fallback = false;
++    mutable std::string turboquant_fallback_reason;
+ 
+     // pre-computed hadamard martrices
+     std::unordered_map<int64_t, std::vector<float>> attn_rot_hadamard;
+@@ -267,6 +312,7 @@ private:
+ 
+     // model layer id -> KV cache layer id
+     std::unordered_map<int32_t, int32_t> map_layer_ids;
++    mutable std::vector<tq_v_layer_state> tq_v_layers;
+ 
+     size_t total_size() const;
+ 
+@@ -299,6 +345,12 @@ private:
+ 
+     bool state_read_meta(llama_io_read_i & io, uint32_t strm, uint32_t cell_count,       slot_info & sinfo, llama_seq_id dest_seq_id = -1);
+     bool state_read_data(llama_io_read_i & io, uint32_t strm, uint32_t cell_count, const slot_info & sinfo);
++    bool turboquant_supported_v(const ggml_tensor * v_cur) const;
++    bool turboquant_supported_backend_v(const ggml_tensor * v_dst) const;
++    void turboquant_set_fallback(const char * reason) const;
++    bool turboquant_is_active_v() const;
++    void turboquant_reset_sidecar(tq_v_layer_state & layer) const;
++    void turboquant_sync_sidecar_v(const ggml_tensor * v_dst, int32_t il, uint32_t n_kv, const slot_info & sinfo) const;
+ };
+ 
+ class llama_kv_cache_context : public llama_memory_context_i {

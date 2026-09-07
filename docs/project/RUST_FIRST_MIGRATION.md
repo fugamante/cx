@@ -1,0 +1,170 @@
+# Rust-First Migration Checklist (XSHELF)
+
+Last updated: 2026-02-26
+Scope: entire `XSHELF` project
+
+## 1) Policy (effective now)
+
+- New feature work is implemented in `rust/cxrs` first.
+- Bash (`lib/cx.sh`) is compatibility/bootstrap only.
+- Root `cx.sh` is a deprecated compatibility anchor retained for transition.
+- Primary process backend remains default; Ollama remains optional alternative.
+- No automatic checks on shell startup.
+- Preserve stdout pipeline safety; diagnostics to stderr.
+
+## 2) Branch strategy
+
+- `main`: stable operational branch for incremental Rust-first rollout.
+- Use scoped feature branches for migration phases.
+- Use short neutral scope slugs for active work.
+
+Flow:
+1. Branch from `main` into a scoped feature branch.
+2. Promote to `main` only after parity + smoke checks pass.
+3. Keep branch READMEs branch-specific.
+4. Prefer concise names that stay within `3` segments total.
+
+Examples:
+- good: `orchestration/contracts`, `runtime/task-guidance`
+- avoid: `runtime/session-token-pairing-integration`
+
+Historical branch focus:
+- define and stage Phase III orchestration contracts before enabling concurrency by default
+- preserve deterministic schema/policy/logging guarantees during scheduler changes
+- keep Rust tests/parity checks green on every iteration slice
+
+## 3) Feature intake checklist (for every new feature)
+
+1. Define command/API surface in `cxrs` first.
+2. Define expected log fields and state changes.
+3. Implement command + tests/checks in Rust.
+4. Add help text and README updates.
+5. Validate non-interactive and pipeline-safe behavior.
+6. Validate backward-compat aliases (`cx-compat`, `bin/cx`) where needed.
+7. Decide whether Bash needs only a shim note (not full reimplementation).
+
+## 4) Quality gates (must pass before merge)
+
+Required:
+- `cargo fmt`
+- `cargo check`
+- `rust/cxrs/scripts/parity_check.sh`
+- `rust/cxrs/scripts/compat_check.sh 20`
+
+Recommended smoke:
+- `cargo run -- version`
+- `cargo run -- doctor`
+- `cargo run -- llm show`
+- `cargo run -- cxo git status`
+- one structured command (example: `cargo run -- commitjson`)
+
+## 5) Behavior parity priorities (ordered)
+
+1. Execution wrappers: `cx`, `cxj`, `cxo`, `cxcopy`.
+2. Structured schema commands: `commitjson/msg`, `diffsum*`, `next`, `fix-run`.
+3. Observability: metrics/profile/trace/alert/worklog/optimize.
+4. Safety + replay: policy gates, quarantine, replay.
+5. Prompt tooling: prompt/roles/fanout/promptlint.
+6. Bench/doctor/health ergonomics and reliability.
+
+## 6) Runtime contracts to keep stable
+
+- Repo-aware log resolution and global fallback.
+- Deterministic schema handling by default for structured commands.
+- Quarantine record + schema failure row with `quarantine_id`.
+- Context capture pipeline: raw -> native reduce -> clip budget.
+- Logged capture fields available for optimization analysis.
+
+## 7) LLM backend contract
+
+Defaults:
+- `CX_LLM_BACKEND=primary`
+- Ollama is opt-in.
+
+Requirements:
+- `llm show` always explains active backend/model.
+- `llm use <backend> [model]` provides quick switching.
+- `llm unset <backend|model|all>` clears persisted defaults.
+- If Ollama model is unset:
+  - interactive TTY: prompt once and persist,
+  - non-interactive: fail clearly with remediation.
+
+## 8) Packaging track (future-ready)
+
+Prepare `cxrs` for Homebrew formula use from `main`:
+- keep command/help output stable,
+- avoid runtime side effects during install,
+- keep dependencies explicit in docs,
+- tag release points from `main`.
+
+## 9) Decommission plan for Bash-heavy logic
+
+Phase A:
+- Keep Bash bootstrap and compatibility wrappers only.
+
+Phase B:
+- Freeze new Bash feature additions.
+- Route user-facing docs toward `cxrs` commands.
+
+Phase C:
+- Optional: trim Bash internals to minimum loader/compat set after sustained Rust parity.
+
+## 10) Done criteria for "Rust-first migration complete"
+
+All true:
+- New features land in Rust first by default.
+- Rust commands are the documented default workflow.
+- Compatibility checks are green in CI for the tracked surface.
+- Bash remains thin and no longer accumulates core logic.
+
+## 11) Phase III: Switchable Orchestration Modes (new)
+
+Objective:
+- support both sequential and parallel task execution without breaking determinism/safety contracts.
+
+First-step implementation contract:
+1. Extend task schema with execution policy metadata:
+   - `run_mode`: `sequential|parallel`
+   - `depends_on`: array of task ids
+   - `resource_keys`: logical locks (for repo-write and other conflict domains)
+   - optional: `max_retries`, `timeout_secs`
+2. Add scheduler planning command:
+   - `xshelf task run-plan [--status pending] [--json]`
+   - outputs deterministic execution order/groups before any execution.
+3. Keep `task run-all` sequential by default until planning + lock enforcement are validated.
+4. Introduce bounded worker execution only for tasks proven independent by dependencies + resource locks.
+5. Extend telemetry contract for concurrency:
+   - `task_id`, `worker_id`, `attempt`, `queued_at`, `started_at`, `finished_at`
+6. Maintain hard constraints:
+   - policy engine still blocks unsafe commands by default,
+   - schema commands remain deterministic by default,
+   - logs remain append-only JSONL with contract validation.
+
+## 12) Phase IV: Multi-Model Tandem Orchestration (planned)
+
+Objective:
+- route task execution across multiple backends/models with deterministic scheduling and explicit convergence.
+
+Planned first-step contract:
+1. Extend task metadata:
+   - `backend` (`primary|ollama|auto`)
+   - `model` (nullable)
+   - `profile` (`fast|balanced|quality|schema_strict`)
+2. Add broker command surface:
+   - `xshelf broker show`
+   - `xshelf broker set --policy latency|quality|cost|balanced`
+3. Extend run-all mixed mode:
+   - `xshelf task run-all --mode mixed --backend-pool primary,ollama --max-workers <n>`
+4. Add tandem convergence modes:
+   - `first_valid`, `majority`, `judge`, `score`
+5. Extend telemetry:
+   - backend/model route decision fields
+   - convergence metadata fields
+   - queue timing metrics
+6. Preserve invariants:
+   - schema enforcement remains deterministic by default,
+   - policy gates remain mandatory for command execution,
+   - quarantine/replay contract remains intact.
+
+Design reference:
+- `docs/orchestration/PHASE_IV_MULTI_MODEL_ORCHESTRATION.md`

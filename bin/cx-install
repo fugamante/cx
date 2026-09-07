@@ -18,14 +18,54 @@ if [[ ! -f "$SHELL_RC" ]]; then
 fi
 
 if grep -Fq "$LINE" "$SHELL_RC"; then
-  echo "cx already installed in $SHELL_RC"
+  echo "XSHELF/CX shell utilities already installed in $SHELL_RC"
 else
   {
     echo
-    echo "# cx utilities"
+    echo "# XSHELF/CX utilities"
     echo "$LINE"
   } >> "$SHELL_RC"
-  echo "Installed cx utilities into $SHELL_RC"
+  echo "Installed XSHELF/CX shell utilities into $SHELL_RC"
 fi
+
+install_manpage() {
+  local src="${REPO_ROOT}/docs/man/cx.1"
+  [[ -f "$src" ]] || return 0
+
+  local candidates=()
+  if command -v brew >/dev/null 2>&1; then
+    local hb_prefix
+    hb_prefix="$(brew --prefix 2>/dev/null || true)"
+    if [[ -n "$hb_prefix" ]]; then
+      candidates+=("$hb_prefix/share/man/man1")
+    fi
+  fi
+  candidates+=(
+    "/opt/homebrew/share/man/man1"
+    "/usr/local/share/man/man1"
+    "$HOME/.local/share/man/man1"
+    "$HOME/man/man1"
+  )
+
+  local target=""
+  local dir
+  for dir in "${candidates[@]}"; do
+    if mkdir -p "$dir" 2>/dev/null; then
+      target="$dir"
+      break
+    fi
+  done
+  if [[ -z "$target" ]]; then
+    echo "cx-install: warning: could not install XSHELF/CX man pages into a writable manpath target" >&2
+    return 0
+  fi
+
+  cp "$src" "$target/cx.1"
+  cp "$src" "$target/xshelf.1"
+  cp "$src" "$target/xs.1"
+  echo "Installed man pages: $target/cx.1, $target/xshelf.1, and $target/xs.1"
+}
+
+install_manpage
 
 echo "Run: source \"$SHELL_RC\""
