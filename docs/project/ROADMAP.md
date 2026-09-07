@@ -2,9 +2,14 @@
 
 ## Now (0-4 weeks)
 
-- PR #56 integration: preserve current README, structured task events, and telemetry
-  while adding bounded prompts and stderr progress. Exit gate: full pre-push
-  guardrails and hosted PR checks; release cadence remains a separate readiness gate.
+- PR #56 integration preserves current README, structured task events, and telemetry
+  while adding bounded prompts and stderr progress. Local validation on 2026-09-07:
+  313 Rust tests and 5 release-check tests passed, with formatting, Clippy, naming,
+  toolchain sync, leak scanning, and line/integration guardrails passing.
+  Publication remains blocked by release cadence: VERSION history is 81 days old
+  against the 14-day limit. Maintainer decision required: an explicit release
+  deferral with the existing `release-exception` mechanism, or release preparation.
+  Resume publication only after that decision; hosted PR checks remain unverified.
 - Current readiness snapshot: `docs/project/RELEASE_READINESS.md`.
 - Preserve JSON contract stability on automation surfaces (`diag/scheduler/optimize/telemetry/broker`).
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).
