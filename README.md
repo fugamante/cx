@@ -192,6 +192,11 @@ Work with tasks:
 ./bin/xshelf task events --limit 20 --json
 ```
 
+Human `task run-all` progress is written to stderr so stdout remains available
+for command results. Set `CX_TASK_RUN_ALL_PROGRESS=0` (or `false`) to disable
+these messages. The same setting applies to the `xshelf`, `xs`, and `cx`
+entrypoints; structured task events and JSON results keep their existing contracts.
+
 Project task sandboxing is opt-in. Configure it per repo with:
 
 ```bash
