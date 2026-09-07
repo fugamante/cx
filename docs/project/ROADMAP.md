@@ -11,7 +11,8 @@
   its 81-day history exceeding the 14-day cadence limit. All other gates remain
   required. Reassess release cadence at the next release-preparation decision;
   the exception does not establish release readiness. Hosted PR checks remain
-  the next acceptance gate after publication.
+  the next acceptance gate after publication. Pre-push Git-environment isolation
+  also preserves the same scan scope as direct validation.
 - Current readiness snapshot: `docs/project/RELEASE_READINESS.md`.
 - Preserve JSON contract stability on automation surfaces (`diag/scheduler/optimize/telemetry/broker`).
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).

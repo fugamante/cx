@@ -15,6 +15,8 @@ Notes:
 ## [Unreleased]
 
 ### Added
+- Pre-push checks clear inherited repository-local Git variables before running
+  subdirectory checks and temporary-repository tests. Discovery failure stops the hook.
 - Bound task objective/context prompt text with `CX_TASK_OBJECTIVE_MAX_CHARS`,
   `CX_TASK_OBJECTIVE_MAX_LINES`, `CX_TASK_CONTEXT_MAX_CHARS`, and
   `CX_TASK_CONTEXT_MAX_LINES`. Defaults derive from the configured capture budget;
