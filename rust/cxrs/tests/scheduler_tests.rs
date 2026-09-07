@@ -48,6 +48,10 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"cached_input
         "3",
     ]);
     let elapsed_ms = started.elapsed().as_millis() as u64;
+    let progress = stderr_str(&out);
+    assert!(progress.contains("launch [1/3]"), "{progress}");
+    assert!(progress.contains("done [3/3]"), "{progress}");
+    assert!(!stdout_str(&out).contains("launch ["));
     assert!(
         out.status.success(),
         "stdout={} stderr={}",

@@ -19,6 +19,10 @@ if [[ ! -x "./rust/cxrs/scripts/leak_scan.sh" ]]; then
   exit 1
 fi
 
+# Subdirectory checks and temporary test repositories must discover their own Git context.
+git_local_env="$(git rev-parse --local-env-vars)"
+unset $git_local_env
+
 echo "pre-push: running repo leak scan" >&2
 ./rust/cxrs/scripts/leak_scan.sh --repo
 

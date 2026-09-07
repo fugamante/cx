@@ -221,6 +221,18 @@ Notes:
 ## [v2026.06.29] - 2026-06-29
 
 ### Added
+- Pre-push checks clear inherited repository-local Git variables before running
+  subdirectory checks and temporary-repository tests. Discovery failure stops the hook.
+- Bound task objective/context prompt text with `CX_TASK_OBJECTIVE_MAX_CHARS`,
+  `CX_TASK_OBJECTIVE_MAX_LINES`, `CX_TASK_CONTEXT_MAX_CHARS`, and
+  `CX_TASK_CONTEXT_MAX_LINES`. Defaults derive from the configured capture budget;
+  positive overrides are accepted and invalid or zero overrides use defaults.
+- Human task-run progress is written to stderr; set `CX_TASK_RUN_ALL_PROGRESS=0`
+  or `false` to disable it. Sequential `--json` retains its structured result path.
+- Additive `normalization` diagnostics in `logs stats --json` and `telemetry --json`
+  count rows with all required fields, rows missing fields, and rows whose execution
+  mode starts with `legacy`. Migrated rows can also count as modern; presence does
+  not imply value validity. Existing keys and contract versions remain unchanged.
 - Repository governance:
   - added `branch-protection-audit` workflow for solo-maintainer mode.
   - added `scripts/branch_protection_audit.py` to restore required PR reviews once a non-owner write collaborator exists.

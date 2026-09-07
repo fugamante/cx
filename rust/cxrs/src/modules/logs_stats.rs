@@ -114,6 +114,7 @@ struct StatsComputed {
     new_in_second: Vec<String>,
     missing_in_second: Vec<String>,
     severity: &'static str,
+    normalization: NormalizationStats,
     capture_prompt: CapturePromptStats,
     retry: RetryStats,
     critical: CriticalStats,
@@ -176,6 +177,13 @@ struct HttpModeStat {
     healthy_runs: usize,
 }
 
+#[derive(Debug, Default, Clone)]
+struct NormalizationStats {
+    modern_rows: usize,
+    legacy_rows: usize,
+    migrated_legacy_rows: usize,
+}
+
 fn severity_label(strict_violations: usize, new_keys: usize, missing_keys: usize) -> &'static str {
     if strict_violations > 0 || missing_keys > 0 {
         return "critical";
@@ -213,6 +221,7 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         new_in_second.len(),
         missing_in_second.len(),
     );
+    let normalization = compute_normalization_stats(rows);
     let capture_prompt = compute_prompt_stats(rows);
     let retry = compute_retry_stats(rows);
     let critical = compute_critical_stats(rows);
@@ -224,11 +233,43 @@ fn compute_stats(rows: &[Value]) -> StatsComputed {
         new_in_second,
         missing_in_second,
         severity,
+        normalization,
         capture_prompt,
         retry,
         critical,
         timing,
         http_mode_stats,
+    }
+}
+
+fn compute_normalization_stats(rows: &[Value]) -> NormalizationStats {
+    let mut modern_rows = 0usize;
+    let mut legacy_rows = 0usize;
+    let mut migrated_legacy_rows = 0usize;
+    for r in rows {
+        let Some(obj) = r.as_object() else {
+            continue;
+        };
+        let has_strict_fields = REQUIRED_STRICT_FIELDS
+            .iter()
+            .all(|field| obj.contains_key(*field));
+        if has_strict_fields {
+            modern_rows += 1;
+        } else {
+            legacy_rows += 1;
+        }
+        let mode = obj
+            .get("execution_mode")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if mode.starts_with("legacy") {
+            migrated_legacy_rows += 1;
+        }
+    }
+    NormalizationStats {
+        modern_rows,
+        legacy_rows,
+        migrated_legacy_rows,
     }
 }
 
@@ -532,6 +573,18 @@ fn print_stats_human(
     println!("required_fields: {}", REQUIRED_STRICT_FIELDS.len());
     println!("severity: {}", stats.severity);
     println!("strict_violations: {}", stats.strict_violations);
+    println!("normalization:");
+    println!("- modern_rows: {}", stats.normalization.modern_rows);
+    println!("- legacy_rows: {}", stats.normalization.legacy_rows);
+    println!(
+        "- migrated_legacy_rows: {}",
+        stats.normalization.migrated_legacy_rows
+    );
+    if stats.normalization.legacy_rows > 0 {
+        println!("- recommendation: run `cx logs migrate` to normalize legacy rows");
+    } else {
+        println!("- recommendation: none");
+    }
     if severity_only {
         return;
     }
@@ -726,6 +779,16 @@ fn print_stats_json(log_file: &Path, rows: &[Value], stats: &StatsComputed) -> i
         "required_fields": REQUIRED_STRICT_FIELDS.len(),
         "severity": stats.severity,
         "strict_violations": stats.strict_violations,
+        "normalization": {
+            "modern_rows": stats.normalization.modern_rows,
+            "legacy_rows": stats.normalization.legacy_rows,
+            "migrated_legacy_rows": stats.normalization.migrated_legacy_rows,
+            "recommendation": if stats.normalization.legacy_rows > 0 {
+                "run `cx logs migrate`"
+            } else {
+                "none"
+            }
+        },
         "backend_capabilities": {
             "turboquant": {
                 "cx_runtime_support": experiment_caps.turboquant_runtime_support,
@@ -853,4 +916,31 @@ pub fn handle_stats(app_name: &str, args: &[String]) -> i32 {
         return 1;
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalization_mixed_rows() {
+        let mut modern = serde_json::Map::new();
+        for field in REQUIRED_STRICT_FIELDS {
+            modern.insert(field.to_string(), Value::Null);
+        }
+        modern.insert("execution_mode".to_string(), json!("lean"));
+        let mut migrated = modern.clone();
+        migrated.insert("execution_mode".to_string(), json!("legacy_migrated"));
+        let rows = vec![
+            json!(modern),
+            json!(migrated),
+            json!({"command": "cx"}),
+            Value::Null,
+        ];
+        let stats = compute_stats(&rows);
+        assert_eq!(stats.normalization.modern_rows, 2);
+        assert_eq!(stats.normalization.legacy_rows, 1);
+        assert_eq!(stats.normalization.migrated_legacy_rows, 1);
+        assert_eq!(stats.capture_prompt.rows_with_explicit_profile, 0);
+    }
 }

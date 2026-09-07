@@ -206,6 +206,12 @@ These rules apply unless a later approved phase explicitly changes them.
 - `bin/cx` remains supported
 - `bin/xs` remains a short alias, not the canonical product name
 - `CX_*` environment variables remain supported
+- `task run-all` human progress uses stderr across `xshelf`, `xs`, and `cx`;
+  `CX_TASK_RUN_ALL_PROGRESS=0` or `false` disables those messages without renaming
+  the setting or changing the existing task-event and JSON result contracts
+- bounded task prompts retain the shared `CX_TASK_OBJECTIVE_MAX_CHARS`,
+  `CX_TASK_OBJECTIVE_MAX_LINES`, `CX_TASK_CONTEXT_MAX_CHARS`, and
+  `CX_TASK_CONTEXT_MAX_LINES` settings across all three entrypoints
 - `.cx/` remains the runtime state location
 - machine-readable JSON contracts are not renamed purely for branding
 - downstream repos may continue consuming `cx` compatibility surfaces

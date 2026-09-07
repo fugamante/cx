@@ -52,6 +52,13 @@ fn logs_stats_alias_reports_population_drift() {
     );
     let v: Value = serde_json::from_str(&stdout_str(&out_json)).expect("json output");
     assert_eq!(v.get("window_runs").and_then(Value::as_u64), Some(2));
+    assert_eq!(v["normalization"]["modern_rows"], 0);
+    assert_eq!(v["normalization"]["legacy_rows"], 2);
+    assert_eq!(v["normalization"]["migrated_legacy_rows"], 0);
+    assert_eq!(
+        v["normalization"]["recommendation"],
+        "run `cx logs migrate`"
+    );
     let fields = v
         .get("fields")
         .and_then(Value::as_array)

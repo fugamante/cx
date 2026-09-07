@@ -2,6 +2,17 @@
 
 ## Now (0-4 weeks)
 
+- PR #56 integration preserves current README, structured task events, and telemetry
+  while adding bounded prompts and stderr progress. Local validation on 2026-09-07:
+  313 Rust tests and 5 release-check tests passed, with formatting, Clippy, naming,
+  toolchain sync, leak scanning, and line/integration guardrails passing.
+  On 2026-09-07 the maintainer approved a PR-scoped `release-exception`: this
+  integration does not declare a release, so VERSION remains unchanged despite
+  its 81-day history exceeding the 14-day cadence limit. All other gates remain
+  required. Reassess release cadence at the next release-preparation decision;
+  the exception does not establish release readiness. Hosted PR checks remain
+  the next acceptance gate after publication. Pre-push Git-environment isolation
+  also preserves the same scan scope as direct validation.
 - Current readiness snapshot: `docs/project/RELEASE_READINESS.md`.
 - Preserve JSON contract stability on automation surfaces (`diag/scheduler/optimize/telemetry/broker`).
 - Keep quality gates strict (`raw_eprintln=0`, function/file limits).

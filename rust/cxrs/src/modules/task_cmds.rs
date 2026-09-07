@@ -1074,6 +1074,18 @@ fn parse_execution_id(stdout: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn progress_enabled() -> bool {
+    env::var("CX_TASK_RUN_ALL_PROGRESS")
+        .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+        .unwrap_or(true)
+}
+
+fn emit_progress(message: &str) {
+    if progress_enabled() {
+        crate::cx_eprintln!("{message}");
+    }
+}
+
 fn retry_backoff_ms(retry_index: u32) -> u64 {
     let power = retry_index.min(4);
     250u64.saturating_mul(1u64 << power).min(2000)
@@ -1498,6 +1510,7 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
     } else {
         let mut summary = RunAllSummary::default();
         let mut halt_all = false;
+        let total = schedule.len();
         for (idx, id) in schedule.iter().enumerate() {
             if halt_all {
                 break;
@@ -1510,6 +1523,17 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                 requested_backend.clone(),
                 &available_pool(&options.backend_pool),
             );
+            if !options.as_json {
+                emit_progress(&format!(
+                    "cxrs task run-all: start [{}/{}] task={} backend={} retries={}",
+                    idx + 1,
+                    total,
+                    id,
+                    backend_selected.as_deref().unwrap_or("auto"),
+                    max_retries
+                ));
+            }
+            let run_started = Instant::now();
             let wave_meta = wave_meta_map
                 .get(id)
                 .cloned()
@@ -1641,6 +1665,14 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                     Ok((code, execution_id)) => {
                         if code == 0 {
                             summary.record_success();
+                            emit_progress(&format!(
+                                "cxrs task run-all: done [{}/{}] task={} status=complete attempts={} duration_ms={}",
+                                idx + 1,
+                                total,
+                                id,
+                                attempt,
+                                run_started.elapsed().as_millis()
+                            ));
                             let event = TaskRunEvent {
                                 id: id.clone(),
                                 backend: backend_selected
@@ -1681,6 +1713,15 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                             continue;
                         }
                         summary.record_failure(failure.class);
+                        emit_progress(&format!(
+                            "cxrs task run-all: done [{}/{}] task={} status=failed reason={} attempts={} duration_ms={}",
+                            idx + 1,
+                            total,
+                            id,
+                            failure.reason,
+                            attempt,
+                            run_started.elapsed().as_millis()
+                        ));
                         crate::cx_eprintln!("{} task run-all: task failed: {id}", cli_app_name());
                         let event = TaskRunEvent {
                             id: id.clone(),
@@ -1707,6 +1748,14 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
                             cli_app_name()
                         );
                         summary.record_critical_error();
+                        emit_progress(&format!(
+                            "cxrs task run-all: done [{}/{}] task={} status=critical_error attempts={} duration_ms={}",
+                            idx + 1,
+                            total,
+                            id,
+                            attempt,
+                            run_started.elapsed().as_millis()
+                        ));
                         let event = TaskRunEvent {
                             id: id.clone(),
                             backend: backend_selected
@@ -1734,6 +1783,13 @@ fn handle_run_all(app_name: &str, args: &[String], deps: &TaskCmdDeps) -> i32 {
             }
             if !finished {
                 summary.record_failure(FailureClass::NonRetryable);
+                emit_progress(&format!(
+                    "cxrs task run-all: done [{}/{}] task={} status=failed reason=unknown duration_ms={}",
+                    idx + 1,
+                    total,
+                    id,
+                    run_started.elapsed().as_millis()
+                ));
                 crate::cx_eprintln!("{} task run-all: task failed: {id}", cli_app_name());
                 let event = TaskRunEvent {
                     id: id.clone(),
@@ -2907,6 +2963,9 @@ fn run_schedule_parallel(
     let mut backend_active: HashMap<String, usize> = HashMap::new();
     let mut summary = RunAllSummary::default();
     let mut next_worker = 1usize;
+    let total = schedule.len();
+    let mut launched = 0usize;
+    let mut completed = 0usize;
 
     while !pending.is_empty() || !active.is_empty() {
         while active.len() < options.max_workers && !pending.is_empty() {
@@ -2951,6 +3010,14 @@ fn run_schedule_parallel(
             } else {
                 next_worker + 1
             };
+            launched += 1;
+            emit_progress(&format!(
+                "cxrs task run-all: launch [{launched}/{total}] task={} backend={} active={} pending={}",
+                launch.id,
+                launch.backend,
+                active.len() + 1,
+                pending.len()
+            ));
             *backend_active.entry(launch.backend.clone()).or_insert(0) += 1;
             let id = launch.id.clone();
             let backend = launch.backend.clone();
@@ -3006,9 +3073,14 @@ fn run_schedule_parallel(
             }
             match join_out {
                 Ok((code, execution_id)) => {
+                    completed += 1;
                     if code == 0 {
                         summary.record_success();
                         let _ = set_task_status_quiet(&done.id, "complete");
+                        emit_progress(&format!(
+                            "cxrs task run-all: done [{completed}/{total}] task={} backend={} status=complete",
+                            done.id, done.backend
+                        ));
                         let event = TaskRunEvent {
                             id: done.id,
                             backend: done.backend,
@@ -3027,6 +3099,10 @@ fn run_schedule_parallel(
                         let failure = classify_failure_for_execution(execution_id.as_deref());
                         summary.record_failure(failure.class);
                         let _ = set_task_status_quiet(&done.id, "failed");
+                        emit_progress(&format!(
+                            "cxrs task run-all: done [{completed}/{total}] task={} backend={} status=failed reason={}",
+                            done.id, done.backend, failure.reason
+                        ));
                         crate::cx_eprintln!(
                             "{} task run-all: task failed: {}",
                             cli_app_name(),
@@ -3049,8 +3125,13 @@ fn run_schedule_parallel(
                     }
                 }
                 Err(e) => {
+                    completed += 1;
                     summary.record_critical_error();
                     let _ = set_task_status_quiet(&done.id, "failed");
+                    emit_progress(&format!(
+                        "cxrs task run-all: done [{completed}/{total}] task={} backend={} status=critical_error",
+                        done.id, done.backend
+                    ));
                     crate::cx_eprintln!(
                         "{} task run-all: critical error for {}: {e}",
                         cli_app_name(),
